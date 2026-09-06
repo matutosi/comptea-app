@@ -23,6 +23,8 @@ for p in (CORE, ROOT):
 
 # 無料枠のメモリに収まる大きさ．超える画像は手元の CUI へ誘導する
 MAX_SIDE = 4000
+# 切り分けは検出を通さないぶん軽いので，少し大きくても扱える
+MAX_SPLIT_SIDE = 8000
 
 
 def too_big(img):
