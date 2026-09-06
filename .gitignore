@@ -16,3 +16,7 @@ weights/*_bak*.pt
 # 資料(著作権のため公開しない)
 labelme_data/
 truth/
+
+# テストの網羅を測ったときの記録
+.coverage
+htmlcov/
