@@ -114,7 +114,7 @@ def show_warnings(warnings, head='--- warnings ---'):
     """attrs['warnings'] を，黙って捨てずに表示する
 
     **要確認のものを先に出す**．どれも情報としては要るが，
-    全部を同じ重みで並べると関門で選別できない．
+    全部を同じ重みで並べると，目で確かめるときに選別できない．
     """
     warnings = list(warnings or [])
     if not warnings:

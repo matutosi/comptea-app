@@ -1,4 +1,4 @@
-"""関門2: 目視で読むセルを切り出す
+"""段階2: 目視で読むセルを切り出す
 
     python crop_cells.py WORKDIR [--what review|regions|all] [--ids 12,34] [--class comp]
 

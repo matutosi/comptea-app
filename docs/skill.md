@@ -1,6 +1,6 @@
 ---
 name: comptea
-description: 植生学の組成表(vegetation composition table)をスキャンした画像から，組成データ(1行 = 1地点 × 1種の縦持ちCSV)を取り出す．YOLO で検出し，格子を作り，OCR して，種名辞書と被度の規則で補正する．途中に3つの関門を置き，格子・読み取り・組み上がりを画像で目視して確かめる．ユーザーが「組成表を読み取って」「この表をデータにして」「comptea を実行して」「植生調査表を CSV にして」などと言ったときに使う．
+description: 植生学の組成表(vegetation composition table)をスキャンした画像から，組成データ(1行 = 1地点 × 1種の縦持ちCSV)を取り出す．YOLO で検出し，格子を作り，OCR して，種名辞書と被度の規則で補正する．途中に3つの段階を置き，格子・読み取り・組み上がりを画像で目視して確かめる．ユーザーが「組成表を読み取って」「この表をデータにして」「comptea を実行して」「植生調査表を CSV にして」などと言ったときに使う．
 ---
 
 # 組成表からデータを取り出す
@@ -37,9 +37,9 @@ description: 植生学の組成表(vegetation composition table)をスキャン�
 
 ```
 split_sheet.py   →  (大きな折り込みのときだけ．表ごとに切る)
-run_pipeline.py  →  [関門1 格子を見る]
-run_ocr.py       →  crop_cells.py  →  [関門2 読む]  →  apply_text.py
-build_table.py   →  [関門3 検査を裁く]
+run_pipeline.py  →  [段階1 格子を見る]
+run_ocr.py       →  crop_cells.py  →  [段階2 読む]  →  apply_text.py
+build_table.py   →  [段階3 検査を裁く]
 ```
 
 ### 0. 何の画像かを確かめる
@@ -79,7 +79,7 @@ py -3.12 yolo/split_sheet.py <PDF か画像> --outdir <置き場> [--dry-run]
 **地点が 10 を超える横長の表は，`run_pipeline.py` が自分で短冊に分けて検出する**
 (`split_wide.py`)．そうしないと `row` が1本も取れない．
 分けたときは警告に「組成部を N つに分けて検出した」と出るので，
-**関門1では短冊の境目の列**を必ず見る．
+**段階1では短冊の境目の列**を必ず見る．
 併せて，**列の境が印字の地点の隙間から離れていないか**を機械で測っており，
 外れていれば「列の境の X% が…隙間から離れている」と要確認に出る．
 
@@ -89,16 +89,16 @@ py -3.12 yolo/split_sheet.py <PDF か画像> --outdir <置き場> [--dry-run]
 切り出して最初からやり直す**(空白の帯で縦の重なりも見て，1枚ずつ自分の
 縮尺で検出し直す)．置き場は `work/<画像名>_s1/`・`_s2/`(縦にも分かれれば
 `_s1p1/`・`_s1p2/`，元のページに縦の分割があれば `_t1_s1/`)．
-警告に「部分画像 N 枚に切り出し」と出るので，関門1で境目の列を見る．
+警告に「部分画像 N 枚に切り出し」と出るので，段階1で境目の列を見る．
 
-### 1. 検出と格子(関門1)
+### 1. 検出と格子(段階1)
 
 ```bash
 python .claude/skills/comptea/scripts/run_pipeline.py <画像> [--conf 30] [--conf-col 20]
 ```
 
 `work/<画像名>/overlay.png` を **Read して目で確かめる**．
-見る点は `references/checkpoints.md` の関門1にまとめてある．要点だけ．
+見る点は `references/checkpoints.md` の段階1にまとめてある．要点だけ．
 
 **1ページに表が2つ以上あるときは，置き場が `work/<画像名>_t1/`・`_t2/` に分かれる**．
 別々の表なので，以後の工程は**1つずつ**渡し，出力もまとめない
@@ -113,7 +113,7 @@ python .claude/skills/comptea/scripts/run_pipeline.py <画像> [--conf 30] [--co
 外れているときの直し方は `references/failure-modes.md` にある．
 だいたいは `--conf` を振り直せば足りる．
 
-### 2. 読み取り(関門2)
+### 2. 読み取り(段階2)
 
 ```bash
 python .claude/skills/comptea/scripts/run_ocr.py work/<画像名> [--reader easyocr|ai|both]
@@ -172,7 +172,7 @@ python .claude/skills/comptea/scripts/apply_text.py work/<画像名> --tsv fixes
 流し込んだ文字は EasyOCR のときと同じ補正を通る．
 どちらが読んだかは `read_by` 列に残る．
 
-### 3. 表に組んで検査(関門3)
+### 3. 表に組んで検査(段階3)
 
 ```bash
 python .claude/skills/comptea/scripts/build_table.py work/<画像名>
@@ -187,7 +187,7 @@ python .claude/skills/comptea/scripts/build_table.py work/<画像名>
 - **被度として読めない形** — その `cell_id` を切り出して読み直す
 - **表頭で読めていない項目** — 領域を読み直す
 
-直すときは関門2に戻る(`crop_cells.py --ids ...` → 読む → `apply_text.py`)．
+直すときは段階2に戻る(`crop_cells.py --ids ...` → 読む → `apply_text.py`)．
 最後に，結果と残った `Need Check` の件数をユーザーに伝える．
 
 ## 出力の見方
@@ -207,7 +207,7 @@ python .claude/skills/comptea/scripts/build_table.py work/<画像名>
 
 ## 参照
 
-- `references/checkpoints.md` — 3つの関門で何を見るか
+- `references/checkpoints.md` — 3つの段階で何を見るか
 - `references/failure-modes.md` — 既知の崩れ方と直し方
 - `references/reading-guide.md` — 画像を読むときの約束(被度・階層・学名)
 - `docs/vegetation_science.md` — 分野の背景知識．用語が出たらまずここ

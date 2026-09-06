@@ -1,4 +1,4 @@
-"""関門3: 縦持ちの表に組み，機械でできる検査をかける
+"""段階3: 縦持ちの表に組み，機械でできる検査をかける
 
     python build_table.py WORKDIR [--keep-absent]
 
@@ -9,7 +9,7 @@
     checks.txt            検査の結果(標準出力と同じ)
 
 検査は**判定するだけ**．引っかかったものが誤りかどうかは，
-画像に戻って目で確かめる(references/checkpoints.md 関門3)．
+画像に戻って目で確かめる(references/checkpoints.md 段階3)．
 """
 import argparse
 import sys

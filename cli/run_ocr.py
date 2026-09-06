@@ -1,4 +1,4 @@
-"""関門2の下ごしらえ: セルを読み，辞書と規則で補正する
+"""段階2の下ごしらえ: セルを読み，辞書と規則で補正する
 
     python run_ocr.py WORKDIR [--reader easyocr|ai|both]
 
@@ -6,7 +6,7 @@
 読み方だけを差し替え，判定の規則は動かさない．誰が読んだかは `read_by` に残る．
 
     easyocr (既定)  EasyOCR で全セルを読む．安く，再現性がある
-    ai              EasyOCR を使わず，**全セルを AI が読む**ものとして関門2へ回す
+    ai              EasyOCR を使わず，**全セルを AI が読む**ものとして段階2へ回す
                     (古い印刷で EasyOCR が崩れる資料向け)
     both            EasyOCR で読んだうえで全セルを AI にも回し，
                     **補正後の値が食い違ったセルだけ**を目視に残す(費用は倍)
@@ -15,7 +15,7 @@
     ocred.csv     located.csv に text / corrected / status を足したもの
     review.tsv    目視に回すセルの一覧(cell_id 付き．これを見て次を決める)
 
-**読めなかったセルも行として残す**．cell_id が飛ぶと関門2で指せなくなるため．
+**読めなかったセルも行として残す**．cell_id が飛ぶと段階2で指せなくなるため．
 `ai` と `both` の次の手順は `crop_cells.py` → 目で読む → `apply_text.py --by ai`．
 """
 import argparse
@@ -41,13 +41,13 @@ READ_CLASSES = ('comp', 'species_col', 'sname', 'layer', 'plot_row', 'header_col
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description='OCRと補正(関門2の下ごしらえ)')
+    p = argparse.ArgumentParser(description='OCRと補正(段階2の下ごしらえ)')
     p.add_argument('workdir', help='run_pipeline.py が作った作業ディレクトリ')
     p.add_argument('--only', default=None,
                    help='読み直すクラスを絞る(例 comp,species_col)')
     p.add_argument('--reader', default='easyocr',
                    choices=['easyocr', 'ai', 'both'],
-                   help='読み方(既定 easyocr)．ai と both は関門2で AI が読む')
+                   help='読み方(既定 easyocr)．ai と both は段階2で AI が読む')
     return p.parse_args()
 
 
@@ -145,7 +145,7 @@ def main():
         target = df.copy()
 
     if args.reader == 'ai':
-        # EasyOCR は動かさない．全セルを「まだ読んでいない」状態で並べ，関門2へ回す
+        # EasyOCR は動かさない．全セルを「まだ読んでいない」状態で並べ，段階2へ回す
         print(f'読み方 ai: {len(target)} セルを AI に回す(EasyOCR は動かさない)')
         read = target.copy().sort_values('cell_id')
         read['text'] = None
@@ -204,7 +204,7 @@ def main():
             print(f'  * {key}: {text}')
 
     print(f'\n書いた: {work / "ocred.csv"} / {work / "review.tsv"}')
-    print('次: crop_cells.py で切り出して目で読む(関門2)')
+    print('次: crop_cells.py で切り出して目で読む(段階2)')
     if args.reader in ('ai', 'both'):
         print('  python crop_cells.py {} --what review'.format(work))
         print('  読んだ結果を TSV にして apply_text.py {} --tsv fixes.tsv --by ai'

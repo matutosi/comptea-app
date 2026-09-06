@@ -4,7 +4,7 @@
 出力  `located.csv`(セルの座標)と重ね描き
 
 中身は CUI と同じ `cli/run_pipeline.py` を呼ぶ．
-関門の作り(格子を見てから先へ進む)をそのまま画面にする．
+格子を見てから先へ進む，という工程の分け方をそのまま画面にする．
 """
 import os
 import subprocess

@@ -1,4 +1,4 @@
-"""関門1: 検出と格子を作り，目視できる画像と要約を出す
+"""段階1: 検出と格子を作り，目視できる画像と要約を出す
 
     python run_pipeline.py IMAGE [--conf 30] [--conf-col 20] [--imgsz 1280]
 
@@ -23,7 +23,7 @@ import _common
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description='検出と格子を作る(関門1)')
+    p = argparse.ArgumentParser(description='検出と格子を作る(段階1)')
     p.add_argument('image', help='組成表の画像')
     p.add_argument('--workdir', default=None, help='中間物の置き場(既定 yolo/work/<画像名>)')
     p.add_argument('--weights', default='weights/comptea.pt')
@@ -111,7 +111,7 @@ def label_grid(img, df):
     """格子に行番号・列番号を焼き込む
 
     番号があると，overlay を見て「何行目がずれている」と指し示せる．
-    関門2で読み取りを頼むときの目印にもなる．
+    段階2で読み取りを頼むときの目印にもなる．
     """
     from PIL import ImageDraw, ImageFont
 
@@ -295,7 +295,7 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
     # 行の数・列の数が合っていても壊れている形がある(2026-09-03・04)
     warnings += split_wide.check_row_heights(df_loc)
     warnings += split_wide.check_header_rows(df_loc)
-    # 関門2で「このセルを読み直す」と指せるように通し番号を振る
+    # 段階2で「このセルを読み直す」と指せるように通し番号を振る
     df_loc.insert(0, 'cell_id', range(1, len(df_loc) + 1))
     df_loc.to_csv(work / 'located.csv', index=False)
 
@@ -403,7 +403,7 @@ def resplit_parts(image, tables, base, args):
         warnings.append(
             f'**表 {i} は左右に {len(cuts) + 1} つの表が並んでいる**({how})．'
             f'部分画像 {len(pieces)} 枚に切り出し，1枚ずつ最初からやり直す'
-            '(空白の帯で縦の重なりも見る)．関門1で境目を目で確かめる')
+            '(空白の帯で縦の重なりも見る)．段階1で境目を目で確かめる')
         for tsuf, k, m, crop in pieces:
             name = f'{base.name}{tsuf}_s{k}' + (f'p{m}' if m else '')
             png = base.parent / f'{name}.png'
@@ -491,13 +491,13 @@ def main():
                 image, df_det = image2, df_det2
                 skew_warn = [f'**紙面の傾き {skew_deg:+.2f}° を直して検出し直した**．'
                              f'座標は直した画像 {out0.name} のもの．'
-                             '関門1で行の境が左右で字を割っていないか見る']
+                             '段階1で行の境が左右で字を割っていないか見る']
             else:
                 if out0.is_file():
                     out0.unlink()          # 使わない回転画像は残さない
                 skew_warn = [f'紙面の傾き {skew_deg:+.2f}° を測ったが，直すと検出が減る'
                              f'(目印 {n1} → {n2}，col {c1} → {c2})ので直さなかった．'
-                             '行の境が左右で字を割っていたら，関門1で知らせる']
+                             '行の境が左右で字を割っていたら，段階1で知らせる']
 
     # 1ページに表が2つ以上あるなら，ここで分けて最後まで別々に扱う
     # 種群を覆った偽の表頭は，表を分ける前に捨てる(locate_items も同じ選別をする)
@@ -597,7 +597,7 @@ def main():
             extra = [f'行が1件も検出されなかったので，行だけ閾値を '
                      f'{ROW_RETRY_CONF}% に下げて拾い直した'
                      f'({(df_one["obj_name"] == "row").sum()} 本)．'
-                     '**行の位置は確かでない**．関門1で overlay を目で確かめる']
+                     '**行の位置は確かでない**．段階1で overlay を目で確かめる']
             try:
                 text, warnings = build_one(image, df_one, work, args, table_no, n_orig)
             except TableFailed as e2:
@@ -622,7 +622,7 @@ def main():
     if failed:
         print(f'\n表 {", ".join(str(i) for i, _ in failed)} は格子にできなかった'
               '(上の理由を読む)')
-    print('\n次: 下の overlay.png を見て判断する(関門1)')
+    print('\n次: 下の overlay.png を見て判断する(段階1)')
     for work in done:
         print(f'  {work / "overlay.png"}')
     if len(done) > 1:

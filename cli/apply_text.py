@@ -1,4 +1,4 @@
-"""関門2: 目で読んだ文字を ocred.csv に戻す
+"""段階2: 目で読んだ文字を ocred.csv に戻す
 
     python apply_text.py WORKDIR --tsv fixes.tsv
 
