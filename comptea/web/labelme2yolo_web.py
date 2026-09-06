@@ -12,10 +12,7 @@ if '__file__' not in locals():
 else:
     WD = Path(__file__).parent
 
-os.chdir(WD)
-if WD not in sys.path:
-    sys.path.append(str(WD))
-import util_file
+from comptea import util_file
 
 # Page config
 st.set_page_config(page_title="Labelme to YOLO", layout="wide")

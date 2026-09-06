@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "comptea"
+version = "0.1.0"
+description = "植生学の組成表をスキャンした画像から，構造化データを取り出す"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Toshikazu Matsumura" }]
+keywords = ["vegetation", "phytosociology", "OCR", "table extraction"]
+
+# **中核だけの依存**．検出 (ultralytics) と読み取り (easyocr) は重いので，
+# 使う工程だけが入れればよいように別扱いにする
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "pillow>=10.0",
+    "rapidfuzz>=3.9",
+    "python-Levenshtein>=0.25",
+]
+
+[project.optional-dependencies]
+detect = ["torch>=2.2", "torchvision>=0.17", "ultralytics>=8.3", "opencv-python-headless>=4.9"]
+read = ["easyocr>=1.7", "opencv-python-headless>=4.9"]
+sheet = ["PyMuPDF>=1.24"]
+web = ["streamlit>=1.36"]
+dev = ["pytest>=8.0"]
+all = ["comptea[detect,read,sheet,web]"]
+
+[project.urls]
+Homepage = "https://github.com/matutosi/comptea-app"
+
+[tool.setuptools]
+packages = ["comptea", "comptea.web"]
+
+[tool.setuptools.package-data]
+# 種名の辞書と重みは同梱する(どこから呼んでも開けるように)
+comptea = ["*.txt", "weights/*.pt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: 検出・読み取りを実際に走らせる(既定では飛ばす．--runslow で走る)"]
+filterwarnings = ["ignore::DeprecationWarning"]

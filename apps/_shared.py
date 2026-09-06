@@ -41,9 +41,10 @@ class LocalFile(io.BytesIO):
         self.seek(pos)
         return data
 
-for p in (CORE, ROOT):
-    if p not in sys.path:
-        sys.path.insert(0, p)
+# **平らな置き場 (`comptea/`) は入れない**(2026-09-07)．入れると
+# `import locate` が通ってしまい，パッケージと二重に読み込まれる
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 
 # 無料枠のメモリに収まる大きさ．超える画像は手元の CUI へ誘導する
 MAX_SIDE = 4000

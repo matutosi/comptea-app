@@ -5,6 +5,8 @@ from functools import lru_cache
 from rapidfuzz import process
 from rapidfuzz.distance import Levenshtein
 
+from . import data_path
+
 def correct_layer(str):
     """
     階層の文字列を修正
@@ -405,7 +407,7 @@ def _load_names(dict_path):
         タプルは並び順を保つため(候補が同点のとき辞書の順で並べる)．
         集合は完全一致を O(1) で見るため．
     """
-    with open(dict_path, "r", encoding="utf-8") as f:
+    with open(data_path(dict_path), "r", encoding="utf-8") as f:
         names = tuple(line.strip() for line in f)
     return names, frozenset(names)
 
@@ -520,7 +522,7 @@ def _load_pairs(dict_path):
     """
     pairs = {}
     try:
-        with open(dict_path, encoding='utf-8') as f:
+        with open(data_path(dict_path), encoding='utf-8') as f:
             for line in f:
                 jn, _, sn = line.rstrip('\n').partition('\t')
                 if jn and sn:

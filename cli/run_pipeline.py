@@ -26,7 +26,9 @@ def parse_args():
     p = argparse.ArgumentParser(description='検出と格子を作る(段階1)')
     p.add_argument('image', help='組成表の画像')
     p.add_argument('--workdir', default=None, help='中間物の置き場(既定 yolo/work/<画像名>)')
-    p.add_argument('--weights', default='weights/comptea.pt')
+    # 既定はパッケージに同梱した重み(どこから呼んでも見つかる)
+    p.add_argument('--weights', default=None,
+                   help='重み(既定は同梱の comptea.pt)')
     # 30 は学習外を含む77枚で決めた値(.claude/CLAUDE.md 参照)
     p.add_argument('--conf', type=float, default=30, help='信頼度の閾値(%%)')
     # 20 は手元の全88枚で決めた値．30 では col が1本も取れない段が5つあり，
@@ -62,7 +64,7 @@ def resolve_imgsz(image, value, quiet=False):
     if str(value).lower() != 'auto':
         return int(value)
     from PIL import Image
-    import split_sheet
+    from comptea import split_sheet
     Image.MAX_IMAGE_PIXELS = None
     w, h = image.size if isinstance(image, Image.Image) else Image.open(image).size
     size = split_sheet.auto_imgsz(w, h)
@@ -92,7 +94,7 @@ def detect(image, weights, conf, by_class, imgsz, source=None):
         source  : `source_image` に残す名前(開いた画像を渡すときに使う)
     """
     from ultralytics import YOLO
-    import detect as detect_mod
+    from comptea import detect as detect_mod
 
     model = YOLO(weights)
     # 低い方の閾値で推論し，クラスごとの閾値で切り直す
@@ -201,8 +203,8 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
     Raises:
         TableFailed: 格子を作れなかったとき
     """
-    import draw_rect
-    import locate
+    from comptea import draw_rect
+    from comptea import locate
     from PIL import Image
 
     work.mkdir(parents=True, exist_ok=True)
@@ -223,11 +225,11 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
     # 表頭の外に散った項目行は，紙面全体の検出でも捨てる．残すと組成部の
     # 行が表頭の値として二重に切られ，表頭の帯が全高に広がって
     # 階層の列の判定(表頭が空)まで壊れる(s01115_18_p2．2026-09-04)
-    import body_rows
-    import checks
-    import col_edges
-    import strips
-    import table_split
+    from comptea import body_rows
+    from comptea import checks
+    from comptea import col_edges
+    from comptea import strips
+    from comptea import table_split
     df_det, stray_warn = table_split.drop_stray_plot_rows(df_det, heads=False)
     # 表頭の中に出た種名の列は捨てる(段を 1 つ増やし，本体から和名が消える)
     df_det, n_names = table_split.drop_stray_name_cols(df_det)
@@ -237,7 +239,7 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
             '(凡例や表題の字を種名の列と見た誤検出．段が余分に増える)．')
     # 種名の列が 1 つも検出されなければ，組成部の左の黒画素の帯から補う
     # (s01115_08_p1・08_p2・18_p2．2026-09-04)
-    import name_col
+    from comptea import name_col
     df_det, name_warn = name_col.name_columns_from_ink(Image.open(image), df_det)
     stray_warn += name_warn
     df_det.to_csv(work / 'detect.csv', index=False)
@@ -257,7 +259,7 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
 
     df_loc = locate.number_cells(df_loc)
     # 階層の列が組成部の先頭に紛れ込んでいたら，地点の列から外す
-    import layer_col
+    from comptea import layer_col
     df_loc, layer_warn = layer_col.fix_columns(Image.open(image), df_loc)
     warnings += layer_warn
     # 地点が多い表では，列の境が1つずれても目では気づけない．
@@ -332,13 +334,13 @@ def resplit_parts(image, tables, base, args):
         (残す表の検出のリスト, 警告, 再帰で書いた置き場のリスト)
     """
     import subprocess
-    import ink
-    import split_sheet
-    import body_rows
-    import checks
-    import col_edges
-    import strips
-    import table_split
+    from comptea import ink
+    from comptea import split_sheet
+    from comptea import body_rows
+    from comptea import checks
+    from comptea import col_edges
+    from comptea import strips
+    from comptea import table_split
     from PIL import Image
 
     im = Image.open(image)
@@ -444,9 +446,9 @@ def deskew_page(image, df_det, args, by_class):
     Returns:
         (元画像か直した画像, その画像での検出, 警告)
     """
-    import deskew
-    import locate
-    import table_split
+    from comptea import deskew
+    from comptea import locate
+    from comptea import table_split
 
     cols0 = df_det[df_det['obj_name'] == 'col']
     rows0 = df_det[df_det['obj_name'] == 'row']
@@ -515,8 +517,8 @@ def split_page(image, df_det, args, base):
     Returns:
         ([(表の番号, 検出), ...], 元の表の数, 別に片づいた作業ディレクトリ, 警告)
     """
-    import locate
-    import table_split
+    from comptea import locate
+    from comptea import table_split
 
     # 種群を覆った偽の表頭は，表を分ける前に捨てる(locate_items も同じ選別をする)
     df_det, n_heads = locate.drop_unsupported_headers(df_det)
@@ -557,7 +559,7 @@ def widen_tables(image, tables, n_orig, sub_done, args, by_class):
     Returns:
         ([(表の番号, 検出), ...], 警告)
     """
-    import strips
+    from comptea import strips
 
     def detect_strip(strip, label):
         return detect(strip, args.weights, args.conf / 100, by_class,
@@ -591,7 +593,7 @@ def build_tables(image, tables, base, args, n_orig, by_class, table_warnings):
     Returns:
         (できた作業ディレクトリ, できなかった (番号, 理由))
     """
-    import locate
+    from comptea import locate
 
     retry = None   # 行の閾値を下げた検出(要るときだけ1度作る)
     done, failed = [], []
@@ -646,6 +648,9 @@ def build_tables(image, tables, base, args, n_orig, by_class, table_warnings):
 def main():
     args = parse_args()
     image, = _common.setup([args.image])
+    if not args.weights:
+        import comptea
+        args.weights = comptea.WEIGHTS
     args.imgsz = resolve_imgsz(image, args.imgsz)
 
     by_class = {'col': args.conf_col / 100}

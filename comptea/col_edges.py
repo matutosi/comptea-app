@@ -11,7 +11,7 @@
 import numpy as np
 import pandas as pd
 
-import ink
+from . import ink
 
 
 GAP_MIN_PX = 20         # 隙間とみなす最小の幅(300 dpi のスキャンで測った)
@@ -185,7 +185,7 @@ def fix_column_edges(img, df_loc, gain=EDGE_INK_GAIN, min_cols=EDGE_SWAP_MIN_COL
     Returns:
         (格子, 警告のリスト)
     """
-    import locate
+    from . import locate
 
     comp = df_loc[df_loc['obj_name'] == 'comp']
     if comp.empty or comp['col'].nunique() < min_cols:
@@ -368,7 +368,7 @@ def align_header_columns(df_loc, img=None):
     Returns:
         (格子, 警告のリスト)
     """
-    import locate
+    from . import locate
 
     comp = df_loc[df_loc['obj_name'] == 'comp']
     head = df_loc[df_loc['obj_name'] == 'header_value']

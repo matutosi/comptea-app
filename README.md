@@ -29,13 +29,28 @@
 ### CUI (まとめて処理する)
 
 ```bash
-pip install -r requirements.txt
+pip install -e .[all]        # 中核だけなら pip install -e .
 
 python cli/run_pipeline.py <画像> --workdir work/<名前>   # 格子を作る
 python cli/run_ocr.py work/<名前>                          # セルを読む
 python cli/build_table.py work/<名前>                      # 縦持ちに組む
 python cli/export_data.py work --out out --tag <資料名>    # まとめて書き出す
 ```
+
+**入れなくても動きます** (`cli/` は，入っていなければリポジトリの置き場を
+自分で `sys.path` に足します)．依存は工程ごとに分けてあり，
+`.[detect]` は検出 (torch・ultralytics)，`.[read]` は読み取り (easyocr)，
+`.[sheet]` は PDF (PyMuPDF)，`.[web]` は Streamlit です．
+
+### ライブラリとして
+
+```python
+from comptea import correct_text
+correct_text.correct_comp('5・5')       # {'corrected': '5;5', 'status': 'OK'}
+```
+
+辞書と重みはパッケージに同梱してあるので，**どこから呼んでも開けます**．
+折り込みを切り分けるだけなら `python -m comptea.split_sheet <PDF> --outdir <置き場>`．
 
 **途中に 3 つの段階**を経ます．格子・読み取り・組み上がりを目で確かめてから
 先へ進む作りです．`export_data.py` は，`Need Check` のセルを画像に切り出して
@@ -130,7 +145,7 @@ pytest --runslow      # 検出と読み取りも実際に走らせる(30 秒ほ�
 - [docs/architecture.md](docs/architecture.md) — コードの構成
 - [eval/README.md](eval/README.md) — 物差し (**非公開の資料が要るので，ここからは動きません**)
 
-作業ディレクトリを省くと `comptea/work/<画像名>/` に書きます．
+作業ディレクトリを省くと，**いまいる場所**の `work/<画像名>/` に書きます．
 
 ## 重み
 

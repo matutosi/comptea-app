@@ -1,6 +1,6 @@
 from pathlib import Path
 import pandas as pd
-import util_file
+from . import util_file
 
 # 検出が0件のときに返る列
 EMPTY_COLS = ['obj_class', 'obj_name', 'confidence', 'x1', 'y1', 'x2', 'y2']

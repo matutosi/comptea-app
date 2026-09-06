@@ -13,7 +13,7 @@
 import numpy as np
 from PIL import Image
 
-import ink
+from . import ink
 
 DESKEW_MIN_ROWS = 0.3     # 左右のずれが行の高さのこの倍未満なら直さない
 DESKEW_MAX_DEG = 1.5      # これを超える推定は信じない(測り損ね．実在する傾きは最大 1.06°．

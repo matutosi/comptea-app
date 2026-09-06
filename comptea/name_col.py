@@ -12,7 +12,7 @@
 import numpy as np
 import pandas as pd
 
-import ink
+from . import ink
 
 NAME_CLASSES = ('sname', 'species_col')
 SMOOTH = 25           # x ごとの黒画素をならす窓(px)

@@ -27,7 +27,7 @@ import pandas as pd
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import strips                               # noqa: E402
+from comptea import strips                               # noqa: E402
 
 Image.MAX_IMAGE_PIXELS = None
 
@@ -105,7 +105,7 @@ def _heading_rows(comp, df_loc, img):
     """組成部に値の無い行(見出し・折り返した種名)の行番号を返す"""
     if img is None or comp.empty:
         return set()
-    import ink
+    from comptea import ink
     dark = ink.binarize(img)
     cx = (int(comp['x1'].min()), int(comp['x2'].max()))
     name = df_loc[df_loc['obj_name'].isin(('sname', 'species_col'))]

@@ -18,8 +18,8 @@ import re
 
 import pandas as pd
 
-import correct_text
-import parse_text
+from . import correct_text
+from . import parse_text
 
 # OCR結果のobj_nameと，出力する列名の対応
 ATTR_COLUMNS = {

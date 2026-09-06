@@ -15,7 +15,7 @@ The project is bilingual (Japanese/English) and targets ecological vegetation su
 
 | Directory | What is in it |
 |:---|:---|
-| `comptea/` | The core modules. What used to be one 1,673-line `split_wide.py` is five files by concern: `strips.py` (wide tables), `col_edges.py` (column boundaries), `table_split.py` (telling two tables apart on one sheet), `body_rows.py` (the body's vertical extent and row boundaries) and `checks.py` (the independent checks). They live flat and import each other by name (`import locate`), so **everything runs with `comptea/` as the working directory** — `cli/_common.setup()` does the `chdir` for you |
+| `comptea/` | The core modules. What used to be one 1,673-line `split_wide.py` is five files by concern: `strips.py` (wide tables), `col_edges.py` (column boundaries), `table_split.py` (telling two tables apart on one sheet), `body_rows.py` (the body's vertical extent and row boundaries) and `checks.py` (the independent checks). It is a package: modules import each other relatively (`from . import ink`), the dictionaries and weights are resolved against the package directory, and **nothing needs a particular working directory** any more (until 2026-09-07 everything had to run inside `comptea/`) |
 | `comptea/web/` | The older all-in-one Streamlit pages, kept as they were |
 | `cli/` | The command-line entry points (`run_pipeline` → `run_ocr` → `build_table`, plus `crop_cells`, `apply_text`, `export_data`) |
 | `apps/` | One Streamlit app per stage, each with its own `requirements.txt` |
@@ -264,8 +264,9 @@ python cli/build_table.py work/<name>                      # assemble
 streamlit run apps/2_grid/streamlit_app.py                 # or one stage in the browser
 ```
 
-The entry points find `comptea/` themselves and `chdir` into it, so they can be
-called from anywhere (`COMPTEA_YOLO` overrides the location).
+The entry points import the package — installed (`pip install -e .`) or, failing
+that, from this repository — and can be called from anywhere without changing the
+working directory (`COMPTEA_CORE` overrides where the core is looked for).
 
 ## Key dependencies
 
@@ -279,7 +280,7 @@ and, per stage, in `apps/*/requirements.txt`.
 - Stages report trouble through `df.attrs['warnings']` rather than failing silently — `locate.py` and `comp_table.py` both do this, and the Streamlit pages display it.
 - Per-cell doubts travel in a `note` column set by `locate.py` (`interpolated` / `snapped` / `on_text`), drawn in colour on the grid overlay and carried through OCR into the long table.
 - Domain background (composition tables, cover-abundance classes, layer codes) is in `docs/vegetation_science.md`. Read it before looking up vegetation-science terms elsewhere.
-- YOLO model weights are expected at `comptea/weights/comptea.pt`
-- The `comptea/` modules use relative imports via `sys.path` manipulation — always run from the `comptea/` directory
+- YOLO model weights ship with the package at `comptea/weights/comptea.pt` (`comptea.WEIGHTS`)
+- `comptea` is an ordinary package; `pip install -e .` makes it importable, and `cli/_common.setup()` falls back to the repository path when it is not installed
 - The source material (scans, labels, truth tables) is not published, for copyright; `examples/sample.jpg` is a single page quoted with its source
 - GPU (CUDA) is optional for inference but recommended for training

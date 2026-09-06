@@ -1,9 +1,8 @@
 """テストの下ごしらえ
 
-中核のモジュールは `comptea/` に平らに置いてあり，互いを `import locate` の
-形で読む．種名の辞書も `j_name.txt` のような**相対パス**で開く．
-そこで `sys.path` を通し，**作業ディレクトリを `comptea/` に移す**
-(CUI もアプリも `cwd=comptea` で呼んでいるので，同じ条件になる)．
+中核は `comptea` パッケージ．入れていなくても走るよう，リポジトリの置き場を
+`sys.path` に足すだけにする(2026-09-07 まではここで `comptea/` へ chdir して
+いた．辞書を相対パスで開いていたため)．
 """
 import os
 import sys
@@ -19,15 +18,6 @@ SAMPLE = os.path.join(ROOT, "examples", "sample.jpg")
 for p in (CORE, APPS, ROOT):
     if p not in sys.path:
         sys.path.insert(0, p)
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _in_core():
-    """辞書を相対パスで開けるように，`comptea/` で動かす"""
-    old = os.getcwd()
-    os.chdir(CORE)
-    yield
-    os.chdir(old)
 
 
 def pytest_addoption(parser):

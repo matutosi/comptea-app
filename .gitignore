@@ -20,3 +20,7 @@ truth/
 # テストの網羅を測ったときの記録
 .coverage
 htmlcov/
+
+# pip install -e . でできるもの
+*.egg-info/
+build/

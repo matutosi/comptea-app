@@ -5,8 +5,8 @@
 """
 import pytest
 
-import parse_text
-import plot_table as pt
+from comptea import parse_text
+from comptea import plot_table as pt
 
 
 # --- 項目名を出力の列名に寄せる -----------------------------------------

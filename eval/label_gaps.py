@@ -32,7 +32,7 @@ from PIL import Image, ImageDraw
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import eval_grid as eg
-import ink
+from comptea import ink
 
 PAD = 2             # 外形に足す余白(画素)
 

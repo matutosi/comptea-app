@@ -40,7 +40,7 @@ def main():
     _common.need_file(tsv, '読んだ結果を書いた TSV を用意')
 
     import pandas as pd
-    import correct_text
+    from comptea import correct_text
 
     df = pd.read_csv(work / 'ocred.csv')
     fixes = pd.read_csv(tsv, sep='\t', dtype={'cell_id': int}, keep_default_na=False)

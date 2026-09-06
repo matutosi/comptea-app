@@ -6,7 +6,7 @@
 """
 import pytest
 
-import correct_text as ct
+from comptea import correct_text as ct
 
 
 # --- 被度・群度 ---------------------------------------------------------

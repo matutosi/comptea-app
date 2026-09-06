@@ -129,9 +129,9 @@ def main():
     _common.need_file(work / 'located.csv', 'run_pipeline.py')
 
     import pandas as pd
-    import correct_text
+    from comptea import correct_text
     if args.reader != 'ai':
-        import ocr  # import に時間がかかる(EasyOCR のモデルを読む)
+        from comptea import ocr  # import に時間がかかる(EasyOCR のモデルを読む)
 
     df = pd.read_csv(work / 'located.csv')
     # --only で読み直すときは，前の結果を残したまま該当セルだけ差し替える

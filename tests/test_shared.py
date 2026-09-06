@@ -12,7 +12,7 @@ import pytest
 import conftest
 
 import _shared
-import detect
+from comptea import detect
 
 
 # --- 見本と重み ---------------------------------------------------------

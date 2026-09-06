@@ -72,7 +72,7 @@ def main():
         if hasattr(stream, 'reconfigure'):
             stream.reconfigure(encoding='utf-8')
     import eval_grid
-    import locate
+    from comptea import locate
 
     d = Path(args.dir)
     images = sorted(p for p in d.iterdir()

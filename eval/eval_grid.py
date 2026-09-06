@@ -180,8 +180,8 @@ def match(truth, found, thresh):
 
 
 def run_one(image, args):
-    import locate
-    import detect as detect_mod
+    from comptea import locate
+    from comptea import detect as detect_mod
     from ultralytics import YOLO
 
     model = YOLO(args.weights)
@@ -198,7 +198,7 @@ def run_one(image, args):
     # 正解のラベルはページ単位なので，段の番号をずらして繋げてから比べる
     tables, warns = locate.split_tables(df_det)
     parts, shift = [], 0
-    import table_split
+    from comptea import table_split
     for df_one in tables:
         # 表頭の外の項目行は捨てる(run_pipeline.py と同じ)
         df_one, stray = table_split.drop_stray_plot_rows(df_one, heads=False)
@@ -249,7 +249,7 @@ def extra_kinds(image, df_loc, extra):
     余分に出ても格子の欠陥ではない．振り分けは黒画素で機械的にやるので目安．
     足すかどうかを決めるときは `label_gaps.py` で切り出して目で見る．
     """
-    import ink
+    from comptea import ink
     if not extra:
         return {}
     dark = ink.binarize(image)

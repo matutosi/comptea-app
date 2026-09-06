@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-import ink
+from comptea import ink
 
 
 def _blank(h=40, w=120):

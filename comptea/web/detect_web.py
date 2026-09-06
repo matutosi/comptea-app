@@ -19,12 +19,9 @@ if '__file__' not in locals():
 else:
     WD = Path(__file__).parent
 
-os.chdir(WD)
-if WD not in sys.path:
-    sys.path.append(str(WD))
 
 # import util_file
-import detect
+from comptea import detect
 
 # avoid error shown below
 #     https://stackoverflow.com/questions/79500227/why-am-i-getting-runtimeerror-no-running-event-loop-and-in-my-vs-code-when-i-am

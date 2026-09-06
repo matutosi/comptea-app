@@ -29,18 +29,15 @@ if '__file__' not in locals():
 else:
     WD = Path(__file__).parent
 
-os.chdir(WD)
-if WD not in sys.path:
-    sys.path.append(str(WD))
 
-import util_file
-import detect
-import locate
-import draw_rect
-import ocr
-import correct_text
-import comp_table
-import plot_table
+from comptea import util_file
+from comptea import detect
+from comptea import locate
+from comptea import draw_rect
+from comptea import ocr
+from comptea import correct_text
+from comptea import comp_table
+from comptea import plot_table
 
 # Windowsでマルチプロセスを使用するために必要
 freeze_support()
@@ -132,7 +129,7 @@ def page_preprocess():
 
     # Deskew
     if deskew:
-        from preprocess_image import correct_skew
+        from comptea.preprocess_image import correct_skew
         image_original = correct_skew(image_original)
         image = image_original.copy()
 

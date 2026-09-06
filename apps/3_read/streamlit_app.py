@@ -100,7 +100,7 @@ if st.button("読む", type="primary"):
     with st.spinner("読んでいます(初回はモデルの取得で数分かかります)"):
         r = subprocess.run([sys.executable, cli, wd, "--reader", "easyocr"],
                            capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", cwd=_shared.CORE)
+                           errors="replace")
     p_ocr = os.path.join(wd, "ocred.csv")
     if not os.path.isfile(p_ocr):
         st.error("読み取りに失敗しました")
@@ -110,8 +110,7 @@ if st.button("読む", type="primary"):
     d = pd.read_csv(p_ocr)
 
     # **表頭も表にして出す**．組み上げを待たずに，調査地・面積・海抜高を見たい
-    sys.path.insert(0, _shared.CORE)
-    import plot_table                            # noqa: E402
+    from comptea import plot_table                            # noqa: E402
 
     warn = None
     try:

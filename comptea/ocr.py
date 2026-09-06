@@ -5,8 +5,8 @@ import pandas as pd
 import easyocr
 from PIL import Image, ImageOps
 
-import ink
-import parse_text
+from . import ink
+from . import parse_text
 
 def binarize_image(img):
     """
@@ -93,7 +93,7 @@ def retry_comp_cell(img, box, thin: bool):
     Returns:
         読めた文字列．採らないときは ''
     """
-    import correct_text
+    from . import correct_text
 
     cell = trim_image(ink.erase_box_lines(img.crop(box)))
     # 被度・群度の字種で読み，値にならなければ**括弧付きの字種**でもう一度
@@ -142,7 +142,7 @@ def retry_empty_comp(df, image, img):
     そこで「何も無い」(読めなかったセルの下位10%)と「値がある」
     (読めたセルの中央値)の間に高さを置く．
     """
-    import ink
+    from . import ink
 
     if 'obj_name' not in df.columns:
         return df
@@ -188,7 +188,7 @@ def retry_empty_comp(df, image, img):
     # 読み直した結果が値として通るときだけ差し替える
     # 字種を絞ると `+` を `4` と読むことがある(example.jpg で 3 セル)ので，
     # 差し替えたセルは `note` に `retry` を付けて段階2の目視に回す
-    import correct_text
+    from . import correct_text
     done = []
     for i in read:
         if correct_text.correct_cell('comp', df.at[i, 'text'])['status'] == 'OK':
@@ -230,7 +230,7 @@ def fix_roman_heads(df, dark, min_sure=ROMAN_MIN_SURE, min_n=ROMAN_MIN_N,
     「読みと画数が合っている割合」が `min_sure` を下回るなら，
     画数の数え方がその表に合っていないとみなして何もしない．
     """
-    import correct_text
+    from . import correct_text
 
     if 'corrected' not in df.columns and 'text' not in df.columns:
         return df

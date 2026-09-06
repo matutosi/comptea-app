@@ -48,8 +48,7 @@ if up is not None:
     # PDF は**貼ってある画像をそのまま取り出して** PNG にし，以降はそれを使う
     # (描き直すと再標本化で字が甘くなる)
     if up.name.lower().endswith(".pdf"):
-        sys.path.insert(0, _shared.CORE)
-        import split_sheet                       # noqa: E402
+        from comptea import split_sheet                   # noqa: E402
 
         try:
             import fitz                          # noqa: E402  PyMuPDF
@@ -87,8 +86,7 @@ if st.button("格子を作る", type="primary"):
     with st.spinner("検出しています(初回はモデルの読み込みに時間がかかります)"):
         r = subprocess.run(
             [sys.executable, cli, src, "--weights", _shared.WEIGHTS, "--workdir", wd],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            cwd=_shared.CORE)
+            capture_output=True, text=True, encoding="utf-8", errors="replace")
     log = (r.stdout or "") + (r.stderr or "")
     overlay = os.path.join(wd, "overlay.png")
     if not os.path.isfile(overlay):

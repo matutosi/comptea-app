@@ -28,9 +28,9 @@ description: 植生学の組成表(vegetation composition table)をスキャン�
 
 - `comptea/weights/comptea.pt` があること
 - Python に ultralytics / easyocr / pandas / Pillow が入っていること
-- 中間物は `comptea/work/<画像名>/` に置かれる(`--workdir` で変えられる)
+- 中間物は `work/<画像名>/` に置かれる(`--workdir` で変えられる)
 
-スクリプトは `comptea/` へ自分で移動してから動くので，**どこから呼んでもよい**．
+スクリプトはパッケージを読むだけで作業ディレクトリを変えないので，**どこから呼んでもよい**．
 `comptea/` が別の場所にあるときは環境変数 `COMPTEA_YOLO` で指す．
 
 ## 流れ
@@ -62,7 +62,7 @@ A0 級の折り込み(`s01115` の 23 枚)には，**1枚に表が2つ3つ載っ
 1枚のまま渡しても行が1本も取れないので，先に切り分ける．
 
 ```bash
-py -3.12 comptea/split_sheet.py <PDF か画像> --outdir <置き場> [--dry-run]
+py -3.12 -m comptea.split_sheet <PDF か画像> --outdir <置き場> [--dry-run]
 ```
 
 `<画像名>_p1.png`・`_p2.png` … が並び，**左の段から，段の中は上から**の順になる．

@@ -13,9 +13,6 @@ if '__file__' not in locals():
 else:
     WD = Path(__file__).parent
 
-os.chdir(WD)
-if WD not in sys.path:
-    sys.path.append(str(WD))
 # import util_file
 
 # Page config
@@ -51,7 +48,7 @@ image = image_original.copy()
 
 # Deskew
 if deskew:
-    from preprocess_image import correct_skew
+    from comptea.preprocess_image import correct_skew
     image_original = correct_skew(image_original)
     image = image_original.copy()
 

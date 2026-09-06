@@ -18,8 +18,8 @@ import pandas as pd
 
 import Levenshtein
 
-import correct_text
-import parse_text
+from . import correct_text
+from . import parse_text
 
 # 和名の項目名 -> 出力の列名
 # 資料によって書き方が揺れるので，含まれていれば一致とみなす

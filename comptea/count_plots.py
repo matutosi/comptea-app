@@ -15,8 +15,7 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import ink                                      # noqa: E402
+from . import ink                                      # noqa: E402
 
 Image.MAX_IMAGE_PIXELS = None
 

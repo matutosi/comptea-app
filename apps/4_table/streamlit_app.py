@@ -66,8 +66,7 @@ if st.button("組み上げる", type="primary"):
     cli = os.path.join(_shared.ROOT, "cli", "build_table.py")
     with st.spinner("組み上げています"):
         r = subprocess.run([sys.executable, cli, wd], capture_output=True,
-                           text=True, encoding="utf-8", errors="replace",
-                           cwd=_shared.CORE)
+                           text=True, encoding="utf-8", errors="replace")
     p_long = os.path.join(wd, "comp_table_long.csv")
     if not os.path.isfile(p_long):
         st.error("組み上げに失敗しました")

@@ -11,9 +11,9 @@
 import numpy as np
 from PIL import Image
 
-import ink
-from body_rows import ROW_COVER_MIN, body_extent_ink, expected_row_edges
-from col_edges import plot_gaps
+from . import ink
+from .body_rows import ROW_COVER_MIN, body_extent_ink, expected_row_edges
+from .col_edges import plot_gaps
 
 Image.MAX_IMAGE_PIXELS = None
 

@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 
-import ink
+from . import ink
 
 # 組成表でないページとみなす 'row' の上限(これ未満なら表ではない)．
 # 手元の組成表は，最も少ないページでも行が数十本ある
@@ -1002,7 +1002,7 @@ def _shift_edges_for_header(x_edges, img, bands, max_ratio=HEADER_SHIFT_MAX,
     Returns:
         (ずらした境, ずらした量 px．ずらさなければ (元の境, 0))
     """
-    import count_plots
+    from . import count_plots
 
     if img is None or x_edges is None or len(x_edges) < 3 or not bands:
         return x_edges, 0

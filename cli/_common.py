@@ -1,44 +1,49 @@
 """各スクリプトが共通で使う準備
 
-中核のモジュールは相対 import と相対パスの辞書(`j_name.txt` など)に
-依存しているため，**必ず中核の場所を作業ディレクトリにしてから** import する．
-利用者から受け取ったパスは，chdir する前に絶対パスへ直しておく．
+中核は `comptea` パッケージ．**入れてあればそのまま読め**，入れていなければ
+このリポジトリの置き場を `sys.path` に足す(`pip install -e .` をしていない
+利用者のため)．
+
+**作業ディレクトリは変えない**(2026-09-07)．以前は中核が相対 import と
+相対パスの辞書に頼っていたので `comptea/` へ移る必要があったが，
+パッケージにしたのでどこから呼んでもよくなった．
 """
 import os
 import sys
 from pathlib import Path
 
-# 中核の置き場．`comptea/` が正で，`yolo/` は古い名前(2026-09 に改めた)
-CORE_DIRS = ('comptea', 'yolo')
 
+def package_dir() -> Path:
+    """中核 (`comptea` パッケージ) の場所を返す
 
-def yolo_dir() -> Path:
-    """中核のモジュールの場所を返す
-
-    環境変数 COMPTEA_YOLO があればそれを使う．
-    無ければこのファイルの位置から遡って探す．
+    環境変数 COMPTEA_CORE があればそれを使う(古い名前 COMPTEA_YOLO も見る)．
+    無ければ入っているものを探し，それも無ければこのファイルの位置から遡る．
     """
-    env = os.environ.get('COMPTEA_YOLO')
+    env = os.environ.get('COMPTEA_CORE') or os.environ.get('COMPTEA_YOLO')
     if env:
         d = Path(env).resolve()
         if (d / 'locate.py').is_file():
             return d
-        raise SystemExit(f'COMPTEA_YOLO に locate.py が無い: {d}')
+        raise SystemExit(f'COMPTEA_CORE に locate.py が無い: {d}')
     here = Path(__file__).resolve()
     for parent in here.parents:
-        for name in CORE_DIRS:
+        for name in ('comptea', 'yolo'):
             d = parent / name
             if (d / 'locate.py').is_file():
                 return d
-    raise SystemExit('中核のモジュールが見つからない．'
-                     'COMPTEA_YOLO で場所を指定する')
+    try:
+        import comptea
+        return Path(comptea.__file__).parent
+    except ImportError:
+        raise SystemExit('中核のモジュールが見つからない．'
+                         'COMPTEA_CORE で場所を指定するか，pip install する')
 
 
 def setup(paths=()):
-    """yolo/ へ chdir し，import できるようにする
+    """`comptea` を読めるようにする
 
     Args:
-        paths: 利用者から受け取ったパス(chdir 前に絶対パスへ直す)
+        paths: 利用者から受け取ったパス(絶対パスへ直して返す)
     Returns:
         絶対パスにした paths のリスト
     """
@@ -49,16 +54,21 @@ def setup(paths=()):
         except (AttributeError, ValueError):
             pass
     resolved = [str(Path(p).resolve()) if p else p for p in paths]
-    d = yolo_dir()
-    sys.path.insert(0, str(d))
-    os.chdir(d)
+    try:
+        import comptea                                        # noqa: F401
+    except ImportError:
+        root = str(package_dir().parent)
+        if root not in sys.path:
+            sys.path.insert(0, root)
     return resolved
 
 
 def workdir(image: str, workdir_opt: str = None, make: bool = True) -> Path:
     """中間物を置く場所
 
-    既定は `yolo/work/<画像名>/`．画像1枚ぶんをひとまとめにする．
+    既定は**いまいる場所**の `work/<画像名>/`．画像1枚ぶんをひとまとめにする．
+    (2026-09-07 まではパッケージの中の `work/` だった．入れて使うと
+     書き込めない場所になるので，呼んだ場所を基準にする)
 
     Args:
         make: 作らずに場所だけ返すなら False．
@@ -68,7 +78,7 @@ def workdir(image: str, workdir_opt: str = None, make: bool = True) -> Path:
     if workdir_opt:
         d = Path(workdir_opt).resolve()
     else:
-        d = yolo_dir() / 'work' / Path(image).stem
+        d = Path.cwd() / 'work' / Path(image).stem
     if make:
         d.mkdir(parents=True, exist_ok=True)
     return d

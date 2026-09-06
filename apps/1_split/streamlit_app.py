@@ -47,8 +47,8 @@ src = os.path.join(work, up.name)
 with open(src, "wb") as f:
     f.write(up.getbuffer())
 
-import ink                                       # noqa: E402
-import split_sheet                               # noqa: E402
+from comptea import ink                                       # noqa: E402
+from comptea import split_sheet                               # noqa: E402
 
 # PDF は**貼ってある画像をそのまま取り出す**(描き直すと字が甘くなる)．
 # 取り出したものを PNG にして，以降はその PNG を使う

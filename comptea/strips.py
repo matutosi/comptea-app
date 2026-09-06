@@ -23,9 +23,9 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 
-import ink
-from col_edges import column_edges_from_gaps, plot_gaps
-from table_split import drop_stray_plot_rows
+from . import ink
+from .col_edges import column_edges_from_gaps, plot_gaps
+from .table_split import drop_stray_plot_rows
 
 Image.MAX_IMAGE_PIXELS = None
 

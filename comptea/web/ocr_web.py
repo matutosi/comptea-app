@@ -17,13 +17,10 @@ if '__file__' not in locals():
 else:
     WD = Path(__file__).parent
 
-os.chdir(WD)
-if WD not in sys.path:
-    sys.path.append(str(WD))
-import util_file
-import ocr
-import locate
-import correct_text
+from comptea import util_file
+from comptea import ocr
+from comptea import locate
+from comptea import correct_text
 
 # ページ設定
 st.set_page_config(page_title="OCR & Text Correction", layout="wide")

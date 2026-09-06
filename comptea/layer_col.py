@@ -21,7 +21,7 @@
 import numpy as np
 from PIL import Image
 
-import ink
+from . import ink
 
 Image.MAX_IMAGE_PIXELS = None       # 折り込みは1億画素を超える
 

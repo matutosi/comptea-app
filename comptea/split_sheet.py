@@ -24,8 +24,7 @@ import sys
 import numpy as np
 from PIL import Image
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import ink                                      # noqa: E402
+from . import ink                                      # noqa: E402
 
 Image.MAX_IMAGE_PIXELS = None                   # 折り込みは1億画素を超える
 

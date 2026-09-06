@@ -46,7 +46,7 @@ def check(df_long, df_plot, out):
     # 同じ文字列が何行にも並ぶので「同じ種が 2 つ」と鳴る．中身は
     # 種群の見出し(`亜群集区分種`)・候補が複数のまま(`クグ;クコ;…`)・
     # 1 文字の読み残りで，どれも種ではない(折り込みで 9 件のうち 7 件)
-    import correct_text                       # setup() で yolo/ が通ってから
+    from comptea import correct_text                       # setup() で yolo/ が通ってから
 
     named = df_long[df_long['j_name'].notna()].copy()
     known = correct_text.known_names(named['j_name'])
@@ -106,8 +106,8 @@ def main():
     _common.need_file(work / 'ocred.csv', 'run_ocr.py')
 
     import pandas as pd
-    import comp_table
-    import plot_table
+    from comptea import comp_table
+    from comptea import plot_table
 
     df = pd.read_csv(work / 'ocred.csv')
     df_long = comp_table.comp_table(df, keep_absent=args.keep_absent)

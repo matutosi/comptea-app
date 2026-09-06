@@ -6,7 +6,7 @@
 import numpy as np
 import pytest
 
-import col_edges
+from comptea import col_edges
 
 
 # --- 等間隔の格子を当てる -----------------------------------------------

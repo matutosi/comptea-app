@@ -5,7 +5,7 @@
 """
 import pytest
 
-import correct_text as ct
+from comptea import correct_text as ct
 
 
 def test_辞書にある名前はそのまま通る():

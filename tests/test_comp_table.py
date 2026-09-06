@@ -6,7 +6,7 @@
 import pandas as pd
 import pytest
 
-import comp_table as cta
+from comptea import comp_table as cta
 
 
 # --- セルを被度と群度に分ける -------------------------------------------
