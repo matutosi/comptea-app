@@ -47,6 +47,9 @@ python cli/export_data.py work --out out --tag <資料名>    # まとめて書�
 ```python
 from comptea import correct_text
 correct_text.correct_comp('5・5')       # {'corrected': '5;5', 'status': 'OK'}
+
+from comptea import pipeline           # 段を，同じプロセスで動かす
+code, log = pipeline.run('grid', ['表.png', '--workdir', 'work/x'])
 ```
 
 辞書と重みはパッケージに同梱してあるので，**どこから呼んでも開けます**．

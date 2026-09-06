@@ -23,7 +23,7 @@ import argparse
 import os
 import sys
 
-import _common
+from comptea.pipeline import common as _common
 
 PAD = 6                 # セルを切り出すときの余白(px)
 NEED_CHECK = 'Need Check'

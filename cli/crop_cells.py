@@ -13,7 +13,7 @@
 import argparse
 import sys
 
-import _common
+from comptea.pipeline import common as _common
 
 TILE_H = 110       # まとめる画像の1タイルの高さ(拡大して読みやすくする)
 TILE_W_MAX = 420   # 横に長いセルはここで頭打ちにする

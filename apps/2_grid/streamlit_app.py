@@ -8,7 +8,6 @@
 """
 import importlib
 import os
-import subprocess
 import sys
 import tempfile
 
@@ -21,6 +20,8 @@ import _shared                                  # noqa: E402
 # Streamlit は書き換えたファイルを走らせ直すが，`import` した先はそのままなので，
 # 更新した直後に古い `_shared` が残り，足したばかりのものが無いと言われる
 importlib.reload(_shared)
+
+from comptea import pipeline            # noqa: E402
 
 st.set_page_config(page_title="comptea 2 格子", layout="wide")
 st.title("2. 検出して格子を作る")
@@ -81,13 +82,12 @@ sig = _shared.upload_sig(up) + (os.path.basename(src),)
 res = _shared.cached("2_grid", sig)
 
 if st.button("格子を作る", type="primary"):
-    cli = os.path.join(_shared.ROOT, "cli", "run_pipeline.py")
     wd = os.path.join(work, "out")
     with st.spinner("検出しています(初回はモデルの読み込みに時間がかかります)"):
-        r = subprocess.run(
-            [sys.executable, cli, src, "--weights", _shared.WEIGHTS, "--workdir", wd],
-            capture_output=True, text=True, encoding="utf-8", errors="replace")
-    log = (r.stdout or "") + (r.stderr or "")
+        # **同じプロセスで呼ぶ**(2026-09-07)．前は Python を起こし直しており，
+        # そのたびに torch を読み込んでいた(1 回 5 秒)
+        _, log = pipeline.run("grid", [src, "--weights", _shared.WEIGHTS,
+                                       "--workdir", wd])
     overlay = os.path.join(wd, "overlay.png")
     if not os.path.isfile(overlay):
         st.error("格子が作れませんでした")

@@ -17,7 +17,8 @@ The project is bilingual (Japanese/English) and targets ecological vegetation su
 |:---|:---|
 | `comptea/` | The core modules. What used to be one 1,673-line `split_wide.py` is five files by concern: `strips.py` (wide tables), `col_edges.py` (column boundaries), `table_split.py` (telling two tables apart on one sheet), `body_rows.py` (the body's vertical extent and row boundaries) and `checks.py` (the independent checks). It is a package: modules import each other relatively (`from . import ink`), the dictionaries and weights are resolved against the package directory, and **nothing needs a particular working directory** any more (until 2026-09-07 everything had to run inside `comptea/`) |
 | `comptea/web/` | The older all-in-one Streamlit pages, kept as they were |
-| `cli/` | The command-line entry points (`run_pipeline` → `run_ocr` → `build_table`, plus `crop_cells`, `apply_text`, `export_data`) |
+| `comptea/pipeline/` | The three stages themselves — `grid.py`, `read.py`, `table.py` — with `common.py` shared between them. `pipeline.run(stage, argv)` drives one **in the calling process**: until 2026-09-07 the apps spawned a new Python per stage and paid the torch import (5 s) every time. Measured with the CPU wheel Streamlit Cloud installs, detection peaks at 432 MB and reading at 507 MB, which fits the ~1 GB free tier (the local CUDA build reaches 1,375 MB and is what made this look impossible) |
+| `cli/` | Thin command-line entry points over those stages (`run_pipeline` → `run_ocr` → `build_table`, plus `crop_cells`, `apply_text`, `export_data`) |
 | `apps/` | One Streamlit app per stage, each with its own `requirements.txt` |
 | `eval/` | The yardsticks. **They need the labelled scans and truth tables, which are not published**, so they cannot be run from this repository |
 | `tests/` | Runs on the dictionaries and `examples/` alone — no source material needed |

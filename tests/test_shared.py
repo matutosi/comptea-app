@@ -135,3 +135,34 @@ def test_入力の印は名前と大きさで決まる():
     _shared.upload_sig(a)
     with zipfile.ZipFile(a) as z:
         assert z.namelist()
+
+
+# --- 段を同じプロセスで呼ぶ ---------------------------------------------
+
+def test_段を同じプロセスから呼べる(tmp_path):
+    """アプリはこれを呼ぶ(2026-09-07)
+
+    前は `cli/*.py` を subprocess で起こしており，そのたびに torch や
+    easyocr を読み込んでいた．CPU 版の torch なら検出 432 MB・読み取り
+    507 MB で，無料枠(1 GB ほど)に収まると測って決めた．
+    """
+    import zipfile
+
+    from comptea import pipeline
+
+    with zipfile.ZipFile(os.path.join(conftest.ROOT, "examples",
+                                      "sample_read.zip")) as z:
+        z.extractall(tmp_path)
+    code, out = pipeline.run("table", [str(tmp_path)])
+    assert code == 0, out
+    assert "[地点数] 本体 6 地点" in out
+    assert (tmp_path / "comp_table_long.csv").is_file()
+
+
+def test_できないときは終了コードと理由が返る(tmp_path):
+    """段は「できない理由」を SystemExit で返す．例外にせず拾う"""
+    from comptea import pipeline
+
+    code, out = pipeline.run("table", [str(tmp_path / "無い")])
+    assert code != 0
+    assert out.strip()

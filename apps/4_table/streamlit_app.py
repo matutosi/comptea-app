@@ -8,7 +8,6 @@
 """
 import importlib
 import os
-import subprocess
 import sys
 import tempfile
 
@@ -21,6 +20,8 @@ import _shared                                  # noqa: E402
 # Streamlit は書き換えたファイルを走らせ直すが，`import` した先はそのままなので，
 # 更新した直後に古い `_shared` が残り，足したばかりのものが無いと言われる
 importlib.reload(_shared)
+
+from comptea import pipeline            # noqa: E402
 
 st.set_page_config(page_title="comptea 4 組み上げ", layout="wide")
 st.title("4. 縦持ちに組んで検査する")
@@ -63,14 +64,12 @@ sig = _shared.upload_sig(up)
 res = _shared.cached("4_table", sig)
 
 if st.button("組み上げる", type="primary"):
-    cli = os.path.join(_shared.ROOT, "cli", "build_table.py")
     with st.spinner("組み上げています"):
-        r = subprocess.run([sys.executable, cli, wd], capture_output=True,
-                           text=True, encoding="utf-8", errors="replace")
+        _, log = pipeline.run("table", [wd])
     p_long = os.path.join(wd, "comp_table_long.csv")
     if not os.path.isfile(p_long):
         st.error("組み上げに失敗しました")
-        st.code(((r.stdout or "") + (r.stderr or ""))[-3000:])
+        st.code(log[-3000:])
         _shared.footer()
         st.stop()
     p_plot = os.path.join(wd, "plot_table.csv")

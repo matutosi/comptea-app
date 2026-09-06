@@ -20,7 +20,7 @@ fixes.tsv は次の2列(1行目は見出し．タブ区切り)．
 import argparse
 import sys
 
-import _common
+from comptea.pipeline import common as _common
 
 
 def parse_args():

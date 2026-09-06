@@ -8,7 +8,6 @@ EasyOCR は**初回にモデルを 100 MB ほど落とす**ので，最初の 1 
 """
 import importlib
 import os
-import subprocess
 import sys
 import tempfile
 
@@ -21,6 +20,8 @@ import _shared                                  # noqa: E402
 # Streamlit は書き換えたファイルを走らせ直すが，`import` した先はそのままなので，
 # 更新した直後に古い `_shared` が残り，足したばかりのものが無いと言われる
 importlib.reload(_shared)
+
+from comptea import pipeline            # noqa: E402
 
 st.set_page_config(page_title="comptea 3 読み取り", layout="wide")
 st.title("3. セルを読む")
@@ -96,15 +97,14 @@ sig = _shared.upload_sig(img_up, loc_up)
 res = _shared.cached("3_read", sig)
 
 if st.button("読む", type="primary"):
-    cli = os.path.join(_shared.ROOT, "cli", "run_ocr.py")
     with st.spinner("読んでいます(初回はモデルの取得で数分かかります)"):
-        r = subprocess.run([sys.executable, cli, wd, "--reader", "easyocr"],
-                           capture_output=True, text=True, encoding="utf-8",
-                           errors="replace")
+        # 同じプロセスで呼ぶ．easyocr の読み込みは 7 秒かかるので，
+        # 一度読めばこのアプリが生きているあいだは使い回せる
+        _, log = pipeline.run("read", [wd, "--reader", "easyocr"])
     p_ocr = os.path.join(wd, "ocred.csv")
     if not os.path.isfile(p_ocr):
         st.error("読み取りに失敗しました")
-        st.code(((r.stdout or "") + (r.stderr or ""))[-3000:])
+        st.code(log[-3000:])
         _shared.footer()
         st.stop()
     d = pd.read_csv(p_ocr)
