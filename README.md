@@ -49,7 +49,7 @@ CSV から辿れるようにします．
 | アプリ | やること | 入力 → 出力 |
 |:---|:---|:---|
 | `apps/1_split` | 折り込みを表ごとに切る (**PDF も可**) | 画像・PDF → 画像 (zip) |
-| `apps/2_grid` | 検出して格子を作る | 画像 → `grid.zip` |
+| `apps/2_grid` | 検出して格子を作る (**PDF も可**) | 画像・PDF → `grid.zip` |
 | `apps/3_read` | セルを読む・**表頭を表にする** | 画像 + `grid.zip` → `read.zip` |
 | `apps/4_table` | 縦持ちに組んで検査 | `read.zip` → `table.zip` |
 

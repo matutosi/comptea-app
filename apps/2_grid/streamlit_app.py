@@ -29,10 +29,10 @@ st.write(
     "できた格子を重ね描きで確かめてください．"
 )
 
-up = st.file_uploader("表の画像", type=["png", "jpg", "jpeg"])
+up = st.file_uploader("表の画像か PDF", type=["png", "jpg", "jpeg", "pdf"])
 use_sample = st.checkbox("見本の画像を使う", value=up is None)
 if up is None and not use_sample:
-    st.info("画像を選ぶか，見本を使ってください．")
+    st.info("画像か PDF を選ぶか，見本を使ってください．")
     _shared.footer()
     st.stop()
 
@@ -44,6 +44,29 @@ if up is not None:
     src = os.path.join(work, up.name)
     with open(src, "wb") as f:
         f.write(up.getbuffer())
+    # PDF は**貼ってある画像をそのまま取り出して** PNG にし，以降はそれを使う
+    # (描き直すと再標本化で字が甘くなる)
+    if up.name.lower().endswith(".pdf"):
+        sys.path.insert(0, _shared.CORE)
+        import split_sheet                       # noqa: E402
+
+        try:
+            import fitz                          # noqa: E402  PyMuPDF
+            n = fitz.open(src).page_count
+        except Exception as e:                   # noqa: BLE001
+            st.error(f"PDF を開けません: {e}")
+            _shared.footer()
+            st.stop()
+        page = 1
+        if n > 1:
+            page = st.number_input(f"ページ (1-{n})", 1, n, 1,
+                                   help="1 ページに 1 つの表があるものを選びます")
+        with st.spinner("PDF のページを PNG に直しています"):
+            stem = os.path.splitext(up.name)[0]
+            png = os.path.join(work, f"{stem}_page{int(page)}.png")
+            split_sheet.load_page(src, page=int(page) - 1).save(png)
+        src = png
+        st.caption(f"PDF {n} ページのうち {int(page)} ページ目を使います")
 else:
     src = _shared.SAMPLE
 img = Image.open(src)
