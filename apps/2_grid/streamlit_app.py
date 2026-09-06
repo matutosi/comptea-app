@@ -60,16 +60,18 @@ if st.button("格子を作る", type="primary"):
     overlay = os.path.join(wd, "overlay.png")
     if os.path.isfile(overlay):
         st.image(overlay, caption="格子の重ね描き", use_container_width=True)
-    for name, label in (("summary.txt", "まとめ"), ("located.csv", "格子")):
-        p = os.path.join(wd, name)
-        if not os.path.isfile(p):
-            continue
-        if name.endswith(".txt"):
-            with st.expander(label, expanded=True):
-                st.text(open(p, encoding="utf-8").read())
-        else:
-            st.download_button(f"{label} ({name}) を受け取る",
-                               open(p, "rb").read(), file_name=name, mime="text/csv")
+    p = os.path.join(wd, "summary.txt")
+    if os.path.isfile(p):
+        with st.expander("まとめ", expanded=True):
+            st.text(open(p, encoding="utf-8").read())
+    # **次の工程へは zip で渡す**．読み取りには格子と検出の両方が要る
+    z = _shared.zip_files(wd, ["located.csv", "detect.csv", "summary.txt",
+                               "overlay.png"])
+    if z:
+        st.download_button("結果をまとめて受け取る (zip)", z,
+                           file_name="grid.zip", mime="application/zip",
+                           type="primary")
+        st.caption("この zip をそのまま「3. セルを読む」に渡してください．")
     if not os.path.isfile(overlay):
         st.error("格子が作れませんでした")
         st.code(log[-3000:])

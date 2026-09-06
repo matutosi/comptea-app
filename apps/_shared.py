@@ -35,6 +35,46 @@ def too_big(img):
     return None
 
 
+def zip_files(work, names):
+    """作業ディレクトリの中の何枚かを zip にまとめて返す(無ければ None)
+
+    工程のあいだの受け渡しは，**ファイルが 2 つ以上なら zip** にする．
+    1 つずつ受け取ると，次の工程で入れ忘れが起きる．
+    """
+    import io
+    import zipfile
+
+    have = [n for n in names if os.path.isfile(os.path.join(work, n))]
+    if not have:
+        return None
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for n in have:
+            z.write(os.path.join(work, n), n)
+    return buf.getvalue()
+
+
+def unzip_into(upload, work):
+    """受け取った zip(または CSV 1 枚)を作業ディレクトリへ展開する
+
+    Returns:
+        置いたファイル名のリスト
+    """
+    import zipfile
+
+    name = getattr(upload, "name", "")
+    if name.lower().endswith(".zip"):
+        with zipfile.ZipFile(upload) as z:
+            names = [n for n in z.namelist() if not n.endswith("/")]
+            for n in names:
+                with open(os.path.join(work, os.path.basename(n)), "wb") as f:
+                    f.write(z.read(n))
+        return [os.path.basename(n) for n in names]
+    with open(os.path.join(work, name), "wb") as f:
+        f.write(upload.getbuffer())
+    return [name]
+
+
 def footer():
     """どのアプリにも出す但し書き"""
     import streamlit as st
