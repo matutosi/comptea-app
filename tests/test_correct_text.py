@@ -150,3 +150,46 @@ def test_文章の領域は素通しする():
 def test_読めなかったセルは落ちない():
     assert ct.correct_cell("comp", None) == {"corrected": None, "status": None}
     assert ct.correct_cell("species_col", float("nan"))["status"] is None
+
+
+# --- 階層は決まった記号だけ ---------------------------------------------
+
+@pytest.mark.parametrize("text, corrected", [
+    ("S", "S"), ("K", "K"), ("M", "M"), ("H", "H"),
+    ("T1", "T1"), ("T2", "T2"), ("S1", "S1"), ("K2", "K2"), ("B2", "B2"),
+    ("5", "S"),                      # S を 5 と読む
+    ("S・K", "S;K"), ("S K", "S;K"), ("SK", "S;K"), ("S;K", "S;K"),
+])
+def test_階層として読める並びだけを採る(text, corrected):
+    assert ct.correct_layer(text)["corrected"] == corrected
+
+
+@pytest.mark.parametrize("text", [
+    "So",        # `S・K` の `・K` を `o` と読んだ形
+    "Ss",        # 同上．1 文字ずつ繋ぐと `S;S` という**それらしい値**になる
+    "So口",
+    "分種",       # 種群の見出しの行が，階層の列に掛かったもの
+    "I", "M1",   # コケ層に添字は付かない
+])
+def test_記号にならない読みは値にしない(text):
+    """**正しい形になる誤りは，読みでは見つからない**(2026-09-07)
+
+    1 文字ずつ ';' で繋いでいたので，誤読が `S;O`・`S;S` という
+    階層らしい値になり，縦持ちの表にそのまま入っていた．
+    """
+    assert ct.correct_layer(text)["status"] == "Need Check"
+
+
+def test_区切りがあるのに1つしか読めなければ値にしない():
+    """`S・K` の `K` には下線が引かれ，OCR が読み落とすことがある
+
+    `S` は階層として正しい形なので，そのまま採ると **K が黙って落ちる**．
+    """
+    assert ct.correct_layer("S・")["status"] == "Need Check"
+    assert ct.correct_layer("・K")["status"] == "Need Check"
+    assert ct.correct_layer("S")["status"] == "OK"        # 区切りが無ければ通す
+
+
+def test_同じ階層が二度並ぶ値は認めない():
+    assert ct.validate_layer("S;K") is True
+    assert ct.validate_layer("S;S") is False

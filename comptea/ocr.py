@@ -71,6 +71,9 @@ COMP_ALLOW = '0123456789+r.,:;・'   # 被度・群度に出る字だけ
 # `2(3-4)` を `36+23` のように化けさせ，1 件も拾えていなかった
 # (s01115_22_p2 の Need Check 46 セルで 0 件 → 字種を足すと 20 件)．
 CONSTANCY_ALLOW = COMP_ALLOW + 'IViv()-'
+# 階層に出る字だけ(docs/vegetation_science.md 3.4)．`S・K` のように 2 つ
+# 書かれることがあるので区切りも入れる．**添字は 1 か 2**
+LAYER_ALLOW = 'TSKBHM12・.,;'
 # 「何も無いセル」と「値のあるセル」の黒画素の間に，2つの高さを置く．
 #   RETRY_AT より濃ければ読み直す / THIN_AT より薄ければ1文字の値しか認めない
 RETRY_AT = 0.15
@@ -112,6 +115,64 @@ def retry_comp_cell(img, box, thin: bool):
     return ''
 
 
+def retry_layer_cell(img, box):
+    """階層のセルを，**字種を絞って**読み直す(2026-09-07)
+
+    階層に来るのは `T S K B H M`(＋添字 1・2)と区切りだけ．そう伝えずに読むと
+    `S・K` が `So`・`Ss`・`So口` になり，1 文字ずつ繋いだ結果
+    `S;O`・`S;S` という**それらしい値**になっていた(見本の 27 セル中 4 セル)．
+
+    **階層として読める形になったときだけ**返す(でたらめを入れないため)．
+
+    Returns:
+        読めた文字列．採らないときは ''
+    """
+    from . import correct_text
+
+    cell = trim_image(ink.erase_box_lines(img.crop(box)))
+    res = READER.recognize(np.array(cell), allowlist=LAYER_ALLOW)
+    text = ' '.join(t[1] for t in res) if res else ''
+    if not text.strip():
+        return ''
+    fixed = correct_text.correct_layer(text)
+    if fixed['status'] not in ('OK', 'multi'):
+        return ''
+    # **字数が合うときだけ採る**(2026-09-07)．`S・K` と組まれたセルで，
+    # 絞った読みが `S` だけを返すことがある(`K` に下線が引かれているため)．
+    # `S` は階層として正しい形なので，そのまま採ると**K が黙って落ちる**
+    n_read = len(str(fixed['corrected']).split(';'))
+    n_ink = len(ink.letter_blobs(ink.binarize(cell)))
+    if n_ink and n_read != n_ink:
+        return ''
+    return text
+
+
+def retry_bad_layers(df, img):
+    """階層として読めなかったセルを，字種を絞って読み直す
+
+    差し替えたセルは `note` に `retry` を付けて，段階2の目視に回す．
+    """
+    from . import correct_text
+
+    if 'obj_name' not in df.columns:
+        return df, 0
+    n = 0
+    for i, r in df[df['obj_name'] == 'layer'].iterrows():
+        text = r.get('text')
+        if not isinstance(text, str) or not text.strip():
+            continue
+        if correct_text.correct_layer(text)['status'] in ('OK', 'multi'):
+            continue
+        got = retry_layer_cell(img, (r['x1'], r['y1'], r['x2'], r['y2']))
+        if not got or got == text:
+            continue
+        df.loc[i, 'text'] = got
+        note = str(df.at[i, 'note'] or '').strip(';') if 'note' in df.columns else ''
+        df.loc[i, 'note'] = (note + ';' if note else '') + 'retry'
+        n += 1
+    return df, n
+
+
 def ocr_images_df(df):
     # groupbyで分けたDataFrameはindexが0始まりとは限らないためilocで取る
     image = df['source_image'].iloc[0]
@@ -129,6 +190,9 @@ def ocr_images_df(df):
             # 空白は correct_comp / correct_layer が除くので害はない
             df.loc[i, 'text'] = parse_text.reading_order(text)
             df.loc[i, 'img_base64'] = jpg2base64(img_ocred)
+    df, n_layer = retry_bad_layers(df, img)
+    if n_layer:
+        print(f'  階層のセル {n_layer} 件を，字種を絞って読み直した')
     return retry_empty_comp(df, image, img)
 
 

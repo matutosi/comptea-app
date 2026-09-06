@@ -26,6 +26,9 @@ ATTR_COLUMNS = {
     'species_col': 'j_name',
     'sname'      : 's_name',
     'layer'      : 'layer',
+    # 階層として読めなかった読み(2026-09-07)．`layer` には入れず，
+    # 目で確かめるときのためにここへ残す
+    'layer_raw'  : 'layer_raw',
 }
 CLASS_COMP = 'comp'
 # 値のあるセルのこの割合が「常在度(被度の範囲)」なら，常在度表とみなして知らせる
@@ -107,12 +110,41 @@ def species_attrs(df: pd.DataFrame) -> pd.DataFrame:
     if attrs.empty:
         return pd.DataFrame(columns=['row_no'])
     attrs['value'] = _text_value(attrs)
+    # **階層は，読めたものだけを `layer` に入れる**(2026-09-07)．
+    # 読み取りが 'Need Check' のセルは `layer_raw` へ回す．
+    # 縦持ちの表を受け取る側は，`layer` が `T1 T2 S K H M` しか
+    # 取らないものとして扱える
+    if 'status' in attrs.columns:
+        bad = (attrs['obj_name'] == 'layer') & (attrs['status'] == 'Need Check')
+        attrs.loc[bad, 'obj_name'] = 'layer_raw'
     # 同じ行に同じobj_nameが複数あるときは左のものを採る
     attrs = attrs.sort_values(['row', 'col']).drop_duplicates(['row', 'obj_name'])
     wide = attrs.pivot(index='row', columns='obj_name', values='value')
     wide = wide.rename(columns=ATTR_COLUMNS).reset_index().rename(columns={'row': 'row_no'})
     wide.columns.name = None
-    return wide
+    return split_bad_layers(wide)
+
+
+def split_bad_layers(attrs):
+    """**階層の列には，階層として読める記号だけ**を残す(2026-09-07)
+
+    残りは `layer_raw` に移す．前は誤読がそのまま入っており，
+    `S・K`(2 階層)を `So` と読んだセルが `S;O` という**それらしい値**に
+    なっていた．縦持ちの表を受け取る側は，`layer` が
+    `T1 T2 S K H M`(＋添字)しか取らないものとして扱える．
+
+    捨てずに `layer_raw` に残すのは，**目で確かめるときに元の読みが要る**ため．
+    """
+    if 'layer' not in attrs.columns:
+        return attrs
+    val = attrs['layer']
+    ok = val.map(lambda v: isinstance(v, str) and v.strip() != ''
+                 and correct_text.validate_layer(v.strip()))
+    bad = val.notna() & ~ok & val.map(lambda v: isinstance(v, str) and v.strip() != '')
+    if bad.any():
+        attrs['layer_raw'] = val.where(bad)
+        attrs.loc[bad, 'layer'] = None
+    return attrs
 
 
 HEAD_VOTE_MIN = 3      # 列の種類を決めるのに要る，括弧付きのセルの数
@@ -478,10 +510,14 @@ def comp_table(df: pd.DataFrame, keep_absent: bool = False) -> pd.DataFrame:
                                  .apply(lambda v: (v + ';' if v else '')
                                         + 'sname_from_jname'))
     res['source'] = 'body'
-    res = res[[
-        'source_image', 'plot', 'row_no', 'j_name', 's_name', 'layer',
-        'cover', 'sociability', 'constancy', 'comp_raw', 'status', 'note', 'source',
-    ]].sort_values(['source_image', 'plot', 'row_no']).reset_index(drop=True)
+    cols = ['source_image', 'plot', 'row_no', 'j_name', 's_name', 'layer']
+    # 階層として読めなかった読みは，あるときだけ列にする(2026-09-07)
+    if 'layer_raw' in res.columns and res['layer_raw'].notna().any():
+        cols.append('layer_raw')
+    cols += ['cover', 'sociability', 'constancy', 'comp_raw', 'status', 'note',
+             'source']
+    res = res[cols].sort_values(
+        ['source_image', 'plot', 'row_no']).reset_index(drop=True)
 
     # 表の下の「1回出現種」を同じ縦持ちの行として足す
     once = once_species_rows(df)
@@ -491,12 +527,16 @@ def comp_table(df: pd.DataFrame, keep_absent: bool = False) -> pd.DataFrame:
             "(source 列が 'once')．")
         res = pd.concat([res, once], ignore_index=True)
 
-    layer = res['layer'].dropna()
-    n_layer = sum(not correct_text.validate_layer(str(v)) for v in layer.unique() if v != '')
-    if n_layer:
-        warnings.append(
-            f'階層として読めない値が {n_layer} 種類ある．'
-            'OCRページで layer の status を確認する．')
+    if 'layer_raw' in res.columns:
+        raw = res['layer_raw'].dropna()
+        raw = raw[raw.astype(str).str.strip() != '']
+        if len(raw):
+            kinds = sorted(set(raw.astype(str)))[:6]
+            warnings.append(
+                f'階層として読めない読みが {len(raw)} 行あった'
+                f"({', '.join(kinds)}…)．"
+                "**layer 列からは外し，layer_raw に残した**．"
+                'セルを見て直すか，段階2で読み直す．')
 
     n_check = (res['status'] == 'Need Check').sum()
     if n_check:

@@ -299,3 +299,29 @@ def head_strokes(dark, box, join=HEAD_JOIN, taller=HEAD_TALLER,
             return len(head)
         head.append((w, h))
     return None
+
+
+LETTER_MIN = 0.4      # いちばん大きいかたまりに対する比．これ未満は区切りや汚れ
+LETTER_JOIN = 4       # このすき間までは同じ字とみなす
+
+
+def letter_blobs(dark, min_ratio=LETTER_MIN, join=LETTER_JOIN):
+    """横に並ぶ**字**のかたまりを (x1, x2) で返す(2026-09-07)
+
+    区切りの `・` や端の罫線を数に入れないよう，**いちばん大きいものに対する
+    比**で選り分ける(`S・K` は S 21 px・`・` 8 px・K 36 px)．
+    読みの字数と突き合わせて，**読み落としを見つける**ために使う．
+    """
+    prof = dark.any(axis=0)
+    idx = np.flatnonzero(np.diff(
+        np.concatenate(([False], prof, [False])).astype(np.int8)))
+    runs = []
+    for a, b in zip(idx[0::2], idx[1::2]):
+        if runs and a - runs[-1][1] <= join:
+            runs[-1][1] = int(b)
+        else:
+            runs.append([int(a), int(b)])
+    if not runs:
+        return []
+    wide = max(b - a for a, b in runs)
+    return [(a, b) for a, b in runs if (b - a) >= wide * min_ratio]

@@ -7,13 +7,27 @@ from rapidfuzz.distance import Levenshtein
 
 from . import data_path
 
+# 階層の記号(docs/vegetation_science.md 3.4)．`K`(Krautschicht)と `H`(herb)，
+# `B`(Baumschicht)と `T`(tree)は流儀の違い．
+# **添字を取るのは高木・低木・草本の層だけ**(`T1` `T2` `S1` `K2`．通常は 1 か 2)．
+# コケ層 `M` に添字は付かない(2026-09-07 ユーザ指摘)
+LAYER_TOKEN = re.compile(r'[BTSKH][12]?|M')
+LAYER_SEP = re.compile(r'[-_*･・.,+ ;:]')
+
+
 def correct_layer(str):
     """
     階層の文字列を修正
 
-    半角・大文字に変換
-    数字を除外
-    ';'を間にいれる
+    半角・大文字にし，区切り(`・` など)を落として**記号として読める並び**を
+    取り出す．`S・K` のように 1 つのセルに 2 つ書かれることがあるので，
+    取り出した記号を ';' で繋ぐ．
+
+    **1 文字ずつ ';' で繋いではいけない**(2026-09-07)．
+    OCR は `S・K` を `So`・`Ss`・`So口` と読み違えるが，1 文字ずつ繋ぐと
+    `S;O`・`S;S` という**それらしい値**になり，読みでは気づけない
+    (`S;S` は「階層が 2 つ」として `multi` になっていた)．
+    記号として読めない字が残るセルは，値を作らず目視に回す．
 
     Args:
         str: 文字列
@@ -26,29 +40,38 @@ def correct_layer(str):
     """
     corrected = unicodedata.normalize("NFKC", str)
     corrected = corrected.upper()
-    # 区切りは後で入れ直すので，元から入っている ';' もここで落とす．
-    # 落とさないと 'S;K' が 'S;;;K' になる(2026-09-01)
-    corrected = re.sub('[-_*･・.,+ ;]', '', corrected)
-    corrected = re.sub('5', 'S', corrected)
-    corrected = ';'.join(corrected)
-    corrected = re.sub('([BTSKH]);([12])', '\\1\\2', corrected)
+    # 区切りは後で入れ直すので落とす(元から入っている ';' も同じ)
+    corrected = LAYER_SEP.sub('', corrected)
+    corrected = re.sub('5', 'S', corrected)          # S を 5 と読む
     if corrected == '':
         return {'corrected': corrected, 'status': None}
+    # **記号として読める並びだけを採る**．余りが出たら値にしない
+    tokens = LAYER_TOKEN.findall(corrected)
+    if not tokens or LAYER_TOKEN.sub('', corrected) != '':
+        return {'corrected': corrected, 'status': 'Need Check'}
+    # **区切りがあるのに 1 つしか読めていないセルは，値にしない**(2026-09-07)．
+    # `S・K` の `K` には下線が引かれていることがあり，OCR が読み落として
+    # `S・` を返す．`S` は階層として正しい形なので，そのまま採ると
+    # **K が黙って落ちる**(見本の 27 セルに 1 件あった)
+    raw = unicodedata.normalize('NFKC', str).upper()
+    if len(tokens) < 2 and LAYER_SEP.sub('', raw) != raw.replace(' ', ''):
+        return {'corrected': corrected, 'status': 'Need Check'}
+    corrected = ';'.join(tokens)
     if not validate_layer(corrected):
-        status = 'Need Check'
-    elif ';' in corrected:
-        status = 'multi'
-    else:
-        status = 'OK'
-    return {'corrected': corrected, 'status': status}
+        return {'corrected': corrected, 'status': 'Need Check'}
+    return {'corrected': corrected,
+            'status': 'multi' if len(tokens) > 1 else 'OK'}
 
 def validate_layer(str):
     """
-    階層の文字列が'[BTSKH][12]?'に合致しているか
+    階層の文字列が'[BTSKH][12]?'か'M'に合致しているか
 
     ';'区切りで複数の階層が入ることがあるため，区切って1つずつ見る．
-    細分は'S1' 'S2'のように1桁までなので'[12]?'とする．
+    細分は'S1' 'S2'のように1桁までなので'[12]?'とする(コケ層 'M' には付かない)．
     部分一致だと'あS'のような誤読が通ってしまうので全体一致で見る．
+
+    **同じ階層は二度書かれない**(2026-09-07)．`Ss` の誤読が `S;S` になり
+    「階層が 2 つ」として通っていた．
 
     Args:
         str: 文字列
@@ -56,11 +79,10 @@ def validate_layer(str):
         合致するとき: True
         合致しない: False
     """
-    str = str.split(';')
-    pattern = '[BTSKH][12]?'
-    matched = [bool(re.fullmatch(pattern, s)) for s in str]
-    matched = all(matched) # is all True?
-    return matched
+    parts = str.split(';')
+    if not all(LAYER_TOKEN.fullmatch(s) for s in parts):
+        return False
+    return len(set(parts)) == len(parts)
 
 # 常在度表のセル(2026-09-04)．折り込みの 68 表のうち 11_p1・22_p2 の 2 表は
 # **常在度表**で，列が地点ではなく群落，セルが「常在度(被度の範囲)」になる
