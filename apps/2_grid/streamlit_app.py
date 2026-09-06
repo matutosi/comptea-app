@@ -1,4 +1,4 @@
-"""2 格子: 検出して格子を作る(関門1)
+"""2 格子: 検出して格子を作る
 
 入力  表の画像
 出力  `located.csv`(セルの座標)と重ね描き
@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import _shared                                  # noqa: E402
 
 st.set_page_config(page_title="comptea 2 格子", layout="wide")
-st.title("2. 検出して格子を作る (関門1)")
+st.title("2. 検出して格子を作る")
 st.write(
     "表の領域(表頭・種名の列・組成部)を検出し，**行と列はアルゴリズムで**決めます．"
     "できた格子を重ね描きで確かめてください．"

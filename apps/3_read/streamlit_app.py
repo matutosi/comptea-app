@@ -1,4 +1,4 @@
-"""3 読み取り: セルを読む(関門2)
+"""3 読み取り: セルを読む
 
 入力  表の画像 と `located.csv`(2 の出力)
 出力  `ocred.csv`
@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import _shared                                  # noqa: E402
 
 st.set_page_config(page_title="comptea 3 読み取り", layout="wide")
-st.title("3. セルを読む (関門2)")
+st.title("3. セルを読む")
 st.write(
     "格子のセルを 1 つずつ読み，被度・種名・階層を補正します．"
     "読めなかったセルは字種を絞って読み直し，値にならないものは "

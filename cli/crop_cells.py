@@ -23,7 +23,7 @@ REGIONS = ('header', 'once_species')
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description='目視で読むセルを切り出す(関門2)')
+    p = argparse.ArgumentParser(description='目視で読むセルを切り出す')
     p.add_argument('workdir')
     p.add_argument('--what', default='review', choices=['review', 'regions', 'all'],
                    help='review=review.tsv のセル / regions=文章の領域だけ / all=全部')

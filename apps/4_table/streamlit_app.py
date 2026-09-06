@@ -1,4 +1,4 @@
-"""4 組み上げ: 縦持ちに組んで検査する(関門3)
+"""4 組み上げ: 縦持ちに組んで検査する
 
 入力  `ocred.csv`(3 の出力)
 出力  `comp_table_long.csv`(1 行 = 1 地点 × 1 種)と検査の結果
@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import _shared                                  # noqa: E402
 
 st.set_page_config(page_title="comptea 4 組み上げ", layout="wide")
-st.title("4. 縦持ちに組んで検査する (関門3)")
+st.title("4. 縦持ちに組んで検査する")
 st.write(
     "読んだセルを縦持ちの表に組みます(1 行 = 1 地点 × 1 種)．"
     "地点数・重複・被度の形を検査し，引っかかったものを知らせます．"

@@ -24,7 +24,7 @@ import _common
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description='目視の読みを反映する(関門2)')
+    p = argparse.ArgumentParser(description='目視の読みを反映する')
     p.add_argument('workdir')
     p.add_argument('--tsv', required=True, help='cell_id と text のタブ区切り')
     p.add_argument('--by', default='ai', help='read_by に残す名前')
@@ -103,7 +103,7 @@ def main():
     still = [c for c in changed if c[4] in ('Need Check', 'multi')]
     if still:
         print(f'\n直しても読めない形が {len(still)} 件ある．画像をもう一度見る')
-    print('\n次: build_table.py で表に組む(関門3)')
+    print('\n次: build_table.py で表に組む')
 
 
 if __name__ == '__main__':

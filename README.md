@@ -31,9 +31,9 @@
 ```bash
 pip install -r requirements.txt
 
-python cli/run_pipeline.py <画像> --workdir work/<名前>   # 格子を作る (関門1)
-python cli/run_ocr.py work/<名前>                          # セルを読む (関門2)
-python cli/build_table.py work/<名前>                      # 縦持ちに組む (関門3)
+python cli/run_pipeline.py <画像> --workdir work/<名前>   # 格子を作る
+python cli/run_ocr.py work/<名前>                          # セルを読む
+python cli/build_table.py work/<名前>                      # 縦持ちに組む
 python cli/export_data.py work --out out --tag <資料名>    # まとめて書き出す
 ```
 
@@ -49,9 +49,9 @@ CSV から辿れるようにします．
 | アプリ | やること | 入力 → 出力 |
 |:---|:---|:---|
 | `apps/1_split` | 折り込みを表ごとに切る | 画像 → 画像 (zip) |
-| `apps/2_grid` | 検出して格子を作る (関門1) | 画像 → `located.csv` |
-| `apps/3_read` | セルを読む (関門2) | 画像 + `located.csv` → `ocred.csv` |
-| `apps/4_table` | 縦持ちに組んで検査 (関門3) | `ocred.csv` → `comp_table_long.csv` |
+| `apps/2_grid` | 検出して格子を作る | 画像 → `located.csv` |
+| `apps/3_read` | セルを読む | 画像 + `located.csv` → `ocred.csv` |
+| `apps/4_table` | 縦持ちに組んで検査 | `ocred.csv` → `comp_table_long.csv` |
 
 ```bash
 streamlit run apps/2_grid/streamlit_app.py

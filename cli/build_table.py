@@ -18,7 +18,7 @@ import _common
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description='縦持ちに組んで検査する(関門3)')
+    p = argparse.ArgumentParser(description='縦持ちに組んで検査する')
     p.add_argument('workdir')
     p.add_argument('--keep-absent', action='store_true', help='非出現のセルも残す')
     return p.parse_args()
