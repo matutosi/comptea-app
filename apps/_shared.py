@@ -101,6 +101,65 @@ def unzip_into(upload, work):
     return [name]
 
 
+# 工程の一覧(番号・見出し・入口の名前・ひとこと)
+APPS = [
+    ("1", "折り込みを表ごとに切る", "1_split",
+     "A0 級の折り込みや PDF を，空白の帯で**表ごとの画像**に切ります"),
+    ("2", "検出して格子を作る", "2_grid",
+     "表頭・種名の列・組成部を検出し，**行と列の格子**を作ります"),
+    ("3", "セルを読む", "3_read",
+     "格子のセルを読み，**被度・種名・階層**を補正します．表頭も表にします"),
+    ("4", "縦持ちに組んで検査する", "4_table",
+     "**1 行 = 1 地点 × 1 種**の表に組み，機械でできる検査にかけます"),
+]
+OVERVIEW = (
+    "スキャンした**組成表**を，構造化データ (1 行 = 1 地点 × 1 種) にします．"
+    "工程を 4 つに分けてあり，**間は zip で受け渡します**．"
+    "1 枚に 1 つの表が写っていれば **2 から**始められます．"
+)
+
+
+def app_url(key):
+    """入口の URL を返す(決まっていなければ None)
+
+    Streamlit Cloud の Secrets に次のように書いておくと，
+    ページどうしを行き来できるようになる．
+
+        [urls]
+        1_split = "https://..."
+        2_grid  = "https://..."
+    """
+    try:
+        import streamlit as st
+
+        return st.secrets.get("urls", {}).get(key)
+    except Exception:                            # noqa: BLE001
+        return None
+
+
+def nav(current):
+    """全体像と，ほかの工程への案内を出す(`current` は `2_grid` のような入口の名前)"""
+    import streamlit as st
+
+    st.info(OVERVIEW)
+    with st.sidebar:
+        st.header("工程")
+        for num, title, key, note in APPS:
+            url = app_url(key)
+            if key == current:
+                st.markdown(f"**▶ {num}. {title}**")
+            elif url:
+                st.markdown(f"[{num}. {title}]({url})")
+            else:
+                st.markdown(f"{num}. {title}")
+            st.caption(note)
+        if not any(app_url(k) for _, _, k, _ in APPS):
+            st.caption(
+                "ほかの工程への行き先は，Secrets の `[urls]` に書くと"
+                "リンクになります．"
+            )
+
+
 def footer():
     """どのアプリにも出す但し書き"""
     import streamlit as st

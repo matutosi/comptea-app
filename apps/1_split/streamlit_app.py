@@ -29,6 +29,7 @@ st.write(
     "**空白の帯**で切り分けて，表ごとの画像にします．"
     "**PDF も受け取れます**(ページごとに PNG へ直してから切ります)．"
 )
+_shared.nav("1_split")
 
 up = st.file_uploader("折り込みの画像か PDF", type=["png", "jpg", "jpeg", "pdf"])
 if up is None:

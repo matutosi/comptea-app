@@ -63,6 +63,18 @@ streamlit run apps/2_grid/streamlit_app.py
 **2・3・4 には見本が入っている**ので，前の工程を通さずにその場で試せます
 (`examples/sample.jpg`・`sample_grid.zip`・`sample_read.zip`)．
 
+各ページの上には**全体像**を，横には**4 工程の一覧**を出しています．
+share.streamlit.io に登録したあと，Secrets に次のように書いておくと，
+一覧が**ほかのページへのリンク**になります (書かなければただの一覧のままです)．
+
+```toml
+[urls]
+1_split = "https://....streamlit.app"
+2_grid  = "https://....streamlit.app"
+3_read  = "https://....streamlit.app"
+4_table = "https://....streamlit.app"
+```
+
 **大きな画像は扱えません** (切り分けは長辺 8000 px，ほかは 4000 px まで)．
 A0 の折り込みは CUI を使ってください．
 

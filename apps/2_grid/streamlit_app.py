@@ -28,6 +28,7 @@ st.write(
     "表の領域(表頭・種名の列・組成部)を検出し，**行と列はアルゴリズムで**決めます．"
     "できた格子を重ね描きで確かめてください．"
 )
+_shared.nav("2_grid")
 
 up = st.file_uploader("表の画像か PDF", type=["png", "jpg", "jpeg", "pdf"])
 use_sample = st.checkbox("見本の画像を使う", value=up is None)

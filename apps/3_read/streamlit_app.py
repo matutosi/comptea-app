@@ -29,6 +29,7 @@ st.write(
     "読めなかったセルは字種を絞って読み直し，値にならないものは "
     "`Need Check` として残します．**表頭の項目**も表にして出します．"
 )
+_shared.nav("3_read")
 
 use_sample = st.checkbox("見本の画像・データを使う", value=True,
                          help="2 を通さずに，この場で試せます")
