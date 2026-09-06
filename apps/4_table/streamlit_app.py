@@ -23,14 +23,10 @@ importlib.reload(_shared)
 
 from comptea import pipeline            # noqa: E402
 
-st.set_page_config(page_title="comptea 4 組み上げ", layout="wide")
-st.title("4. 縦持ちに組んで検査する")
-st.write(
+_shared.start("4_table", "組み上げ",
     "読んだセルを縦持ちの表に組みます(1 行 = 1 地点 × 1 種)．"
     "地点数・重複・被度の形を検査し，引っかかったものを知らせます．"
-    "**表頭の項目**も 1 行 = 1 地点の表にします．"
-)
-_shared.nav("4_table")
+    "**表頭の項目**も 1 行 = 1 地点の表にします．")
 
 use_sample = st.checkbox("見本のデータを使う", value=True,
                          help="2・3 を通さずに，この場で試せます")
@@ -40,24 +36,12 @@ if use_sample:
 else:
     up = st.file_uploader("3 の結果 (read.zip か ocred.csv)", type=["zip", "csv"])
 if up is None:
-    st.info("3 で受け取った zip を選んでください．")
-    _shared.footer()
-    st.stop()
+    _shared.stop_with("3 で受け取った zip を選んでください．")
 
 import pandas as pd                              # noqa: E402
 
-work = tempfile.mkdtemp(prefix="comptea_")
-wd = os.path.join(work, "out")
-os.makedirs(wd, exist_ok=True)
-put = _shared.unzip_into(up, wd)
-p_ocr = os.path.join(wd, "ocred.csv")
-if not os.path.isfile(p_ocr):
-    csvs = [n for n in put if n.lower().endswith(".csv")]
-    if not csvs:
-        st.error("`ocred.csv` が見つかりません．3 の zip を渡してください．")
-        _shared.footer()
-        st.stop()
-    os.replace(os.path.join(wd, csvs[0]), p_ocr)
+work, wd = _shared.workdir()
+p_ocr = _shared.take_zip(up, wd, "ocred.csv", "3 の zip を渡してください．")
 st.caption(f"読み取り: {len(pd.read_csv(p_ocr))} セル")
 
 sig = _shared.upload_sig(up)
@@ -68,10 +52,7 @@ if st.button("組み上げる", type="primary"):
         _, log = pipeline.run("table", [wd])
     p_long = os.path.join(wd, "comp_table_long.csv")
     if not os.path.isfile(p_long):
-        st.error("組み上げに失敗しました")
-        st.code(log[-3000:])
-        _shared.footer()
-        st.stop()
+        _shared.fail_with("組み上げに失敗しました", log)
     p_plot = os.path.join(wd, "plot_table.csv")
     p_chk = os.path.join(wd, "checks.txt")
     # **中身を憶える**．作業ディレクトリは再実行のたびに作り直されるので，
@@ -99,10 +80,7 @@ if res:
         st.subheader(f"表頭 ({len(res['plot'])} 地点)")
         st.dataframe(res["plot"], use_container_width=True)
 
-    if res["zip"]:
-        st.download_button("結果をまとめて受け取る (zip)", res["zip"],
-                           file_name="table.zip", mime="application/zip",
-                           type="primary")
+    _shared.offer(res["zip"], "table.zip")
     if res["checks"]:
         with st.expander("検査の結果", expanded=True):
             st.text(res["checks"])

@@ -23,14 +23,10 @@ importlib.reload(_shared)
 
 from comptea import pipeline            # noqa: E402
 
-st.set_page_config(page_title="comptea 3 読み取り", layout="wide")
-st.title("3. セルを読む")
-st.write(
+_shared.start("3_read", "読み取り",
     "格子のセルを 1 つずつ読み，被度・種名・階層を補正します．"
     "読めなかったセルは字種を絞って読み直し，値にならないものは "
-    "`Need Check` として残します．**表頭の項目**も表にして出します．"
-)
-_shared.nav("3_read")
+    "`Need Check` として残します．**表頭の項目**も表にして出します．")
 
 use_sample = st.checkbox("見本の画像・データを使う", value=True,
                          help="2 を通さずに，この場で試せます")
@@ -45,36 +41,22 @@ else:
     loc_up = col2.file_uploader("2 の結果 (grid.zip か located.csv)",
                                 type=["zip", "csv"])
 if img_up is None or loc_up is None:
-    st.info("2 で受け取った zip と，同じ画像を選んでください．")
-    _shared.footer()
-    st.stop()
+    _shared.stop_with("2 で受け取った zip と，同じ画像を選んでください．")
 
 from PIL import Image                            # noqa: E402
 import pandas as pd                              # noqa: E402
 
 Image.MAX_IMAGE_PIXELS = None
-work = tempfile.mkdtemp(prefix="comptea_")
-wd = os.path.join(work, "out")
-os.makedirs(wd, exist_ok=True)
+work, wd = _shared.workdir()
 src = os.path.join(work, img_up.name)
 with open(src, "wb") as f:
     f.write(img_up.getbuffer())
 msg = _shared.too_big(Image.open(src))
 if msg:
-    st.error(msg)
-    _shared.footer()
-    st.stop()
+    _shared.fail_with(msg)
 
-put = _shared.unzip_into(loc_up, wd)
-loc_path = os.path.join(wd, "located.csv")
-if not os.path.isfile(loc_path):
-    # CSV を 1 枚だけ渡された場合は，その名前を located.csv にする
-    csvs = [n for n in put if n.lower().endswith(".csv")]
-    if not csvs:
-        st.error("`located.csv` が見つかりません．2 の zip を渡してください．")
-        _shared.footer()
-        st.stop()
-    os.replace(os.path.join(wd, csvs[0]), loc_path)
+loc_path = _shared.take_zip(loc_up, wd, "located.csv",
+                            "2 の zip を渡してください．")
 
 # 画像の場所は，この場で置いた写しに読み替える
 loc = pd.read_csv(loc_path)
@@ -103,10 +85,7 @@ if st.button("読む", type="primary"):
         _, log = pipeline.run("read", [wd, "--reader", "easyocr"])
     p_ocr = os.path.join(wd, "ocred.csv")
     if not os.path.isfile(p_ocr):
-        st.error("読み取りに失敗しました")
-        st.code(log[-3000:])
-        _shared.footer()
-        st.stop()
+        _shared.fail_with("読み取りに失敗しました", log)
     d = pd.read_csv(p_ocr)
 
     # **表頭も表にして出す**．組み上げを待たずに，調査地・面積・海抜高を見たい
@@ -147,9 +126,6 @@ if res:
 
     st.subheader("読んだセル (先頭 30)")
     st.dataframe(d.head(30), use_container_width=True)
-    if res["zip"]:
-        st.download_button("結果をまとめて受け取る (zip)", res["zip"],
-                           file_name="read.zip", mime="application/zip",
-                           type="primary")
-        st.caption("この zip をそのまま「4. 縦持ちに組んで検査する」に渡してください．")
+    _shared.offer(res["zip"], "read.zip",
+                  "この zip をそのまま「4. 縦持ちに組んで検査する」に渡してください．")
 _shared.footer()

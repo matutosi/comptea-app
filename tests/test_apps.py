@@ -20,6 +20,20 @@ def _path(key):
     return os.path.join(conftest.ROOT, "apps", key, "streamlit_app.py")
 
 
+def test_見出しは工程の一覧と揃う():
+    """見出しは `_shared.APPS` の 1 か所で決める(2026-09-07)
+
+    共通の型に寄せたとき，見出しがタブの短い名前(「1. 切り分け」)に
+    変わってしまった．一覧と同じ文言が出ることを押さえる．
+    """
+    import _shared
+
+    for num, title, key, _ in _shared.APPS:
+        at = AppTest.from_file(_path(key), default_timeout=120)
+        at.run()
+        assert at.title[0].value == f"{num}. {title}"
+
+
 @pytest.mark.parametrize("key", APPS)
 def test_画面が出るところまで走る(key):
     """見本を使う既定のまま，例外を出さずに描き切れること

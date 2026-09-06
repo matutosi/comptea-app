@@ -198,6 +198,90 @@ def nav(current):
             )
 
 
+# --- 4 つのアプリに共通の型 ---------------------------------------------
+# 「頭を出す → 受け取る → 展開する → 無ければ知らせる → 走らせる →
+#  憶える → zip を渡す」という並びは 4 つとも同じ．写しておくと，
+# 直しが 4 か所に散る(2026-09-06 の不具合は 4 つ全部に同じ形で入っていた)
+
+
+def start(key, tab, lead):
+    """見出し・全体像・ほかの工程への案内までを出す
+
+    見出しは `APPS` の 1 か所で決める(以前は各アプリに書いてあり，
+    寄せるときに短い名前へ変わってしまった)．`tab` はブラウザのタブの名前．
+    """
+    import streamlit as st
+
+    num, title = next((n, t) for n, t, k, _ in APPS if k == key)
+    st.set_page_config(page_title=f"comptea {num} {tab}", layout="wide")
+    st.title(f"{num}. {title}")
+    st.write(lead)
+    nav(key)
+
+
+def stop_with(msg):
+    """知らせて，但し書きを出して止める"""
+    import streamlit as st
+
+    st.info(msg)
+    footer()
+    st.stop()
+
+
+def fail_with(msg, log=None):
+    """できなかったことを知らせて止める(理由の末尾を添える)"""
+    import streamlit as st
+
+    st.error(msg)
+    if log:
+        st.code(log[-3000:])
+    footer()
+    st.stop()
+
+
+def workdir():
+    """この実行のための置き場を作る(再実行のたびに新しく作られる)"""
+    import os
+    import tempfile
+
+    work = tempfile.mkdtemp(prefix="comptea_")
+    wd = os.path.join(work, "out")
+    os.makedirs(wd, exist_ok=True)
+    return work, wd
+
+
+def take_zip(upload, wd, want, hint):
+    """受け取った zip(か CSV 1 枚)を展開し，要るファイルの場所を返す
+
+    CSV を 1 枚だけ渡されたときは，その名前を `want` に読み替える
+    (工程の側は決まった名前しか見ない)．
+    """
+    import os
+
+    put = unzip_into(upload, wd)
+    path = os.path.join(wd, want)
+    if os.path.isfile(path):
+        return path
+    csvs = [n for n in put if n.lower().endswith(".csv")]
+    if not csvs:
+        fail_with(f"`{want}` が見つかりません．{hint}")
+    os.replace(os.path.join(wd, csvs[0]), path)
+    return path
+
+
+def offer(zip_bytes, file_name, caption=None):
+    """結果の受け取りを出す(中身が無ければ何もしない)"""
+    import streamlit as st
+
+    if not zip_bytes:
+        return
+    st.download_button("結果をまとめて受け取る (zip)", zip_bytes,
+                       file_name=file_name, mime="application/zip",
+                       type="primary")
+    if caption:
+        st.caption(caption)
+
+
 def footer():
     """どのアプリにも出す但し書き"""
     import streamlit as st

@@ -21,28 +21,22 @@ import _shared                                  # noqa: E402
 # 更新した直後に古い `_shared` が残り，足したばかりのものが無いと言われる
 importlib.reload(_shared)
 
-st.set_page_config(page_title="comptea 1 切り分け", layout="wide")
-st.title("1. 折り込みを表ごとに切る")
-st.write(
+_shared.start("1_split", "切り分け",
     "A0 級の折り込みには，表が 2-5 個並んでいます．"
     "そのまま検出にかけると，別々の表の地点が 1 つの番号体系に混ざります．"
     "**空白の帯**で切り分けて，表ごとの画像にします．"
-    "**PDF も受け取れます**(ページごとに PNG へ直してから切ります)．"
-)
-_shared.nav("1_split")
+    "**PDF も受け取れます**(ページごとに PNG へ直してから切ります)．")
 
 up = st.file_uploader("折り込みの画像か PDF", type=["png", "jpg", "jpeg", "pdf"])
 if up is None:
-    st.info("画像か PDF を選んでください．")
-    _shared.footer()
-    st.stop()
+    _shared.stop_with("画像か PDF を選んでください．")
 
 import tempfile                                  # noqa: E402
 
 from PIL import Image                            # noqa: E402
 
 Image.MAX_IMAGE_PIXELS = None
-work = tempfile.mkdtemp(prefix="comptea_")
+work, _wd = _shared.workdir()
 src = os.path.join(work, up.name)
 with open(src, "wb") as f:
     f.write(up.getbuffer())
