@@ -13,7 +13,7 @@ eval_grid.py が「どれだけ正しく取れたか」を測るのに対し，
 **本文や写真だけのページ(組成表でないページ)は数えない**．
 手元の資料には隣のページの続きだけが載ったページが混ざっていて，
 これを落ちた画像に数えると実力を過小に見せる(2026-09-01)．
-判定は locate.looks_like_no_table() を見る．
+判定は filters.looks_like_no_table() を見る．
 """
 import argparse
 import sys
@@ -45,6 +45,7 @@ def parse_args():
 
 def scan_one(image, args, eval_grid, locate):
     """1枚ぶんの結果を1行にまとめる"""
+    from comptea import filters
     rec = {'image': image.name, 'blocks': 0, 'blocks_no_comp': 0,
            'comp': 0, 'rows': 0, 'cols': 0, 'warnings': 0,
            'error': '', 'no_table': False}
@@ -55,10 +56,10 @@ def scan_one(image, args, eval_grid, locate):
         return rec
     rec['warnings'] = len(warns)
     if df is None or len(df) == 0:
-        # 検出が0件．表のないページとみなす(locate.looks_like_no_table)
+        # 検出が0件．表のないページとみなす(filters.looks_like_no_table)
         rec['no_table'] = True
         return rec
-    if locate.looks_like_no_table(df):
+    if filters.looks_like_no_table(df):
         rec['no_table'] = True
         return rec
     ranges, empty = eval_grid.block_ranges(df)
@@ -80,6 +81,7 @@ def main():
             stream.reconfigure(encoding='utf-8')
     import eval_grid
     from comptea import locate
+    from comptea import filters
 
     d = Path(args.dir)
     images = sorted(p for p in d.iterdir()

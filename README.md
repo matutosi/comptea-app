@@ -116,6 +116,7 @@ pytest --runslow      # 検出と読み取りも実際に走らせる(30 秒ほ�
 | `tests/test_ink.py` | 黒画素から測る道具 (画数・罫線・破線) |
 | `tests/test_geometry.py` | 等間隔の格子・境が字を割る回数 |
 | `tests/test_checks.py` | 格子の検査 4 つ (鳴るべきときに鳴るか) |
+| `tests/test_wiring.py` | モジュールをまたぐ参照が実在するか (移し忘れを捕まえる) |
 | `tests/test_grid_parts.py` | 短冊・種名の列・階層の列 (組み立てた紙面で) |
 | `tests/test_apps.py` | Streamlit の 4 アプリを画面まで走らせる |
 | `tests/test_shared.py` | 工程のあいだの受け渡し (zip・見本・検出の返り) |

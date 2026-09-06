@@ -207,6 +207,8 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
     """
     from comptea import draw_rect
     from comptea import locate
+    from comptea import filters
+    from comptea import blocks
     from PIL import Image
 
     work.mkdir(parents=True, exist_ok=True)
@@ -217,7 +219,7 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
         (work / 'table.txt').write_text(f'{table_no}/{n_tables}', encoding='utf-8')
     df_det.to_csv(work / 'detect.csv', index=False)
 
-    if locate.looks_like_fragment(df_det):
+    if filters.looks_like_fragment(df_det):
         # 表頭も種名の列も無い．切り分けで残った表題・凡例だけの帯など．
         # 進めると数行 x 2 列の格子ができ，表が1つ多く数えられる
         raise TableFailed(
@@ -251,7 +253,7 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
     warnings = stray_warn + list(df_loc.attrs.get('warnings', []))
     if len(df_loc) == 0:
         raise TableFailed('格子を作れなかった．下の警告を読む', warnings)
-    if locate.looks_like_no_table(df_loc):
+    if filters.looks_like_no_table(df_loc):
         # 表のないページに枠がいくつか出ただけ．そのまま進むと
         # 空の段ができ，中身の無い表が黙って下流へ流れる
         raise TableFailed(
@@ -451,6 +453,7 @@ def deskew_page(image, df_det, args, by_class):
     """
     from comptea import deskew
     from comptea import locate
+    from comptea import blocks
     from comptea import table_split
 
     cols0 = df_det[df_det['obj_name'] == 'col']
@@ -465,7 +468,7 @@ def deskew_page(image, df_det, args, by_class):
     # −2.3°)，親の回転で部分画像の切り出しも変わる．部分画像の子の実行
     # (`--no-resplit`)でも測らない
     single0 = (not args.no_resplit
-               and len(locate.split_tables(df_det)[0]) == 1
+               and len(blocks.split_tables(df_det)[0]) == 1
                and len(table_split.split_side_by_side(df_det)[0]) == 1)
     if not (single0 and len(cols0) >= 3 and len(pitch_src) >= 3):
         return image, df_det, []
@@ -521,11 +524,13 @@ def split_page(image, df_det, args, base):
         ([(表の番号, 検出), ...], 元の表の数, 別に片づいた作業ディレクトリ, 警告)
     """
     from comptea import locate
+    from comptea import blocks
+    from comptea import filters
     from comptea import table_split
 
     # 種群を覆った偽の表頭は，表を分ける前に捨てる(locate_items も同じ選別をする)
-    df_det, n_heads = locate.drop_unsupported_headers(df_det)
-    tables, warnings = locate.split_tables(df_det)
+    df_det, n_heads = filters.drop_unsupported_headers(df_det)
+    tables, warnings = blocks.split_tables(df_det)
     warnings = list(warnings or [])
     if n_heads:
         warnings.append(
@@ -597,6 +602,7 @@ def build_tables(image, tables, base, args, n_orig, by_class, table_warnings):
         (できた作業ディレクトリ, できなかった (番号, 理由))
     """
     from comptea import locate
+    from comptea import blocks
 
     retry = None   # 行の閾値を下げた検出(要るときだけ1度作る)
     done, failed = [], []
@@ -614,7 +620,7 @@ def build_tables(image, tables, base, args, n_orig, by_class, table_warnings):
                     retry = detect(image, args.weights, args.conf / 100,
                                    {**by_class, 'row': ROW_RETRY_CONF / 100},
                                    args.imgsz)
-                    retry = locate.split_tables(retry)[0]
+                    retry = blocks.split_tables(retry)[0]
                 df_one = retry[i - 1] if len(retry) == n_orig else None
             else:
                 df_one = None

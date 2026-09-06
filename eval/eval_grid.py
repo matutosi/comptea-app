@@ -188,6 +188,7 @@ def match(truth, found, thresh):
 
 def run_one(image, args):
     from comptea import locate
+    from comptea import blocks
     from comptea import detect as detect_mod
     from ultralytics import YOLO
 
@@ -203,7 +204,7 @@ def run_one(image, args):
     df_det['model'] = args.weights
     # 1ページに表が2つ以上あるなら，表ごとに格子を作る(run_pipeline.py と同じ)．
     # 正解のラベルはページ単位なので，段の番号をずらして繋げてから比べる
-    tables, warns = locate.split_tables(df_det)
+    tables, warns = blocks.split_tables(df_det)
     parts, shift = [], 0
     from comptea import table_split
     for df_one in tables:

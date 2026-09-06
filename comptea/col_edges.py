@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from . import ink
+from .axes import _edge_ink
 
 
 GAP_MIN_PX = 20         # 隙間とみなす最小の幅(300 dpi のスキャンで測った)
@@ -201,8 +202,8 @@ def fix_column_edges(img, df_loc, gain=EDGE_INK_GAIN, min_cols=EDGE_SWAP_MIN_COL
     lat = sorted({x1, *[float(v) for v in lat[1:-1]], x2})
     if len(lat) - 1 < (len(edges) - 1) * min_keep:
         return df_loc, []
-    cur = locate._edge_ink(edges, dark, y1, y2)
-    new = locate._edge_ink(lat, dark, y1, y2)
+    cur = _edge_ink(edges, dark, y1, y2)
+    new = _edge_ink(lat, dark, y1, y2)
     if cur is None or new is None or new > cur * gain:
         return df_loc, []
 
