@@ -78,6 +78,9 @@ if msg:
     st.stop()
 st.caption(f"画像: {img.size[0]} x {img.size[1]} px")
 
+sig = _shared.upload_sig(up) + (os.path.basename(src),)
+res = _shared.cached("2_grid", sig)
+
 if st.button("格子を作る", type="primary"):
     cli = os.path.join(_shared.ROOT, "cli", "run_pipeline.py")
     wd = os.path.join(work, "out")
@@ -88,21 +91,31 @@ if st.button("格子を作る", type="primary"):
             cwd=_shared.CORE)
     log = (r.stdout or "") + (r.stderr or "")
     overlay = os.path.join(wd, "overlay.png")
-    if os.path.isfile(overlay):
-        st.image(overlay, caption="格子の重ね描き", use_container_width=True)
-    p = os.path.join(wd, "summary.txt")
-    if os.path.isfile(p):
-        with st.expander("まとめ", expanded=True):
-            st.text(open(p, encoding="utf-8").read())
-    # **次の工程へは zip で渡す**．読み取りには格子と検出の両方が要る
-    z = _shared.zip_files(wd, ["located.csv", "detect.csv", "summary.txt",
-                               "overlay.png"])
-    if z:
-        st.download_button("結果をまとめて受け取る (zip)", z,
-                           file_name="grid.zip", mime="application/zip",
-                           type="primary")
-        st.caption("この zip をそのまま「3. セルを読む」に渡してください．")
     if not os.path.isfile(overlay):
         st.error("格子が作れませんでした")
         st.code(log[-3000:])
+        _shared.footer()
+        st.stop()
+    p_sum = os.path.join(wd, "summary.txt")
+    # **中身を憶える**．作業ディレクトリは再実行のたびに作り直される
+    res = {
+        "overlay": open(overlay, "rb").read(),
+        "summary": (open(p_sum, encoding="utf-8").read()
+                    if os.path.isfile(p_sum) else ""),
+        # 次の工程へは zip で渡す．読み取りには格子と検出の両方が要る
+        "zip": _shared.zip_files(wd, ["located.csv", "detect.csv", "summary.txt",
+                                      "overlay.png"]),
+    }
+    _shared.remember("2_grid", sig, res)
+
+if res:
+    st.image(res["overlay"], caption="格子の重ね描き", use_container_width=True)
+    if res["summary"]:
+        with st.expander("まとめ", expanded=True):
+            st.text(res["summary"])
+    if res["zip"]:
+        st.download_button("結果をまとめて受け取る (zip)", res["zip"],
+                           file_name="grid.zip", mime="application/zip",
+                           type="primary")
+        st.caption("この zip をそのまま「3. セルを読む」に渡してください．")
 _shared.footer()

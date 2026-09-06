@@ -84,24 +84,42 @@ if big:
     _shared.footer()
     st.stop()
 
-buf = io.BytesIO()
-total = 0
-with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-    for name, img, path in pages:
-        with st.spinner(f"{name}: 空白の帯を探しています"):
-            boxes = split_sheet.find_tables(ink.binarize(img))
-        st.write(f"**{name}** — {len(boxes)} 個の表に分かれました")
-        cols = st.columns(min(3, max(1, len(boxes))))
-        for i, b in enumerate(boxes, 1):
-            part = img.crop(tuple(int(v) for v in b))
+# **切り分けは 1 度だけ**．ここはボタンの中に無いので，前は再実行のたびに
+# やり直していた(A0 の紙面では毎回数十秒．受け取りのボタンを押しても起きる)
+sig = _shared.upload_sig(up)
+res = _shared.cached("1_split", sig)
+
+if res is None:
+    buf = io.BytesIO()
+    cuts = []
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, img, path in pages:
+            with st.spinner(f"{name}: 空白の帯を探しています"):
+                boxes = split_sheet.find_tables(ink.binarize(img))
+            names = []
+            for i, b in enumerate(boxes, 1):
+                part = img.crop(tuple(int(v) for v in b)).convert("L")
+                q = io.BytesIO()
+                part.save(q, format="PNG")
+                fn = f"{name}_p{i}.png"
+                z.writestr(fn, q.getvalue())
+                names.append((fn, part.size))
+            cuts.append((name, names))
+    res = {"zip": buf.getvalue(), "cuts": cuts,
+           "total": sum(len(n) for _, n in cuts)}
+    _shared.remember("1_split", sig, res)
+
+# 表示は憶えた zip から読み出す(切り出した画像を二重に持たない)
+with zipfile.ZipFile(io.BytesIO(res["zip"])) as z:
+    for name, names in res["cuts"]:
+        st.write(f"**{name}** — {len(names)} 個の表に分かれました")
+        cols = st.columns(min(3, max(1, len(names))))
+        for i, (fn, size) in enumerate(names, 1):
             with cols[(i - 1) % len(cols)]:
-                st.image(part, caption=f"{i}: {part.size[0]} x {part.size[1]} px",
+                st.image(z.read(fn), caption=f"{i}: {size[0]} x {size[1]} px",
                          use_container_width=True)
-            p = io.BytesIO()
-            part.convert("L").save(p, format="PNG")
-            z.writestr(f"{name}_p{i}.png", p.getvalue())
-            total += 1
-st.download_button(f"表ごとの画像を受け取る (zip・{total} 枚)", buf.getvalue(),
+
+st.download_button(f"表ごとの画像を受け取る (zip・{res['total']} 枚)", res["zip"],
                    file_name=f"{stem}_tables.zip", mime="application/zip",
                    type="primary")
 st.caption("この中の 1 枚を「2. 検出して格子を作る」に渡してください．")

@@ -105,3 +105,33 @@ def test_検出の返りをpandasにそろえる():
     assert isinstance(got, pd.DataFrame) and got.at[0, "name"] == "row"
     same = pd.DataFrame([{"name": "col"}])
     assert detect.to_pandas(same) is same
+
+
+# --- 結果を憶えておく ---------------------------------------------------
+
+def test_入力が同じなら憶えた結果を返す(monkeypatch):
+    """**Streamlit はどのウィジェットを触っても全体を走らせ直す**
+
+    重い処理をボタンの中だけに置くと，次の再実行で結果が消える(2026-09-06)．
+    """
+    import streamlit as st
+
+    state = {}
+    monkeypatch.setattr(st, "session_state", state, raising=False)
+    assert _shared.cached("k", ("a", 1)) is None
+    _shared.remember("k", ("a", 1), {"n": 3})
+    assert _shared.cached("k", ("a", 1)) == {"n": 3}
+    # 入力が変われば捨てる
+    assert _shared.cached("k", ("b", 2)) is None
+
+
+def test_入力の印は名前と大きさで決まる():
+    a = _shared.LocalFile(_shared.SAMPLE_GRID)
+    b = _shared.LocalFile(_shared.SAMPLE_READ)
+    assert _shared.upload_sig(a) == _shared.upload_sig(a)
+    assert _shared.upload_sig(a) != _shared.upload_sig(b)
+    assert _shared.upload_sig(None) == (None,)
+    # 印を取っても，中身は先頭から読める(`zipfile` に渡せる)
+    _shared.upload_sig(a)
+    with zipfile.ZipFile(a) as z:
+        assert z.namelist()

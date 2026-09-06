@@ -72,3 +72,45 @@ def test_共通の部品を読み直している(key):
     """`importlib.reload(_shared)` が無いと，更新した直後に古いものが残る"""
     src = open(_path(key), encoding="utf-8").read()
     assert "importlib.reload(_shared)" in src
+
+
+def test_再実行しても結果が消えない():
+    """受け取りのボタンを押すと再実行が起きる(2026-09-06 に見つけた不具合)
+
+    重い処理を `if st.button(...)` の中だけに置いていたので，押した直後に
+    画面から結果が消えていた．いちばん軽い 4 で，代表して確かめる．
+    """
+    at = AppTest.from_file(_path("4_table"), default_timeout=300).run()
+    at.button[0].click().run()
+    assert len(at.dataframe) == 2
+    before = [m.value for m in at.metric]
+    assert before
+
+    at.checkbox[0].set_value(True).run()       # 別のウィジェットを触る = 再実行
+    assert [m.value for m in at.metric] == before
+    assert len(at.dataframe) == 2
+
+
+def test_切り分けは1度だけ走る():
+    """1 はボタンが無いので，前は再実行のたびに切り直していた
+
+    `file_uploader` は `AppTest` から入れられないので，差し替えて渡す．
+    """
+    script = f'''
+import sys
+sys.path.insert(0, r"{os.path.join(conftest.ROOT, 'apps')}")
+import streamlit as st
+import _shared
+st.file_uploader = lambda *a, **k: _shared.LocalFile(r"{conftest.SAMPLE}")
+path = r"{_path('1_split')}"
+exec(compile(open(path, encoding="utf-8").read(), path, "exec"),
+     {{"__name__": "__main__", "__file__": path}})
+'''
+    at = AppTest.from_string(script, default_timeout=300).run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert "1_split" in at.session_state          # 結果を憶えている
+    kept = at.session_state["1_split"]["value"]
+    assert kept["total"] >= 1 and kept["zip"]
+
+    at.run()                                      # 再実行しても作り直さない
+    assert at.session_state["1_split"]["value"] is kept

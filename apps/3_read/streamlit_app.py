@@ -92,45 +92,65 @@ else:
         det_path, index=False, encoding="utf-8-sig")
 st.caption(f"格子: {len(loc)} セル")
 
+sig = _shared.upload_sig(img_up, loc_up)
+res = _shared.cached("3_read", sig)
+
 if st.button("読む", type="primary"):
     cli = os.path.join(_shared.ROOT, "cli", "run_ocr.py")
     with st.spinner("読んでいます(初回はモデルの取得で数分かかります)"):
         r = subprocess.run([sys.executable, cli, wd, "--reader", "easyocr"],
                            capture_output=True, text=True, encoding="utf-8",
                            errors="replace", cwd=_shared.CORE)
-    p = os.path.join(wd, "ocred.csv")
-    if not os.path.isfile(p):
+    p_ocr = os.path.join(wd, "ocred.csv")
+    if not os.path.isfile(p_ocr):
         st.error("読み取りに失敗しました")
         st.code(((r.stdout or "") + (r.stderr or ""))[-3000:])
         _shared.footer()
         st.stop()
-    d = pd.read_csv(p)
-    ng = int((d["status"] == "Need Check").sum()) if "status" in d else 0
-    st.success(f"{len(d)} セルを読みました(Need Check {ng} 件)")
+    d = pd.read_csv(p_ocr)
 
     # **表頭も表にして出す**．組み上げを待たずに，調査地・面積・海抜高を見たい
     sys.path.insert(0, _shared.CORE)
     import plot_table                            # noqa: E402
 
+    warn = None
     try:
         df_plot = plot_table.plot_table(d)
     except Exception as e:                       # noqa: BLE001
         df_plot = pd.DataFrame()
-        st.warning(f"表頭を表にできませんでした: {e}")
+        warn = f"表頭を表にできませんでした: {e}"
+    plot_warnings = list(df_plot.attrs.get("warnings", [])) if len(df_plot) else []
     if len(df_plot):
         df_plot.to_csv(os.path.join(wd, "plot_table.csv"), index=False,
                        encoding="utf-8-sig")
-        st.subheader(f"表頭 ({len(df_plot)} 地点)")
-        st.dataframe(df_plot, use_container_width=True)
-        for w in df_plot.attrs.get("warnings", []):
+    # **中身を憶える**．読み取りは数分かかるので，再実行でやり直させない
+    res = {
+        "ocred": d,
+        "plot": df_plot if len(df_plot) else None,
+        "plot_warnings": plot_warnings,
+        "warn": warn,
+        "zip": _shared.zip_files(wd, ["ocred.csv", "plot_table.csv", "review.tsv",
+                                      "located.csv", "detect.csv"]),
+    }
+    _shared.remember("3_read", sig, res)
+
+if res:
+    d = res["ocred"]
+    ng = int((d["status"] == "Need Check").sum()) if "status" in d else 0
+    st.success(f"{len(d)} セルを読みました(Need Check {ng} 件)")
+    if res["warn"]:
+        st.warning(res["warn"])
+    if res["plot"] is not None:
+        st.subheader(f"表頭 ({len(res['plot'])} 地点)")
+        st.dataframe(res["plot"], use_container_width=True)
+        for w in res["plot_warnings"]:
             st.caption(f"! {w}")
 
     st.subheader("読んだセル (先頭 30)")
     st.dataframe(d.head(30), use_container_width=True)
-    z = _shared.zip_files(wd, ["ocred.csv", "plot_table.csv", "review.tsv",
-                               "located.csv", "detect.csv"])
-    st.download_button("結果をまとめて受け取る (zip)", z,
-                       file_name="read.zip", mime="application/zip",
-                       type="primary")
-    st.caption("この zip をそのまま「4. 縦持ちに組んで検査する」に渡してください．")
+    if res["zip"]:
+        st.download_button("結果をまとめて受け取る (zip)", res["zip"],
+                           file_name="read.zip", mime="application/zip",
+                           type="primary")
+        st.caption("この zip をそのまま「4. 縦持ちに組んで検査する」に渡してください．")
 _shared.footer()

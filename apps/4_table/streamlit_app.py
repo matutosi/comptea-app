@@ -59,19 +59,37 @@ if not os.path.isfile(p_ocr):
     os.replace(os.path.join(wd, csvs[0]), p_ocr)
 st.caption(f"読み取り: {len(pd.read_csv(p_ocr))} セル")
 
+sig = _shared.upload_sig(up)
+res = _shared.cached("4_table", sig)
+
 if st.button("組み上げる", type="primary"):
     cli = os.path.join(_shared.ROOT, "cli", "build_table.py")
     with st.spinner("組み上げています"):
         r = subprocess.run([sys.executable, cli, wd], capture_output=True,
                            text=True, encoding="utf-8", errors="replace",
                            cwd=_shared.CORE)
-    p = os.path.join(wd, "comp_table_long.csv")
-    if not os.path.isfile(p):
+    p_long = os.path.join(wd, "comp_table_long.csv")
+    if not os.path.isfile(p_long):
         st.error("組み上げに失敗しました")
         st.code(((r.stdout or "") + (r.stderr or ""))[-3000:])
         _shared.footer()
         st.stop()
-    lg = pd.read_csv(p)
+    p_plot = os.path.join(wd, "plot_table.csv")
+    p_chk = os.path.join(wd, "checks.txt")
+    # **中身を憶える**．作業ディレクトリは再実行のたびに作り直されるので，
+    # 場所ではなく中身を預ける
+    res = {
+        "long": pd.read_csv(p_long),
+        "plot": pd.read_csv(p_plot) if os.path.isfile(p_plot) else None,
+        "checks": (open(p_chk, encoding="utf-8").read()
+                   if os.path.isfile(p_chk) else ""),
+        "zip": _shared.zip_files(wd, ["comp_table_long.csv", "comp_table_wide.csv",
+                                      "plot_table.csv", "checks.txt", "ocred.csv"]),
+    }
+    _shared.remember("4_table", sig, res)
+
+if res:
+    lg = res["long"]
     c1, c2, c3 = st.columns(3)
     c1.metric("縦持ちの行", len(lg))
     c2.metric("OK", int((lg["status"] == "OK").sum()))
@@ -79,19 +97,15 @@ if st.button("組み上げる", type="primary"):
     st.subheader("縦持ちの表 (先頭 50)")
     st.dataframe(lg.head(50), use_container_width=True)
 
-    q = os.path.join(wd, "plot_table.csv")
-    if os.path.isfile(q):
-        df_plot = pd.read_csv(q)
-        st.subheader(f"表頭 ({len(df_plot)} 地点)")
-        st.dataframe(df_plot, use_container_width=True)
+    if res["plot"] is not None:
+        st.subheader(f"表頭 ({len(res['plot'])} 地点)")
+        st.dataframe(res["plot"], use_container_width=True)
 
-    z = _shared.zip_files(wd, ["comp_table_long.csv", "comp_table_wide.csv",
-                               "plot_table.csv", "checks.txt", "ocred.csv"])
-    st.download_button("結果をまとめて受け取る (zip)", z,
-                       file_name="table.zip", mime="application/zip",
-                       type="primary")
-    c = os.path.join(wd, "checks.txt")
-    if os.path.isfile(c):
+    if res["zip"]:
+        st.download_button("結果をまとめて受け取る (zip)", res["zip"],
+                           file_name="table.zip", mime="application/zip",
+                           type="primary")
+    if res["checks"]:
         with st.expander("検査の結果", expanded=True):
-            st.text(open(c, encoding="utf-8").read())
+            st.text(res["checks"])
 _shared.footer()

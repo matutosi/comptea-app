@@ -101,6 +101,40 @@ def unzip_into(upload, work):
     return [name]
 
 
+# --- 結果を憶えておく ---------------------------------------------------
+# **Streamlit はどのウィジェットを触っても全体を走らせ直す**(2026-09-06)．
+# 重い処理を `if st.button(...)` の中だけに置くと，次の再実行では条件が偽に
+# なり，出したはずの表も受け取りのボタンも消える(受け取りのボタンを押した
+# ときにも再実行が起きるので，押した直後に画面から結果が消えていた)．
+# 結果は `st.session_state` に預け，**入力が変わったときだけ捨てる**．
+
+
+def upload_sig(*ups):
+    """入力が変わったかを見分ける印(名前と大きさ)"""
+    out = []
+    for u in ups:
+        if u is None:
+            out.append(None)
+        else:
+            out.append((getattr(u, "name", ""), len(u.getbuffer())))
+    return tuple(out)
+
+
+def cached(key, sig):
+    """憶えてある結果を返す(入力が変わっていれば None)"""
+    import streamlit as st
+
+    slot = st.session_state.get(key)
+    return slot["value"] if slot and slot["sig"] == sig else None
+
+
+def remember(key, sig, value):
+    """結果を憶える(次の再実行でも出せるように)"""
+    import streamlit as st
+
+    st.session_state[key] = {"sig": sig, "value": value}
+
+
 # 工程の一覧(番号・見出し・入口の名前・ひとこと)
 APPS = [
     ("1", "折り込みを表ごとに切る", "1_split",
