@@ -1,0 +1,3 @@
+# テストを走らせるのに要るもの(本体は requirements.txt)
+-r requirements.txt
+pytest>=8.0

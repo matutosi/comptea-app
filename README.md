@@ -78,6 +78,34 @@ share.streamlit.io に登録したあと，Secrets に次のように書いて�
 **大きな画像は扱えません** (切り分けは長辺 8000 px，ほかは 4000 px まで)．
 A0 の折り込みは CUI を使ってください．
 
+## テスト
+
+```bash
+pip install -r requirements-dev.txt
+pytest                # 実データの要らないもの(数秒)
+pytest --runslow      # 検出と読み取りも実際に走らせる(30 秒ほど)
+```
+
+**実データが無くても走ります**．辞書と見本 (`examples/`) だけで完結し，
+画像の要るものは印字を模した小さな配列を組み立てて確かめます．
+
+| ファイル | 見るもの |
+|:---|:---|
+| `tests/test_correct_text.py` | 被度・常在度・階層・表頭の値の補正 |
+| `tests/test_names.py` | 種名の辞書との突き合わせ |
+| `tests/test_comp_table.py` | 括弧付きのセルの読み分け・割れた値の繕い |
+| `tests/test_header.py` | 項目名の寄せ・文章形式の表頭・1 回出現種 |
+| `tests/test_ink.py` | 黒画素から測る道具 (画数・罫線・破線) |
+| `tests/test_geometry.py` | 等間隔の格子・境が字を割る回数 |
+| `tests/test_apps.py` | Streamlit の 4 アプリを画面まで走らせる |
+| `tests/test_shared.py` | 工程のあいだの受け渡し (zip・見本・検出の返り) |
+| `tests/test_pipeline.py` | 見本 1 枚の通し (`slow` は検出と読み取り) |
+
+歯止めにしているのは，**実物を見て決めた判断**です
+(`III(+-4)` を `III(1-4)` にしない，1 文字の読みは完全一致だけ採る，など)．
+どれも「黙って別の値になる」型で，通してみても気づけません．
+経緯は [docs/lessons.md](docs/lessons.md) にあります．
+
 ## 出力の形
 
 `comp_table_long.csv` は縦持ちで，1 行が 1 地点 × 1 種です．
