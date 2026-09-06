@@ -11,7 +11,7 @@
 画像を `imgsz=1280` で行っており，折り込みの表(最大 5137 x 11025)を
 そのまま入れると字が潰れて何も学べない．断片の切れ目は
 
-    横  種名の列 + 地点のかたまり(`split_wide.plan_strips()` と同じ考え)
+    横  種名の列 + 地点のかたまり(`strips.plan_strips()` と同じ考え)
     縦  行の境目(行を途中で割らない)
 
 に置く．`comp` は検出クラスではないのでラベルにしない
@@ -27,7 +27,7 @@ import pandas as pd
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import split_wide                               # noqa: E402
+import strips                               # noqa: E402
 
 Image.MAX_IMAGE_PIXELS = None
 
@@ -185,7 +185,7 @@ def clip_boxes(boxes, tile, name_x2, min_inside=MIN_INSIDE):
     """断片の中に入る箱だけを，断片の座標に直して返す
 
     `tile` は (table_x1, y1, x2, y2, chunk_x1)．種名の側と地点のかたまりを
-    横につないだ画像になるので，x は `split_wide._back()` の逆をたどる．
+    横につないだ画像になるので，x は `strips._back()` の逆をたどる．
     """
     tx1, ty1, cx2, ty2, cx1 = tile
     name_w = name_x2 - tx1
@@ -207,7 +207,7 @@ def clip_boxes(boxes, tile, name_x2, min_inside=MIN_INSIDE):
         # 続く行や列は同じ形で入っている)．
         # 見るのは**伸びていない向き**．そちらがはみ出していたら，
         # その箱は隣の断片のもの．
-        if label in split_wide.FULL_WIDTH:
+        if label in strips.FULL_WIDTH:
             if (d - c) / max(1.0, y2 - y1) < min_inside:
                 continue
         elif (b - a) / max(1.0, x2 - x1) < min_inside:
@@ -223,7 +223,7 @@ def write_tile(im, tile, boxes, dst_png, name_x2, labelme=True):
     別の拡張子が混ざると，何枚あるのか数えられなくなる．
     """
     tx1, ty1, cx2, ty2, cx1 = [int(v) for v in tile]
-    strip = split_wide.make_strip(im.crop((0, ty1, im.width, ty2)),
+    strip = strips.make_strip(im.crop((0, ty1, im.width, ty2)),
                                   tx1, int(name_x2), cx1, cx2)
     strip.save(dst_png)
     if not labelme:

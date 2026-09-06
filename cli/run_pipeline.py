@@ -223,10 +223,14 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
     # 表頭の外に散った項目行は，紙面全体の検出でも捨てる．残すと組成部の
     # 行が表頭の値として二重に切られ，表頭の帯が全高に広がって
     # 階層の列の判定(表頭が空)まで壊れる(s01115_18_p2．2026-09-04)
-    import split_wide
-    df_det, stray_warn = split_wide.drop_stray_plot_rows(df_det, heads=False)
+    import body_rows
+    import checks
+    import col_edges
+    import strips
+    import table_split
+    df_det, stray_warn = table_split.drop_stray_plot_rows(df_det, heads=False)
     # 表頭の中に出た種名の列は捨てる(段を 1 つ増やし，本体から和名が消える)
-    df_det, n_names = split_wide.drop_stray_name_cols(df_det)
+    df_det, n_names = table_split.drop_stray_name_cols(df_det)
     if n_names:
         stray_warn.append(
             f'表頭の中にあった種名の列の検出 {n_names} 本を捨てた'
@@ -258,13 +262,12 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
     warnings += layer_warn
     # 地点が多い表では，列の境が1つずれても目では気づけない．
     # 隙間の位置は検出とは別の測り方で出せるので，突き合わせて知らせる
-    import split_wide
     # **行が大きく落ちていたら，組成部の谷から決め直す**．
     # 行の検出は地点の多い表で崩れるが，組成部は非出現でも「・」があるので，
     # どの行にも字がある(2026-09-02 ユーザ指摘)
     # **列は作り直さない**．短冊に分けない表では `col` の検出の方が確かだった
     # (2026-09-02 に測った．列の一致 38 → 37，セル 271,176 → 259,224)
-    redo, warn = split_wide.rows_from_body(image, df_det, df_loc)
+    redo, warn = body_rows.rows_from_body(image, df_det, df_loc)
     if redo is not None:
         df_loc2 = locate.locate_items(
             redo, threth_col=args.threth_col, threth_row=args.threth_row,
@@ -281,20 +284,20 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
             warnings = (stray_warn + warn
                         + list(df_loc2.attrs.get('warnings', [])) + lw)
     # 行が決まったあとに，列の境だけを印字の隙間から組み直す(良いときだけ)
-    df_loc, edge_warn = split_wide.fix_column_edges(Image.open(image), df_loc)
+    df_loc, edge_warn = col_edges.fix_column_edges(Image.open(image), df_loc)
     warnings += edge_warn
     # そのうえで，境が字を割らない位置へ数 px ずらす(列の数は変えない)
-    df_loc, cross_warn = split_wide.fix_edges_by_crossings(Image.open(image), df_loc)
+    df_loc, cross_warn = col_edges.fix_edges_by_crossings(Image.open(image), df_loc)
     warnings += cross_warn
     # 表頭の列を本体に合わせる(本体で捨てた列が表頭に残ると，地点がずれる)
-    df_loc, align_warn = split_wide.align_header_columns(df_loc)
+    df_loc, align_warn = col_edges.align_header_columns(df_loc)
     warnings += align_warn
-    warnings += split_wide.check_grid_columns(image, df_loc)
+    warnings += checks.check_grid_columns(image, df_loc)
     # **行も測る**．列だけを見ていたので，行が9割落ちても黙って通っていた
-    warnings += split_wide.check_grid_rows(image, df_loc, df_det=df_det)
+    warnings += checks.check_grid_rows(image, df_loc, df_det=df_det)
     # 行の数・列の数が合っていても壊れている形がある(2026-09-03・04)
-    warnings += split_wide.check_row_heights(df_loc)
-    warnings += split_wide.check_header_rows(df_loc)
+    warnings += checks.check_row_heights(df_loc)
+    warnings += checks.check_header_rows(df_loc)
     # 段階2で「このセルを読み直す」と指せるように通し番号を振る
     df_loc.insert(0, 'cell_id', range(1, len(df_loc) + 1))
     df_loc.to_csv(work / 'located.csv', index=False)
@@ -331,7 +334,11 @@ def resplit_parts(image, tables, base, args):
     import subprocess
     import ink
     import split_sheet
-    import split_wide
+    import body_rows
+    import checks
+    import col_edges
+    import strips
+    import table_split
     from PIL import Image
 
     im = Image.open(image)
@@ -365,10 +372,10 @@ def resplit_parts(image, tables, base, args):
         return y0, y1
 
     for k, (i, df_one) in enumerate(tables):
-        cuts = list(split_wide.side_by_side_cuts(df_one))
+        cuts = list(table_split.side_by_side_cuts(df_one))
         if dark is None:
             dark = ink.binarize(im)
-        band = split_wide.name_band_cuts(dark, df_one)
+        band = table_split.name_band_cuts(dark, df_one)
         merged = []
         for c in sorted(set(cuts) | set(band)):
             # 近すぎる切れ目は1つにまとめる(密な帯が2つに割れて，10 px の
@@ -458,10 +465,14 @@ def main():
     # 組成部の箱が複数の表にまたがって角度がでたらめになり(02_p1 の部分画像で
     # −2.3°)，親の回転で部分画像の切り出しも変わる．部分画像の子の実行
     # (`--no-resplit`)でも測らない
-    import split_wide as _sw
+    import body_rows
+    import checks
+    import col_edges
+    import strips
+    import table_split
     single0 = (not args.no_resplit
                and len(locate.split_tables(df_det)[0]) == 1
-               and len(_sw.split_side_by_side(df_det)[0]) == 1)
+               and len(table_split.split_side_by_side(df_det)[0]) == 1)
     if single0 and len(cols0) >= 3 and len(pitch_src) >= 3:
         base0 = _common.workdir(args.image, args.workdir, make=False)
         out0 = base0.parent / (base0.name + '_deskew.png')
@@ -512,7 +523,6 @@ def main():
     # 地点が多すぎて行が取れない表は，短冊に分けて検出し直す．
     # そのときだけ「左右に並んだ別々の表」も見分ける(細い仕切りは
     # 画像の段階で切れないため)．手元の 88 枚はこの経路に入らない
-    import split_wide
 
     def detect_strip(strip, label):
         return detect(strip, args.weights, args.conf / 100, by_class,
@@ -535,7 +545,7 @@ def main():
 
     sided = []
     for idx, df_one in tables:
-        parts, side_warn = split_wide.split_side_by_side(df_one)
+        parts, side_warn = table_split.split_side_by_side(df_one)
         table_warnings += side_warn
         sided.extend((idx, part) for part in parts)
     if len(sided) != n_orig or sub_done:
@@ -547,7 +557,7 @@ def main():
 
     wide_tables = []
     for idx, df_one in tables:
-        if not split_wide.needs_strips(df_one):
+        if not strips.needs_strips(df_one):
             wide_tables.append((idx, df_one))
             continue
         # 表が縦に重なっているときは，短冊をこの表の高さだけで切る．
@@ -560,7 +570,7 @@ def main():
         # だけのはずが，Tab.148 の 454-6000 px も含む 134 行の格子になった)
         y_range = ((float(df_one['y1'].min()), float(df_one['y2'].max()))
                    if (n_orig > 1 or sub_done) else None)
-        wide, warn = split_wide.detect_wide(image, df_one, detect_strip,
+        wide, warn = strips.detect_wide(image, df_one, detect_strip,
                                             y_range=y_range)
         table_warnings += warn
         wide_tables.append((idx, df_one if wide is None else wide))

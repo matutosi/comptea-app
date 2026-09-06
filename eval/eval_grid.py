@@ -198,10 +198,10 @@ def run_one(image, args):
     # 正解のラベルはページ単位なので，段の番号をずらして繋げてから比べる
     tables, warns = locate.split_tables(df_det)
     parts, shift = [], 0
-    import split_wide
+    import table_split
     for df_one in tables:
         # 表頭の外の項目行は捨てる(run_pipeline.py と同じ)
-        df_one, stray = split_wide.drop_stray_plot_rows(df_one, heads=False)
+        df_one, stray = table_split.drop_stray_plot_rows(df_one, heads=False)
         warns += stray
         df_loc = locate.locate_items(df_one, image=str(image), snap=True)
         warns += list(df_loc.attrs.get('warnings', []))

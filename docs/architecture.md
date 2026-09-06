@@ -15,7 +15,7 @@ The project is bilingual (Japanese/English) and targets ecological vegetation su
 
 | Directory | What is in it |
 |:---|:---|
-| `comptea/` | The core modules. They live flat and import each other by name (`import locate`), so **everything runs with `comptea/` as the working directory** — `cli/_common.setup()` does the `chdir` for you |
+| `comptea/` | The core modules. What used to be one 1,673-line `split_wide.py` is five files by concern: `strips.py` (wide tables), `col_edges.py` (column boundaries), `table_split.py` (telling two tables apart on one sheet), `body_rows.py` (the body's vertical extent and row boundaries) and `checks.py` (the independent checks). They live flat and import each other by name (`import locate`), so **everything runs with `comptea/` as the working directory** — `cli/_common.setup()` does the `chdir` for you |
 | `comptea/web/` | The older all-in-one Streamlit pages, kept as they were |
 | `cli/` | The command-line entry points (`run_pipeline` → `run_ocr` → `build_table`, plus `crop_cells`, `apply_text`, `export_data`) |
 | `apps/` | One Streamlit app per stage, each with its own `requirements.txt` |
@@ -82,7 +82,7 @@ shift.
   each vertical part**, never the other way round, or the gap between the species-name
   column and the composition body would split a single table. Loads PDFs through
   PyMuPDF, lifting the embedded scan rather than re-rendering it
-- `split_wide.py`: Detects a table with far more plots than the detector was trained on
+- `strips.py`: Detects a table with far more plots than the detector was trained on
   by cutting the composition body into groups of plots, the species-name columns kept
   at the head of each strip, then mapping the boxes back to the original coordinates so
   `locate.py` never learns the table was wide. Not a scale problem: a 37-plot table
