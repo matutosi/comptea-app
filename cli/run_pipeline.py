@@ -432,28 +432,22 @@ def resplit_parts(image, tables, base, args):
     return keep, warnings, done
 
 
-def main():
-    args = parse_args()
-    image, = _common.setup([args.image])
+def deskew_page(image, df_det, args, by_class):
+    """紙面の傾きを直し，直した画像で検出し直す
 
-    import locate
-    args.imgsz = resolve_imgsz(image, args.imgsz)
+    折り込みは 9 表で左右の行が行の高さの 0.3-1.0 倍ずれ，水平な境では片端で
+    字を割る(08_p2 は `2.2` が上下の行に割れて 28 セルが読めなかった．
+    2026-09-04)．傾きは検出した `col` の範囲(組成部)で測る．直した画像は
+    作業ディレクトリの隣に置き，以後はそれを元画像として扱う
+    (座標はすべて直した画像のもの)．
 
-    by_class = {'col': args.conf_col / 100}
-    df_det = detect(image, args.weights, args.conf / 100, by_class, args.imgsz)
-    if df_det.empty:
-        raise SystemExit(
-            '検出が0件．**このページに組成表が無い**ことが多い'
-            '(本文・写真・隣のページから続く流し込みだけのページ)．'
-            '画像を Read して確かめ，表があるなら conf を下げるか weights を疑う')
-
-    # **傾きを直してから検出し直す**(2026-09-04)．折り込みは 9 表で左右の行が
-    # 行の高さの 0.3-1.0 倍ずれ，水平な境では片端で字を割る(08_p2 は `2.2` が
-    # 上下の行に割れて 28 セルが読めなかった)．傾きは検出した `col` の範囲
-    # (組成部)で測る．直した画像を作業ディレクトリの隣に置き，以後はそれを
-    # 元画像として扱う(座標はすべて直した画像のもの)
+    Returns:
+        (元画像か直した画像, その画像での検出, 警告)
+    """
     import deskew
-    skew_warn = []
+    import locate
+    import table_split
+
     cols0 = df_det[df_det['obj_name'] == 'col']
     rows0 = df_det[df_det['obj_name'] == 'row']
     heads0 = df_det[df_det['obj_name'] == 'header']
@@ -465,75 +459,74 @@ def main():
     # 組成部の箱が複数の表にまたがって角度がでたらめになり(02_p1 の部分画像で
     # −2.3°)，親の回転で部分画像の切り出しも変わる．部分画像の子の実行
     # (`--no-resplit`)でも測らない
-    import body_rows
-    import checks
-    import col_edges
-    import strips
-    import table_split
     single0 = (not args.no_resplit
                and len(locate.split_tables(df_det)[0]) == 1
                and len(table_split.split_side_by_side(df_det)[0]) == 1)
-    if single0 and len(cols0) >= 3 and len(pitch_src) >= 3:
-        base0 = _common.workdir(args.image, args.workdir, make=False)
-        out0 = base0.parent / (base0.name + '_deskew.png')
-        out0.parent.mkdir(parents=True, exist_ok=True)
-        # y は**表頭の下端から `col` の下端**(組成部)で測る．`col` の箱ごと測ると
-        # 表頭の値の並びが混ざり，符号まで逆になる(08_p2 は col の箱で +0.36°，
-        # 組成部で −0.83°)．`row` の検出の範囲は表の一部しか覆わないことがあり
-        # (08_p2 は 5 本で 110 px)，そこで測ると小さく出る
-        by0 = heads0['y2'].max() if len(heads0) else cols0['y1'].min()
-        by1 = cols0['y2'].max()
-        box0 = (cols0['x1'].min(), by0, cols0['x2'].max(), by1)
-        pitch0 = float((pitch_src['y2'] - pitch_src['y1']).median())
-        image2, skew_deg = deskew.deskew_to(image, out0, box0, pitch0)
-        if skew_deg:
-            df_det2 = detect(image2, args.weights, args.conf / 100, by_class, args.imgsz)
-            # **直して検出が減ったら元に戻す**(2026-09-04)．回すと種名の列や
-            # 表頭が検出されなくなる紙面があり(04_p2 は 122 行 → 34 行，
-            # 23_p1_t1_s2 は 231 → 116，18_p1 は表ごと消えた)，傾きを直す
-            # 利益より大きい．目印の検出数と `col` の数が減らないときだけ採る
-            keys = ('sname', 'species_col', 'header', 'header_col', 'once_species')
-            n1 = int(df_det['obj_name'].isin(keys).sum())
-            n2 = int(df_det2['obj_name'].isin(keys).sum())
-            c1 = int((df_det['obj_name'] == 'col').sum())
-            c2 = int((df_det2['obj_name'] == 'col').sum())
-            # 目印は 1 つの増減なら検出のゆらぎ(08_p2 は 3 → 2 で結果は正しかった)
-            if not df_det2.empty and n2 >= n1 - 1 and c2 >= c1 * 0.8:
-                image, df_det = image2, df_det2
-                skew_warn = [f'**紙面の傾き {skew_deg:+.2f}° を直して検出し直した**．'
-                             f'座標は直した画像 {out0.name} のもの．'
-                             '段階1で行の境が左右で字を割っていないか見る']
-            else:
-                if out0.is_file():
-                    out0.unlink()          # 使わない回転画像は残さない
-                skew_warn = [f'紙面の傾き {skew_deg:+.2f}° を測ったが，直すと検出が減る'
-                             f'(目印 {n1} → {n2}，col {c1} → {c2})ので直さなかった．'
-                             '行の境が左右で字を割っていたら，段階1で知らせる']
+    if not (single0 and len(cols0) >= 3 and len(pitch_src) >= 3):
+        return image, df_det, []
 
-    # 1ページに表が2つ以上あるなら，ここで分けて最後まで別々に扱う
+    base0 = _common.workdir(args.image, args.workdir, make=False)
+    out0 = base0.parent / (base0.name + '_deskew.png')
+    out0.parent.mkdir(parents=True, exist_ok=True)
+    # y は**表頭の下端から `col` の下端**(組成部)で測る．`col` の箱ごと測ると
+    # 表頭の値の並びが混ざり，符号まで逆になる(08_p2 は col の箱で +0.36°，
+    # 組成部で −0.83°)．`row` の検出の範囲は表の一部しか覆わないことがあり
+    # (08_p2 は 5 本で 110 px)，そこで測ると小さく出る
+    by0 = heads0['y2'].max() if len(heads0) else cols0['y1'].min()
+    by1 = cols0['y2'].max()
+    box0 = (cols0['x1'].min(), by0, cols0['x2'].max(), by1)
+    pitch0 = float((pitch_src['y2'] - pitch_src['y1']).median())
+    image2, skew_deg = deskew.deskew_to(image, out0, box0, pitch0)
+    if not skew_deg:
+        return image, df_det, []
+
+    df_det2 = detect(image2, args.weights, args.conf / 100, by_class, args.imgsz)
+    # **直して検出が減ったら元に戻す**(2026-09-04)．回すと種名の列や
+    # 表頭が検出されなくなる紙面があり(04_p2 は 122 行 → 34 行，
+    # 23_p1_t1_s2 は 231 → 116，18_p1 は表ごと消えた)，傾きを直す
+    # 利益より大きい．目印の検出数と `col` の数が減らないときだけ採る
+    keys = ('sname', 'species_col', 'header', 'header_col', 'once_species')
+    n1 = int(df_det['obj_name'].isin(keys).sum())
+    n2 = int(df_det2['obj_name'].isin(keys).sum())
+    c1 = int((df_det['obj_name'] == 'col').sum())
+    c2 = int((df_det2['obj_name'] == 'col').sum())
+    # 目印は 1 つの増減なら検出のゆらぎ(08_p2 は 3 → 2 で結果は正しかった)
+    if not df_det2.empty and n2 >= n1 - 1 and c2 >= c1 * 0.8:
+        return image2, df_det2, [
+            f'**紙面の傾き {skew_deg:+.2f}° を直して検出し直した**．'
+            f'座標は直した画像 {out0.name} のもの．'
+            '段階1で行の境が左右で字を割っていないか見る']
+    if out0.is_file():
+        out0.unlink()                      # 使わない回転画像は残さない
+    return image, df_det, [
+        f'紙面の傾き {skew_deg:+.2f}° を測ったが，直すと検出が減る'
+        f'(目印 {n1} → {n2}，col {c1} → {c2})ので直さなかった．'
+        '行の境が左右で字を割っていたら，段階1で知らせる']
+
+
+def split_page(image, df_det, args, base):
+    """1 枚の紙面を，表ごとの検出に分ける
+
+    縦に重なった表・左右に並んだ表・部分画像に切り出してやり直すものを，
+    ここですべて片づける．**左右に並んだ表は検出の手掛かりで分ける**
+    (表と表のあいだが 1 つの表の内部の空白より狭いことがあり，
+    s01115_23 は 50 px．画像の空白だけでは分けられない)．
+
+    Returns:
+        ([(表の番号, 検出), ...], 元の表の数, 別に片づいた作業ディレクトリ, 警告)
+    """
+    import locate
+    import table_split
+
     # 種群を覆った偽の表頭は，表を分ける前に捨てる(locate_items も同じ選別をする)
     df_det, n_heads = locate.drop_unsupported_headers(df_det)
-    tables, table_warnings = locate.split_tables(df_det)
+    tables, warnings = locate.split_tables(df_det)
+    warnings = list(warnings or [])
     if n_heads:
-        table_warnings = list(table_warnings or []) + [
+        warnings.append(
             f"項目行にも項目名の列にも重ならない 'header' の検出 {n_heads} 本を捨てた"
-            '(組成部の最初の種群を表頭として覆っていることがある)．']
-    table_warnings = skew_warn + list(table_warnings or [])
+            '(組成部の最初の種群を表頭として覆っていることがある)．')
 
-    # 地点が多すぎて行が取れない表は，短冊に分けて検出し直す．
-    # そのときだけ「左右に並んだ別々の表」も見分ける(細い仕切りは
-    # 画像の段階で切れないため)．手元の 88 枚はこの経路に入らない
-
-    def detect_strip(strip, label):
-        return detect(strip, args.weights, args.conf / 100, by_class,
-                      resolve_imgsz(strip, 'auto', quiet=True), source=label)
-
-    # **左右に並んだ表は，検出の手掛かりで分ける**．
-    # 表と表のあいだが1つの表の内部の空白より狭いことがあり
-    # (s01115_23 は 50 px)，画像の空白だけでは分けられない．
-    # 種名の列と表頭が横にいくつ並ぶかで見分ける．
-    # 横長の表だけでなく**すべての表**に当てる(2026-09-03)
-    base = _common.workdir(args.image, args.workdir, make=False)
     sub_done = []
     n_orig = len(tables)          # 元の表の数．番号はこれで振る
     tables = list(enumerate(tables, start=1))
@@ -541,24 +534,39 @@ def main():
         # 切れ目があれば部分画像に切り出して最初からやり直す(再帰は1段)．
         # 抜けた表があっても，残った表は元の番号(_t2 など)を保つ
         tables, resplit_warn, sub_done = resplit_parts(image, tables, base, args)
-        table_warnings += resplit_warn
+        warnings += resplit_warn
 
     sided = []
     for idx, df_one in tables:
         parts, side_warn = table_split.split_side_by_side(df_one)
-        table_warnings += side_warn
+        warnings += side_warn
         sided.extend((idx, part) for part in parts)
     if len(sided) != n_orig or sub_done:
         # 左右に分かれて増えたときは，番号を振り直す(再帰で抜けたときは保つ)
         if not sub_done:
             sided = list(enumerate((df for _, df in sided), start=1))
             n_orig = len(sided)
-    tables = sided
+    return sided, n_orig, sub_done, warnings
 
-    wide_tables = []
+
+def widen_tables(image, tables, n_orig, sub_done, args, by_class):
+    """地点が多すぎて行が取れない表を，短冊に分けて検出し直す
+
+    手元の 88 枚はこの経路に入らない．
+
+    Returns:
+        ([(表の番号, 検出), ...], 警告)
+    """
+    import strips
+
+    def detect_strip(strip, label):
+        return detect(strip, args.weights, args.conf / 100, by_class,
+                      resolve_imgsz(strip, 'auto', quiet=True), source=label)
+
+    out, warnings = [], []
     for idx, df_one in tables:
         if not strips.needs_strips(df_one):
-            wide_tables.append((idx, df_one))
+            out.append((idx, df_one))
             continue
         # 表が縦に重なっているときは，短冊をこの表の高さだけで切る．
         # 全高で切ると別の表の箱まで拾い直し，先に分けた表がまた1つに戻る
@@ -571,11 +579,19 @@ def main():
         y_range = ((float(df_one['y1'].min()), float(df_one['y2'].max()))
                    if (n_orig > 1 or sub_done) else None)
         wide, warn = strips.detect_wide(image, df_one, detect_strip,
-                                            y_range=y_range)
-        table_warnings += warn
-        wide_tables.append((idx, df_one if wide is None else wide))
-    tables = wide_tables
-    _common.show_warnings(table_warnings, head='--- このページの成り立ち ---')
+                                        y_range=y_range)
+        warnings += warn
+        out.append((idx, df_one if wide is None else wide))
+    return out, warnings
+
+
+def build_tables(image, tables, base, args, n_orig, by_class, table_warnings):
+    """表ごとに格子を組み，まとめを書く
+
+    Returns:
+        (できた作業ディレクトリ, できなかった (番号, 理由))
+    """
+    import locate
 
     retry = None   # 行の閾値を下げた検出(要るときだけ1度作る)
     done, failed = [], []
@@ -624,6 +640,34 @@ def main():
             encoding='utf-8')
         print(f'\n書いた: {work}')
         done.append(work)
+    return done, failed
+
+
+def main():
+    args = parse_args()
+    image, = _common.setup([args.image])
+    args.imgsz = resolve_imgsz(image, args.imgsz)
+
+    by_class = {'col': args.conf_col / 100}
+    df_det = detect(image, args.weights, args.conf / 100, by_class, args.imgsz)
+    if df_det.empty:
+        raise SystemExit(
+            '検出が0件．**このページに組成表が無い**ことが多い'
+            '(本文・写真・隣のページから続く流し込みだけのページ)．'
+            '画像を Read して確かめ，表があるなら conf を下げるか weights を疑う')
+
+    image, df_det, skew_warn = deskew_page(image, df_det, args, by_class)
+
+    base = _common.workdir(args.image, args.workdir, make=False)
+    tables, n_orig, sub_done, warn = split_page(image, df_det, args, base)
+    table_warnings = skew_warn + warn
+
+    tables, warn = widen_tables(image, tables, n_orig, sub_done, args, by_class)
+    table_warnings += warn
+    _common.show_warnings(table_warnings, head='--- このページの成り立ち ---')
+
+    done, failed = build_tables(image, tables, base, args, n_orig, by_class,
+                                table_warnings)
 
     from pathlib import Path
     done += [Path(d) for d in sub_done]
