@@ -98,3 +98,34 @@ def test_見本のセルを読める(tmp_path):
     ocred = pd.read_csv(tmp_path / "ocred.csv")
     assert "corrected" in ocred.columns
     assert ocred["corrected"].notna().sum() > 50
+
+
+# --- 3 段を通しで(同じプロセスで) ---------------------------------------
+
+@pytest.mark.slow
+def test_見本1枚を3段とも通す(tmp_path):
+    """格子 → 読み取り → 組み上げを，`pipeline.run()` で続けて回す
+
+    工程どうしの繋ぎ目は，部品ごとの試験では見えない
+    (「部品ごとには動くのに，通しでは何も出ない」型の壊れ方をする)．
+    """
+    from comptea import pipeline
+
+    wd = tmp_path / "work"
+    code, out = pipeline.run("grid", [os.path.join(ROOT, "examples", "sample.jpg"),
+                                      "--workdir", str(wd)])
+    assert code == 0, out
+    assert (wd / "located.csv").is_file() and (wd / "overlay.png").is_file()
+
+    code, out = pipeline.run("read", [str(wd)])
+    assert code == 0, out
+    ocred = pd.read_csv(wd / "ocred.csv")
+    assert ocred["corrected"].notna().sum() > 50
+
+    code, out = pipeline.run("table", [str(wd)])
+    assert code == 0, out
+    long = pd.read_csv(wd / "comp_table_long.csv")
+    assert long["plot"].max() >= 5
+    assert (long["status"] == "OK").sum() > 40
+    # 和名が 1 つも無い表は，格子の段では気づけない(2026-09-05)
+    assert long["j_name"].notna().sum() > 0

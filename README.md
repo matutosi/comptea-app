@@ -115,9 +115,11 @@ pytest --runslow      # 検出と読み取りも実際に走らせる(30 秒ほ�
 | `tests/test_header.py` | 項目名の寄せ・文章形式の表頭・1 回出現種 |
 | `tests/test_ink.py` | 黒画素から測る道具 (画数・罫線・破線) |
 | `tests/test_geometry.py` | 等間隔の格子・境が字を割る回数 |
+| `tests/test_checks.py` | 格子の検査 4 つ (鳴るべきときに鳴るか) |
+| `tests/test_grid_parts.py` | 短冊・種名の列・階層の列 (組み立てた紙面で) |
 | `tests/test_apps.py` | Streamlit の 4 アプリを画面まで走らせる |
 | `tests/test_shared.py` | 工程のあいだの受け渡し (zip・見本・検出の返り) |
-| `tests/test_pipeline.py` | 見本 1 枚の通し (`slow` は検出と読み取り) |
+| `tests/test_pipeline.py` | 見本 1 枚の通し (`slow` は 3 段を続けて回す) |
 
 歯止めにしているのは，**実物を見て決めた判断**です
 (`III(+-4)` を `III(1-4)` にしない，1 文字の読みは完全一致だけ採る，など)．
