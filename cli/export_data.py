@@ -192,14 +192,18 @@ def crop_need_check(lg, works, out, pad):
 
 def main():
     args = parse_args()
-    _common.setup([])                       # yolo/ を import できるようにする
+    # **chdir する前に絶対パスへ直す**．`setup()` は中核の場所へ移るので，
+    # 受け取った相対パスはそのままでは解決できない
+    paths = _common.setup(list(args.workdirs) + [args.out])
     import pandas as pd                     # noqa: F401
 
-    works = find_workdirs(args.workdirs)
+    roots, out = paths[:-1], paths[-1]
+    works = find_workdirs(roots)
     if not works:
         print('作業ディレクトリが見つからない(build_table.py まで通してから実行する)')
         sys.exit(1)
-    os.makedirs(args.out, exist_ok=True)
+    args.out = out
+    os.makedirs(out, exist_ok=True)
     lg, pt, sm = collect(works, args.tag)
     if lg is None:
         print('縦持ちが 1 つも無い')
