@@ -6,6 +6,7 @@
 中身は CUI と同じ `cli/run_ocr.py` を呼ぶ．
 EasyOCR は**初回にモデルを 100 MB ほど落とす**ので，最初の 1 回は待ち時間が長い．
 """
+import importlib
 import os
 import subprocess
 import sys
@@ -15,6 +16,11 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import _shared                                  # noqa: E402
+
+# **読み込み済みのモジュールは走らせ直されない**(2026-09-06)．
+# Streamlit は書き換えたファイルを走らせ直すが，`import` した先はそのままなので，
+# 更新した直後に古い `_shared` が残り，足したばかりのものが無いと言われる
+importlib.reload(_shared)
 
 st.set_page_config(page_title="comptea 3 読み取り", layout="wide")
 st.title("3. セルを読む")

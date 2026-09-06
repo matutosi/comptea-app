@@ -6,6 +6,7 @@
 中身は CUI と同じ `cli/build_table.py` を呼ぶ．
 画像を触らないので依存は pandas だけ．いちばん軽い工程．
 """
+import importlib
 import os
 import subprocess
 import sys
@@ -15,6 +16,11 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import _shared                                  # noqa: E402
+
+# **読み込み済みのモジュールは走らせ直されない**(2026-09-06)．
+# Streamlit は書き換えたファイルを走らせ直すが，`import` した先はそのままなので，
+# 更新した直後に古い `_shared` が残り，足したばかりのものが無いと言われる
+importlib.reload(_shared)
 
 st.set_page_config(page_title="comptea 4 組み上げ", layout="wide")
 st.title("4. 縦持ちに組んで検査する")

@@ -6,6 +6,7 @@
 この工程は画像しか触らないので，依存は Pillow・numpy・PyMuPDF だけ．
 """
 import io
+import importlib
 import os
 import sys
 import zipfile
@@ -14,6 +15,11 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import _shared                                  # noqa: E402
+
+# **読み込み済みのモジュールは走らせ直されない**(2026-09-06)．
+# Streamlit は書き換えたファイルを走らせ直すが，`import` した先はそのままなので，
+# 更新した直後に古い `_shared` が残り，足したばかりのものが無いと言われる
+importlib.reload(_shared)
 
 st.set_page_config(page_title="comptea 1 切り分け", layout="wide")
 st.title("1. 折り込みを表ごとに切る")
