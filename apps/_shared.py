@@ -5,6 +5,12 @@ Streamlit Cloud は入口のファイルを走らせるので，その場で `sy
 """
 import os
 import sys
+import tempfile
+
+# ultralytics は設定を `~/.config/Ultralytics` に書こうとする．
+# Streamlit Cloud では書けないので，一時ディレクトリに向ける
+os.environ.setdefault("YOLO_CONFIG_DIR", os.path.join(tempfile.gettempdir(),
+                                                      "Ultralytics"))
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CORE = os.path.join(ROOT, "comptea")

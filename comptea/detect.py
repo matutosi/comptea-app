@@ -5,8 +5,25 @@ import util_file
 # 検出が0件のときに返る列
 EMPTY_COLS = ['obj_class', 'obj_name', 'confidence', 'x1', 'y1', 'x2', 'y2']
 
+def to_pandas(df):
+    """`results[0].to_df()` の返りを pandas にそろえる
+
+    **ultralytics の版で中身が変わる**(2026-09-06 に Streamlit Cloud で発覚)．
+    8.3.94 は pandas を返すが，新しい版は **polars** を返すので，
+    そのままだと `'Series' object has no attribute 'apply'` で落ちる．
+    `to_dicts()` を通して pandas に直す
+    (`to_pandas()` は pyarrow を要るので使わない)．
+    """
+    if isinstance(df, pd.DataFrame):
+        return df
+    if hasattr(df, 'to_dicts'):
+        return pd.DataFrame(df.to_dicts())
+    return pd.DataFrame(df)
+
+
 # separate box column into 4 columns
 def split_box_column(df):
+    df = to_pandas(df)
     # 検出が0件だと to_df() は列の無い空のDataFrameを返す．
     # そのまま進むと 'box' が無くて KeyError になり，
     # 「1件も検出できなかった」ことが読み取れない例外で落ちる．
