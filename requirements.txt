@@ -1,0 +1,13 @@
+# CUI 版(全部の工程)．Streamlit のアプリは apps/*/requirements.txt を使う
+--extra-index-url https://download.pytorch.org/whl/cpu
+pillow>=10.0
+numpy>=1.26
+pandas>=2.2
+opencv-python-headless>=4.9
+torch>=2.2
+torchvision>=0.17
+ultralytics>=8.3
+easyocr>=1.7
+python-Levenshtein>=0.25
+rapidfuzz>=3.9
+PyMuPDF>=1.24

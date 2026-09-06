@@ -1,0 +1,18 @@
+# 作業ディレクトリと出力
+work/
+work_*/
+out/
+*_results_*.csv
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 学習の途中で残る重みの控え
+weights/*_bak*.pt
+
+# 資料(著作権のため公開しない)
+labelme_data/
+truth/
