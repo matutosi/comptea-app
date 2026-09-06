@@ -187,7 +187,7 @@ def retry_empty_comp(df, image, img):
     # 単独の `+`・`1` の細い線まで消して改悪だったので取り下げた．
     # 読み直した結果が値として通るときだけ差し替える
     # 字種を絞ると `+` を `4` と読むことがある(example.jpg で 3 セル)ので，
-    # 差し替えたセルは `note` に `retry` を付けて関門2の目視に回す
+    # 差し替えたセルは `note` に `retry` を付けて段階2の目視に回す
     import correct_text
     done = []
     for i in read:

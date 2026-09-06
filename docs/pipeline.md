@@ -3,7 +3,7 @@
 スキャンした組成表の画像から，縦持ちの表 (1 行 = 1 地点 × 1 種) を作るまでの流れです．
 分野の背景は [vegetation_science.md](vegetation_science.md)，
 規則づくりの知見は [lessons.md](lessons.md)，
-コードの構成は [.claude/ARCHITECTURE.md](../.claude/ARCHITECTURE.md) を見てください．
+コードの構成は [architecture.md](architecture.md) を見てください．
 
 ## 全体像
 

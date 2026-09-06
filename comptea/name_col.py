@@ -157,7 +157,7 @@ def name_columns_from_ink(img, df_det):
         if len(bands) > 2:
             warn.append(f'組成部の左に字の帯が {len(bands)} 本ある．'
                         '左の 2 本を学名・和名としたが，残りは使っていない．'
-                        '関門1で列の対応を目で確かめる')
+                        '段階1で列の対応を目で確かめる')
     else:
         pairs = [(bands[0], 'species_col')]
         warn.append('組成部の左の字の帯が 1 本だけなので，和名の列とみなした．'
@@ -191,5 +191,5 @@ def name_columns_from_ink(img, df_det):
     warn.insert(0, f"**種名の列を，組成部の左の黒画素の帯から補った**"
                    f"({', '.join(n for _, n in pairs)}．"
                    f"x {', '.join(f'{a}-{b}' for (a, b), _ in pairs)})．"
-                   '関門1で列の位置を目で確かめる')
+                   '段階1で列の位置を目で確かめる')
     return out, warn

@@ -1,37 +1,39 @@
 # comptea architecture
 
-This file describes the codebase — architecture, commands, conventions — the
-slow-changing half of the project instructions. Progress, open problems, and decisions
-live in `.claude/CLAUDE.md`, which imports this file.
+This file describes the codebase — architecture, commands, conventions. The
+narrative of how the rules were arrived at (and which ideas were measured and
+dropped) is in [lessons.md](lessons.md); the stage-by-stage walkthrough is in
+[pipeline.md](pipeline.md).
 
 ## Project Overview
 
 **comptea** (Composite Table to Data Easy) extracts structured data from scanned images of vegetation composition tables found in books and reports. The pipeline: image preprocessing → object detection (YOLO/Detectron2) → region location → OCR → text correction → tabular output.
 
-The project is bilingual (Japanese/English) and targets ecological vegetation survey data. It exists as both an R package and a Python (Streamlit) web application.
+The project is bilingual (Japanese/English) and targets ecological vegetation survey data.
 
-## Architecture
+## Layout
 
-### Two parallel implementations
+| Directory | What is in it |
+|:---|:---|
+| `comptea/` | The core modules. They live flat and import each other by name (`import locate`), so **everything runs with `comptea/` as the working directory** — `cli/_common.setup()` does the `chdir` for you |
+| `comptea/web/` | The older all-in-one Streamlit pages, kept as they were |
+| `cli/` | The command-line entry points (`run_pipeline` → `run_ocr` → `build_table`, plus `crop_cells`, `apply_text`, `export_data`) |
+| `apps/` | One Streamlit app per stage, each with its own `requirements.txt` |
+| `eval/` | The yardsticks. **They need the labelled scans and truth tables, which are not published**, so they cannot be run from this repository |
+| `tests/` | Runs on the dictionaries and `examples/` alone — no source material needed |
 
-- **R package** (`R/`): Original implementation structured as an R package (DESCRIPTION, NAMESPACE). Uses `devtools::load_all()` for development. Depends on `wameicheckr` for species name matching via edit distance.
-- **Python/YOLO pipeline** (`yolo/`): Newer implementation using YOLO11 for detection and Streamlit for the web UI. This is the actively developed path.
+An earlier R implementation and a Detectron2 prototype exist in the project's private
+history; neither is included here.
 
-### Python pipeline stages (`yolo/`)
+## Pipeline stages
 
-The whole pipeline is available as one Streamlit app, `comptea_web.py`, whose seven
-sidebar pages mirror the stages below. The per-stage `*_web.py` apps are kept as well.
-
-1. **Label conversion** (`labelme2yolo_web.py`): Converts labelme annotations to the YOLO dataset layout
-2. **Preprocessing** (`preprocess_image.py`, `preprocess_image_web.py`): Deskew, grayscale, binarize, remove noise
-3. **Training** (`train_web.py`): Trains YOLO models from labeled data (zip of images + YAML config)
-4. **Detection** (`detect_web.py`, `detect.py`): YOLO object detection. Confidence thresholds are per class (see `detect.filter_by_conf()`). The command-line path and the yardsticks all pass `--conf 30 --conf-col 20`: at 30 the `col` of a whole block is lost on some pages (kinki_047's left block scores 0.24), which drops every row in that block. `imgsz` defaults to `auto`, which scales it with
+4. **Detection** (`detect.py`): YOLO object detection. Confidence thresholds are per class (see `detect.filter_by_conf()`). The command-line path and the yardsticks all pass `--conf 30 --conf-col 20`: at 30 the `col` of a whole block is lost on some pages (kinki_047's left block scores 0.24), which drops every row in that block. `imgsz` defaults to `auto`, which scales it with
    the longest side so the page meets the detector at the scale it was trained on
    (long side 3300 px ↔ `imgsz` 1280): a book page still resolves to 1280, an
    oversized fold-out to 1856–2560. Feeding a 4809-px-tall table at 1280 costs two
    thirds of its rows
-5. **Location** (`locate_web.py`, `locate.py`): Turns the detected `row` / `col` boxes into cell coordinates. A page can hold more than one block — a single-plot table is often set in two columns — so `split_blocks()` divides the page at the species-name columns and builds a grid per block; a page can also hold more than one **table**, stacked vertically, which is a different thing entirely (separate header, separate plots, never merged), and `split_tables()` cuts those apart at the top of each header, the caller keeping one workdir per table; `number_cells()` then numbers rows continuously across blocks and columns within each. Boundaries come from the detections themselves; only the gaps where a row or column went undetected are interpolated (`locate_edges()`). A boundary that lands on text is nudged to the middle of the nearest gap in the ink profile (`snap_edges()`). Removes duplicate overlapping detections and reports what it could not resolve via `df.attrs['warnings']`
-6. **OCR** (`ocr_web.py`, `ocr.py`): EasyOCR (ja+en) reads text from each located cell region. Images are binarized and trimmed before OCR.
+5. **Location** (`locate.py`): Turns the detected `row` / `col` boxes into cell coordinates. A page can hold more than one block — a single-plot table is often set in two columns — so `split_blocks()` divides the page at the species-name columns and builds a grid per block; a page can also hold more than one **table**, stacked vertically, which is a different thing entirely (separate header, separate plots, never merged), and `split_tables()` cuts those apart at the top of each header, the caller keeping one workdir per table; `number_cells()` then numbers rows continuously across blocks and columns within each. Boundaries come from the detections themselves; only the gaps where a row or column went undetected are interpolated (`locate_edges()`). A boundary that lands on text is nudged to the middle of the nearest gap in the ink profile (`snap_edges()`). Removes duplicate overlapping detections and reports what it could not resolve via `df.attrs['warnings']`
+6. **OCR** (`ocr.py`): EasyOCR (ja+en) reads text from each located cell region. Images are binarized and trimmed before OCR.
 7. **Text correction** (`correct_text.py`): Post-OCR corrections for species names (edit distance against `j_name.txt` / `s_name.txt`), layer codes, and composition values. Each correction validates its own result and returns a `status` (`OK` / `Need Check` / `suggested` / `multi`). A composition cell may also be a **constancy** value — `IV(+-3)`, meaning "constancy IV, cover range +–3" — which appears when the sheet is a synoptic table whose columns are communities rather than plots (2 of the 68 fold-out tables). `correct_constancy()` normalises it (`+`/`r` are legitimate heads for occurrences below constancy I; a missing hyphen inside the brackets is restored; a Roman numeral read inside the brackets is a `1`, since only cover ranges live there; a trailing stray character is the closing bracket misread). What it does **not** do is decide what the cell means: a bracketed cell is `IV(+-3)` (constancy IV, cover range) in a community column and `2(3-4)` (cover 2, sociability range) in a single-plot column, **and one table holds both** — 9 of 22_p2's 25 columns are single plots, 7 of 11_p1's 14. Reading a printed `2` as `II` cost those columns their cover values. `comp_table.column_head_kinds()` votes per column on whether the heads are Roman or Arabic, and `split_comp(kind=…)` fills either `constancy` + cover range or `cover` + `sociability` accordingly; the vote also settles the `1`/`I` confusion the glyphs make unavoidable cell by cell. A table with both kinds is flagged in the warnings
 8. **Running-text parsing** (`parse_text.py`, `plot_table.py`): The header of a
    single-plot table and the once-only species list below the table are set as running
@@ -45,7 +47,8 @@ sidebar pages mirror the stages below. The per-stage `*_web.py` apps are kept as
 
 ### Object classes detected
 
-The 12 classes in `yolo/labelme_data/YOLODataset/dataset.yaml`:
+The 12 classes the detector was trained on (the labelled dataset itself is not
+published; the counts are from it):
 
 | Class | Description | Labels |
 |-------|-------------|-------:|
@@ -242,56 +245,41 @@ shift.
   Vascular Plant Japanese Name Checklist (ver. 1.10), the dictionary `correct_text.py`
   matches against
 
-### Claude Code skill (`.claude/skills/comptea/`)
+### Command line (`cli/`)
 
 The same pipeline driven from the command line rather than Streamlit, for reading a
 table end to end in one go: `run_pipeline.py` (the whole run), `crop_cells.py`,
 `run_ocr.py`, `apply_text.py`, `build_table.py`, with `_common.py` shared between them.
-Three checkpoints — the grid, the reading, the assembled table — are rendered as images
-to be eyeballed before the run continues; `references/` holds the checkpoint guide,
-the reading guide, and the known failure modes. OCR is EasyOCR-led: the AI reads only
-the cells that carry a warning and the running-text regions.
+Three stages — the grid, the reading, the assembled table — are rendered as images to
+be eyeballed before the run continues; `docs/references/` holds the stage guide, the
+reading guide, and the known failure modes. OCR is EasyOCR-led.
 
-### Legacy Detectron2 path (`detectron2/`, `python/`)
-
-Older approach using Facebook's Detectron2. Files in `.gitignore` — kept for reference but not actively maintained. Uses labelme for annotation and labelme2coco for format conversion.
-
-## Running the Streamlit Apps
+## Running it
 
 ```bash
-cd yolo
-streamlit run comptea_web.py   # The whole pipeline, seven pages
+python cli/run_pipeline.py <image> --workdir work/<name>   # the grid
+python cli/run_ocr.py work/<name>                          # read the cells
+python cli/build_table.py work/<name>                      # assemble
 
-# Or one stage at a time
-streamlit run labelme2yolo_web.py     # Label conversion
-streamlit run preprocess_image_web.py # Image preprocessing
-streamlit run train_web.py            # Model training
-streamlit run detect_web.py           # Object detection
-streamlit run locate_web.py           # Region location
-streamlit run ocr_web.py              # OCR and text correction
+streamlit run apps/2_grid/streamlit_app.py                 # or one stage in the browser
 ```
 
-## Key Dependencies
+The entry points find `comptea/` themselves and `chdir` into it, so they can be
+called from anywhere (`COMPTEA_YOLO` overrides the location).
 
-**Python** (`yolo/`): ultralytics (YOLO11), streamlit, easyocr, labelme2yolo, python-Levenshtein, PIL/Pillow, pandas, numpy, torch, opencv (pinned in `yolo/requirements.txt`)
+## Key dependencies
 
-**R** (`R/`): dplyr, tidyr, purrr, stringr, fs, wameicheckr (species name reference)
-
-## Working with the R Package
-
-```r
-devtools::load_all(".")              # Load all R functions
-fs::dir_ls("R") |> purrr::walk(source)  # Alternative: source all R files
-```
+ultralytics (YOLO11), streamlit, easyocr, python-Levenshtein, rapidfuzz, PIL/Pillow,
+pandas, numpy, torch, opencv, PyMuPDF — pinned in `requirements.txt` (whole pipeline)
+and, per stage, in `apps/*/requirements.txt`.
 
 ## Notes
 
 - Output is **long format**: one row per plot × species (`comp_table.py`). `to_wide()` exists only for eyeballing.
 - Stages report trouble through `df.attrs['warnings']` rather than failing silently — `locate.py` and `comp_table.py` both do this, and the Streamlit pages display it.
-- Per-cell doubts travel in a `note` column set by `locate.py` (`interpolated` / `snapped` / `on_text`), drawn in colour on the Locate page and carried through OCR into the long table.
+- Per-cell doubts travel in a `note` column set by `locate.py` (`interpolated` / `snapped` / `on_text`), drawn in colour on the grid overlay and carried through OCR into the long table.
 - Domain background (composition tables, cover-abundance classes, layer codes) is in `docs/vegetation_science.md`. Read it before looking up vegetation-science terms elsewhere.
-- Progress, open problems, and decisions live in `.claude/CLAUDE.md`.
-- YOLO model weights are expected at `yolo/weights/comptea.pt`
-- The `yolo/` Python modules use relative imports via `sys.path` manipulation — always run from the `yolo/` directory
-- Training data and model outputs are stored outside the repo (e.g., `C:/Users/matutosi/data/detectron2/`)
+- YOLO model weights are expected at `comptea/weights/comptea.pt`
+- The `comptea/` modules use relative imports via `sys.path` manipulation — always run from the `comptea/` directory
+- The source material (scans, labels, truth tables) is not published, for copyright; `examples/sample.jpg` is a single page quoted with its source
 - GPU (CUDA) is optional for inference but recommended for training

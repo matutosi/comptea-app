@@ -398,7 +398,7 @@ def comp_table(df: pd.DataFrame, keep_absent: bool = False) -> pd.DataFrame:
         warnings.append(
             f'{n_moved} 箇所は，隣り合うセルにまたがって組まれた値だったので'
             "行の中で分け直した(note に 'moved' を付けてある)．"
-            '印字が列の境からずれている行なので，関門3で目を通す．')
+            '印字が列の境からずれている行なので，段階3で目を通す．')
     # 括弧付きのセルの意味は列で決まる(常在度か，単独地点の被度・群度か)
     kinds = column_head_kinds(comp)
     split = [split_comp(t, k) for t, k in zip(comp['comp_raw'], kinds)]
@@ -432,7 +432,7 @@ def comp_table(df: pd.DataFrame, keep_absent: bool = False) -> pd.DataFrame:
             f'(括弧付きの列 {n_col} のうち {n_con_col} が常在度)．'
             '常在度の列は `constancy` に常在度・`cover` に被度の範囲が入り，'
             '単独地点の列は `cover`・`sociability` に被度と群度が入る．'
-            '列の種類は列ごとの多数決で決めているので，関門3で目を通す．')
+            '列の種類は列ごとの多数決で決めているので，段階3で目を通す．')
     n_con = int(con.notna().sum())
     n_val = int((comp['status'] != 'absent').sum())
     if n_con and n_val and n_con / n_val >= CONSTANCY_MIN:

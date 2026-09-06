@@ -473,7 +473,7 @@ def correct_name(input_str: str, target="s_name", dict_path_s="s_name.txt", dict
     # **離れた候補は採らない**．辞書に載っていない名前(異名・古い学名・
     # 品種名など)を，近いだけの別種にすり替えてしまうため
     # (`Actinidia arguta` が距離3の `Actinidia rufa` になった．2026-09-01)．
-    # 元の印字を残し，'Need Check' にして関門2へ回す．
+    # 元の印字を残し，'Need Check' にして段階2へ回す．
     if min_distance > MAX_ADOPT_DIST:
         return {"corrected": input_str, "status": "Need Check"}
     # **1 文字の読みは，完全に一致するときだけ採る**(2026-09-06)．

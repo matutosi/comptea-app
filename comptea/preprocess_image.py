@@ -25,15 +25,7 @@ def correct_skew(image):
     corrected = cv2.warpAffine(image, m, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
     return corrected
 
-if __name__ == "__main__":
-    # 画像の読み込みと傾き補正
-    image = cv2.imread('input_skewed.png')
-    corrected_image = correct_skew(image)
-    cv2.imwrite('corrected_image.png', corrected_image)
-
-    # 画像の前処理を実行
-    processed_image = preprocess_image('input.png')
-    #処理後の画像を保存
-    cv2.imwrite('processed_image.png', processed_image)
-
-    # OCRエンジンの設定も重要
+# **`__main__` の試し書きは外した**(2026-09-06)．未定義の `preprocess_image()` を
+# 呼んでおり，走らせると落ちた．傾き補正の本体は `deskew.py` に移っており
+# (組成部の左右の黒画素の相互相関で測る)，ここに残る `correct_skew` は
+# `web/` の古いページからだけ呼ばれる．

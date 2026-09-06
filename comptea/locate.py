@@ -790,7 +790,7 @@ def _guess_layer_column(img, name_ranges, x_edges, y_edges):
     **罫線を落とさないと分けられない**(kinki_010 は階層の列が無いのに，
     傾いた縦罫線の黒画素で「字がある」と見えていた)．
 
-    間違って作っても，読んだ中身が階層として通らなければ関門2に挙がるので，
+    間違って作っても，読んだ中身が階層として通らなければ段階2に挙がるので，
     黙って値が化けることはない．
 
     Returns:
@@ -960,7 +960,7 @@ def check_body_reach(df, source_image, y_edges):
             out.append(
                 f'**種名の列は格子より {gap:.1f} 行ぶん{where}まで伸びている**．'
                 'その範囲の行が丸ごと落ちているおそれが強い．'
-                '関門1で表の端を目で確かめる．')
+                '段階1で表の端を目で確かめる．')
     return out
 
 
@@ -1032,7 +1032,6 @@ def _shift_edges_for_header(x_edges, img, bands, max_ratio=HEADER_SHIFT_MAX,
     shift = int(round(float(np.median(agree))))
     if abs(shift) < min_shift or best_n < max(2, len(votes) * 0.5):
         return x_edges, 0
-    lo, hi = float(bands[0][0]), float(bands[-1][1])
     e = np.asarray(x_edges, dtype=float).copy()
     e[1:-1] += shift
     return np.maximum.accumulate(e), shift
@@ -1181,7 +1180,7 @@ def _locate_block(df: pd.DataFrame, source_image: str, img, max_shift_ratio: flo
             warnings.append(
                 f"'{class_layer}' は検出されなかったが，種名の列と組成部の隙間に"
                 '字があるため，そこを階層の列として補った．'
-                '読んだ中身が階層として通らなければ関門2に挙がる．')
+                '読んだ中身が階層として通らなければ段階2に挙がる．')
     # itemごとのx,y座標．範囲が決まらないものは作らない
     items = []
     for x_range, obj_name in [
@@ -1199,7 +1198,7 @@ def _locate_block(df: pd.DataFrame, source_image: str, img, max_shift_ratio: flo
                     '階層の列は**無い**とみなした'
                     '(検出が無く，種名の列と組成部の隙間にも字が無い)．'
                     '草本群落などでは普通のこと．'
-                    '階層の列があるはずなら，関門1で隙間を目で確かめる．')
+                    '階層の列があるはずなら，段階1で隙間を目で確かめる．')
             else:
                 warnings.append(
                     f"'{obj_name}' が1件も検出されなかったため，この列は出力しない．")
@@ -1363,7 +1362,7 @@ def _locate_header(df: pd.DataFrame, source_image: str, x_edges, warnings: list,
                 warnings.append(
                     f'表頭の項目行は，検出({len(h_edges) - 1} 行)と'
                     f'項目名の字の行({len(new_edges) - 1} 行)で数が違う．'
-                    '項目名の側を採った．関門1で行の対応を目で確かめる．')
+                    '項目名の側を採った．段階1で行の対応を目で確かめる．')
             h_edges = new_edges
             n_items = len(h_edges) - 1
     h_notes = axis_notes(n=n_items)
@@ -1378,7 +1377,7 @@ def _locate_header(df: pd.DataFrame, source_image: str, x_edges, warnings: list,
     if shift:
         warnings.append(
             f'表頭は組成部と横位置が {shift:+d} px ずれているので，'
-            '表頭の列の境だけずらした．関門1で表頭の値の切れ目を目で確かめる')
+            '表頭の列の境だけずらした．段階1で表頭の値の切れ目を目で確かめる')
     out = [coord_item(hx_edges, h_edges, obj_name='header_value',
                       y_notes=h_notes)]
     if hc is None:

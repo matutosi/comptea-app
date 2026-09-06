@@ -93,7 +93,7 @@ def main():
         print(f'{mark}#{cell_id:<5} {obj:<14} {str(before)!r:<24} -> {str(after)!r} [{status}]')
     if 'corrected_easyocr' in df.columns:
         n = len(changed)
-        print(f'\n--- EasyOCR との突き合わせ (補正後の値で比べる) ---')
+        print('\n--- EasyOCR との突き合わせ (補正後の値で比べる) ---')
         print(f'  一致 {n - len(disagree)}/{n}   食い違い {len(disagree)}')
         for cell_id, obj, a, b in disagree[:40]:
             print(f'  #{cell_id:<5} {obj:<14} easyocr {a!r:<24} -> ai {b!r}')

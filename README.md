@@ -128,6 +128,7 @@ pytest --runslow      # 検出と読み取りも実際に走らせる(30 秒ほ�
 - [docs/lessons.md](docs/lessons.md) — 規則づくりの知見と，測って取り下げた案
 - [docs/vegetation_science.md](docs/vegetation_science.md) — 分野の背景 (被度階級・階層・常在度)
 - [docs/architecture.md](docs/architecture.md) — コードの構成
+- [eval/README.md](eval/README.md) — 物差し (**非公開の資料が要るので，ここからは動きません**)
 
 作業ディレクトリを省くと `comptea/work/<画像名>/` に書きます．
 

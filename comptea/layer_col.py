@@ -15,7 +15,7 @@
 見るのは**先頭の列だけ**にする．階層の列は必ず組成部の左端にあり，
 値の少ない地点の列を巻き込んで消す事故を避けられる．
 
-間違って階層としても，読んだ中身が階層として通らなければ関門2に挙がるので，
+間違って階層としても，読んだ中身が階層として通らなければ段階2に挙がるので，
 黙って値が化けることはない(`locate._guess_layer_column()` と同じ考え方)．
 """
 import numpy as np
@@ -83,7 +83,7 @@ def mark_layer_column(img, df_loc, **kw):
     return out, [
         f'組成部の先頭の列(列 {col})は**表頭が空**なので，'
         f'地点の列ではなく**階層の列**とみなした({int(hit.sum())} セル)．'
-        '地点番号はその次の列から 1 で振り直す．関門1で列の中身を目で確かめる']
+        '地点番号はその次の列から 1 で振り直す．段階1で列の中身を目で確かめる']
 
 
 NAME_OVERLAP = 0.5      # 種名などの箱と横にこれ以上重なる組成列は，組成部ではない
@@ -148,7 +148,7 @@ def _merge_slivers(out, dark, body_min, sliver=SLIVER_RATIO):
         warn.append(f'幅の細い切れ端の列 {dropped} を捨てた(端にあって本体が空)．')
     if merged:
         warn.append(f'幅の細い切れ端の列を隣に併合した {merged}(切れ端 → 併合先)．'
-                    '値がその境に掛かっていることがあるので，関門1で見る')
+                    '値がその境に掛かっていることがあるので，段階1で見る')
     return out, warn
 
 
@@ -266,7 +266,7 @@ def fix_columns(img, df_loc, ink_max=HEADER_INK_MAX, min_cols=MIN_COLS,
     if trimmed:
         warnings.append(
             f'組成部の左端の列 {trimmed} は種名の領域にかかっていたので，右端 1 列ぶんだけを'
-            '地点の列として残した(15_p5 で地点 1 がここにあった)．関門1で見る')
+            '地点の列として残した(15_p5 で地点 1 がここにあった)．段階1で見る')
     if dropped:
         warnings.append(
             f'組成部の左端の列 {sorted(dropped)} を組成部から外した'
@@ -279,5 +279,5 @@ def fix_columns(img, df_loc, ink_max=HEADER_INK_MAX, min_cols=MIN_COLS,
         warnings.append(
             f'**組成部の右端の列 {sorted(summary)} は表頭が空**なので，群の要約の列'
             '(常在度など)とみなして地点から外した(obj_name は summary)．'
-            '地点なら --conf を疑う．関門1で列の中身を目で確かめる')
+            '地点なら --conf を疑う．段階1で列の中身を目で確かめる')
     return out, warnings

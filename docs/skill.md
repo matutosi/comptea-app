@@ -9,7 +9,7 @@ description: 植生学の組成表(vegetation composition table)をスキャン�
 
 **測れるものは Python が測り，判断が要るところを目で見る**．
 
-`yolo/` のモジュールが，検出・格子・辞書補正・被度の検証・表の組み立てを
+`comptea/` のモジュールが，検出・格子・辞書補正・被度の検証・表の組み立てを
 すでに持っている．このスキルはそれを呼び出す薄い層で，
 **アルゴリズムを新しく書かない**．代わりに，自動化しないと決めた判断
 (領域が「1回出現種」か「調査地の記載」か，段落がどこで終わるか，
@@ -26,12 +26,12 @@ description: 植生学の組成表(vegetation composition table)をスキャン�
 
 ## 前提
 
-- `yolo/weights/comptea.pt` があること
+- `comptea/weights/comptea.pt` があること
 - Python に ultralytics / easyocr / pandas / Pillow が入っていること
-- 中間物は `yolo/work/<画像名>/` に置かれる(`--workdir` で変えられる)
+- 中間物は `comptea/work/<画像名>/` に置かれる(`--workdir` で変えられる)
 
-スクリプトは `yolo/` へ自分で移動してから動くので，**どこから呼んでもよい**．
-`yolo/` が別の場所にあるときは環境変数 `COMPTEA_YOLO` で指す．
+スクリプトは `comptea/` へ自分で移動してから動くので，**どこから呼んでもよい**．
+`comptea/` が別の場所にあるときは環境変数 `COMPTEA_YOLO` で指す．
 
 ## 流れ
 
@@ -62,7 +62,7 @@ A0 級の折り込み(`s01115` の 23 枚)には，**1枚に表が2つ3つ載っ
 1枚のまま渡しても行が1本も取れないので，先に切り分ける．
 
 ```bash
-py -3.12 yolo/split_sheet.py <PDF か画像> --outdir <置き場> [--dry-run]
+py -3.12 comptea/split_sheet.py <PDF か画像> --outdir <置き場> [--dry-run]
 ```
 
 `<画像名>_p1.png`・`_p2.png` … が並び，**左の段から，段の中は上から**の順になる．
@@ -136,7 +136,7 @@ python .claude/skills/comptea/scripts/crop_cells.py work/<画像名>
 まで通して初めて値が入る．`both` では `apply_text.py` が EasyOCR の読みと
 突き合わせ，`ocred.csv` の `agree` 列に `ok` / `disagree` を残す．
 
-正解表3枚 (`yolo/truth/`) と `yolo/eval_read.py` で比べた結果 (組成部のセル)．
+正解表3枚 (非公開) と `eval/eval_read.py` で比べた結果 (組成部のセル)．
 
 | ページ | easyocr | ai |
 |:---|---:|---:|

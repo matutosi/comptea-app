@@ -486,7 +486,7 @@ def split_side_by_side(df_det):
     return out, [
         f'**この画像には表が左右に {len(out)} つ並んでいる**'
         '(種名の列も表頭もその数だけある)．別々の表として1つずつ組み立てる．'
-        '仕切りが細くて画像の段階では切れなかったので，関門1で境目を目で確かめる']
+        '仕切りが細くて画像の段階では切れなかったので，段階1で境目を目で確かめる']
 
 
 def side_by_side_cuts(df_det):
@@ -651,7 +651,7 @@ def fix_column_edges(img, df_loc, gain=EDGE_INK_GAIN, min_cols=EDGE_SWAP_MIN_COL
     return out, [
         f'列の境を**印字の隙間から**組み直した({len(edges) - 1} 列 → {len(lat) - 1} 列，'
         f'線上の黒画素 {cur:.2f} → {new:.2f})．検出から作った境より，'
-        '線上の黒画素が少ない．関門1で列の中身を目で確かめる']
+        '線上の黒画素が少ない．段階1で列の中身を目で確かめる']
 
 
 # 境をずらせる幅(列の幅に対する比)．**広げると値が別の地点へ移る**(2026-09-05)．
@@ -834,7 +834,7 @@ def check_grid_columns(image, df_loc, min_cols=CHECK_MIN_COLS,
     return [f'**列の境の {(1 - hit) * 100:.0f}% が，印字の地点の隙間から'
             f'{near} px 以上離れている**(境 {len(edges)} 本，隙間 {len(gaps)} 本，'
             f'ずれの中央値 {np.median(dist):.0f} px)．'
-            '列の区切りが地点と合っていないおそれが強い．関門1で目で確かめる']
+            '列の区切りが地点と合っていないおそれが強い．段階1で目で確かめる']
 
 
 STRAY_TOL_ROWS = 1.5        # 表頭の帯のゆとり(項目行の高さの倍数)
@@ -1280,7 +1280,7 @@ def check_grid_rows(image, df_loc, min_ratio=ROW_COVER_MIN, df_det=None):
         return []
     return [f'**格子の行が {rows} 行しかないのに，組成部には字の行が {n} ある**'
             f'({rows / n:.2f} 倍)．行が丸ごと落ちているおそれが強い．'
-            '関門1で表の下の方を目で確かめる．'
+            '段階1で表の下の方を目で確かめる．'
             '--conf を下げると取れることがある']
 
 
@@ -1392,7 +1392,7 @@ def check_row_heights(df_loc, cv_max=ROW_HEIGHT_CV_MAX):
         return []
     return [f'**行の高さが極端に不揃い**(変動係数 {cv:.2f}，最大 {h.max():.0f} px'
             f' 対 中央値 {np.median(h):.0f} px)．表題や表頭を 1 行として'
-            '飲み込んでいることが多い．関門1で表の上端を目で確かめる']
+            '飲み込んでいることが多い．段階1で表の上端を目で確かめる']
 
 
 def check_header_rows(df_loc):
@@ -1414,7 +1414,7 @@ def check_header_rows(df_loc):
         return []
     return [f'**表頭の値の行 {inside} 行が組成部の中にある**(全 {len(g)} 行)．'
             '項目行の誤検出が組成部の行を表頭として切っている．'
-            '関門1で表頭と組成部の境を目で確かめる']
+            '段階1で表頭と組成部の境を目で確かめる']
 
 
 ROW_EDGE_GAIN = 0.7     # 行の境の線上の黒画素がこの倍以下なら，決め直した方を採る
@@ -1587,7 +1587,7 @@ def rows_from_body(image, df_det, df_loc, min_ratio=ROW_COVER_MIN):
         f'**行を組成部の黒画素から決め直した**({have} 行 → {len(made)} 行，'
         f'行の高さ {pitch:.0f} px)．検出では行が大きく落ちていた．'
         '行の高さは表の中でほぼ一定なので，黒画素の周期から高さを求め，'
-        'その高さで進みながら境を黒画素の最小に寄せた．関門1で行の対応を目で確かめる']
+        'その高さで進みながら境を黒画素の最小に寄せた．段階1で行の対応を目で確かめる']
 
 
 def detect_wide(image, df_det, detect_fn, target_w=TARGET_W,
@@ -1626,7 +1626,7 @@ def detect_wide(image, df_det, detect_fn, target_w=TARGET_W,
         f'**地点が多すぎて行が取れないので，組成部を {len(chunks)} つに分けて'
         f'検出した**(種名の列 x0-{name_x2} を頭に付け，'
         f'地点のあいだの隙間 {len(gaps)} 本から切れ目を選んだ)．'
-        '短冊の境目で列が重複していないか，関門1で目で確かめる')
+        '短冊の境目で列が重複していないか，段階1で目で確かめる')
 
     y1, y2 = (0, im.height) if y_range is None else (
         max(0, int(y_range[0])), min(im.height, int(y_range[1])))
@@ -1663,11 +1663,11 @@ def detect_wide(image, df_det, detect_fn, target_w=TARGET_W,
             f'列の境を**印字の地点の隙間**から決め直した'
             f'({len(col)} 件の検出 → {len(made)} 列)．'
             '地点の列は等間隔に組まれているので，検出より隙間の方が確か．'
-            '関門1で列の中身を目で確かめる')
+            '段階1で列の中身を目で確かめる')
     elif lattice:
         warnings.append(
             '列の境を印字の隙間から決めようとしたが，**等間隔に乗らなかった**．'
-            '検出から決めた境をそのまま使う．関門1で列を目で確かめる')
+            '検出から決めた境をそのまま使う．段階1で列を目で確かめる')
 
     out['source_image'] = str(image).replace('\\', '/')
     return out, warnings
