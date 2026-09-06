@@ -24,10 +24,18 @@ st.write(
     "`Need Check` として残します．**表頭の項目**も表にして出します．"
 )
 
+use_sample = st.checkbox("見本の画像・データを使う", value=True,
+                         help="2 を通さずに，この場で試せます")
 col1, col2 = st.columns(2)
-img_up = col1.file_uploader("表の画像", type=["png", "jpg", "jpeg"])
-loc_up = col2.file_uploader("2 の結果 (grid.zip か located.csv)",
-                            type=["zip", "csv"])
+if use_sample:
+    img_up = _shared.LocalFile(_shared.SAMPLE)
+    loc_up = _shared.LocalFile(_shared.SAMPLE_GRID)
+    col1.info(f"見本の画像: {img_up.name}")
+    col2.info(f"見本の格子: {loc_up.name}")
+else:
+    img_up = col1.file_uploader("表の画像", type=["png", "jpg", "jpeg"])
+    loc_up = col2.file_uploader("2 の結果 (grid.zip か located.csv)",
+                                type=["zip", "csv"])
 if img_up is None or loc_up is None:
     st.info("2 で受け取った zip と，同じ画像を選んでください．")
     _shared.footer()

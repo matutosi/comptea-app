@@ -3,6 +3,7 @@
 中核は `comptea/` に平らに置いてあり，互いを `import locate` の形で読む．
 Streamlit Cloud は入口のファイルを走らせるので，その場で `sys.path` を通す．
 """
+import io
 import os
 import sys
 import tempfile
@@ -16,6 +17,29 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CORE = os.path.join(ROOT, "comptea")
 WEIGHTS = os.path.join(CORE, "weights", "comptea.pt")
 SAMPLE = os.path.join(ROOT, "examples", "sample.jpg")
+# 見本の中間データ．前の工程を通さずに試せるようにしておく
+SAMPLE_GRID = os.path.join(ROOT, "examples", "sample_grid.zip")
+SAMPLE_READ = os.path.join(ROOT, "examples", "sample_read.zip")
+
+
+class LocalFile(io.BytesIO):
+    """アップロードされたファイルと同じ顔をする，手元のファイル
+
+    「見本を使う」を選んだときに，読み込みの処理を分けずに済ませる．
+    `zipfile` や `pandas.read_csv` にそのまま渡せるよう `BytesIO` を継ぐ．
+    """
+
+    def __init__(self, path):
+        with open(path, "rb") as f:
+            super().__init__(f.read())
+        self.name = os.path.basename(path)
+
+    def getbuffer(self):
+        pos = self.tell()
+        self.seek(0)
+        data = self.read()
+        self.seek(pos)
+        return data
 
 for p in (CORE, ROOT):
     if p not in sys.path:

@@ -48,18 +48,23 @@ CSV から辿れるようにします．
 
 | アプリ | やること | 入力 → 出力 |
 |:---|:---|:---|
-| `apps/1_split` | 折り込みを表ごとに切る | 画像 → 画像 (zip) |
-| `apps/2_grid` | 検出して格子を作る | 画像 → `located.csv` |
-| `apps/3_read` | セルを読む | 画像 + `located.csv` → `ocred.csv` |
-| `apps/4_table` | 縦持ちに組んで検査 | `ocred.csv` → `comp_table_long.csv` |
+| `apps/1_split` | 折り込みを表ごとに切る (**PDF も可**) | 画像・PDF → 画像 (zip) |
+| `apps/2_grid` | 検出して格子を作る | 画像 → `grid.zip` |
+| `apps/3_read` | セルを読む・**表頭を表にする** | 画像 + `grid.zip` → `read.zip` |
+| `apps/4_table` | 縦持ちに組んで検査 | `read.zip` → `table.zip` |
 
 ```bash
 streamlit run apps/2_grid/streamlit_app.py
 ```
 
-工程のあいだは CSV で受け渡します．段階の分け方とそのまま対応しています．
+**工程のあいだは zip で受け渡します**．次の工程に要るものが一式入っているので，
+入れ忘れが起きません．工程の分け方は，CUI の 3 つの段階とそのまま対応しています．
 
-**大きな画像は扱えません** (長辺 4000 px まで)．A0 の折り込みは CUI を使ってください．
+**2・3・4 には見本が入っている**ので，前の工程を通さずにその場で試せます
+(`examples/sample.jpg`・`sample_grid.zip`・`sample_read.zip`)．
+
+**大きな画像は扱えません** (切り分けは長辺 8000 px，ほかは 4000 px まで)．
+A0 の折り込みは CUI を使ってください．
 
 ## 出力の形
 

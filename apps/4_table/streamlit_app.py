@@ -24,7 +24,13 @@ st.write(
     "**表頭の項目**も 1 行 = 1 地点の表にします．"
 )
 
-up = st.file_uploader("3 の結果 (read.zip か ocred.csv)", type=["zip", "csv"])
+use_sample = st.checkbox("見本のデータを使う", value=True,
+                         help="2・3 を通さずに，この場で試せます")
+if use_sample:
+    up = _shared.LocalFile(_shared.SAMPLE_READ)
+    st.info(f"見本の読み取り: {up.name}")
+else:
+    up = st.file_uploader("3 の結果 (read.zip か ocred.csv)", type=["zip", "csv"])
 if up is None:
     st.info("3 で受け取った zip を選んでください．")
     _shared.footer()
