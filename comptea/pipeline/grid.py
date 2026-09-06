@@ -1,6 +1,8 @@
 """段階1: 検出と格子を作り，目視できる画像と要約を出す
 
-    python run_pipeline.py IMAGE [--conf 30] [--conf-col 20] [--imgsz 1280]
+    python cli/run_pipeline.py IMAGE [--conf 30] [--conf-col 20] [--imgsz 1280]
+    python -m comptea.pipeline.grid IMAGE ...        (同じもの)
+    pipeline.run('grid', [IMAGE, ...])               (同じプロセスで呼ぶ)
 
 出力(すべて work/<画像名>/ の下)
     detect.csv    YOLO の検出結果
@@ -25,7 +27,7 @@ from . import common as _common
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description='検出と格子を作る(段階1)')
     p.add_argument('image', help='組成表の画像')
-    p.add_argument('--workdir', default=None, help='中間物の置き場(既定 yolo/work/<画像名>)')
+    p.add_argument('--workdir', default=None, help='中間物の置き場(既定はいまいる場所の work/<画像名>)')
     # 既定はパッケージに同梱した重み(どこから呼んでも見つかる)
     p.add_argument('--weights', default=None,
                    help='重み(既定は同梱の comptea.pt)')

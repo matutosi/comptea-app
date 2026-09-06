@@ -23,6 +23,13 @@ from PIL import Image
 
 # yolo/ から実行する前提だが，どこから呼ばれても通るようにしておく
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# **入れていなくても動くようにする**(2026-09-07)．`cli/` と `tests/` は
+# 同じことをしているが，ここだけ抜けており，パッケージを入れていない PC では
+# 実行の**途中で**落ちていた(中核の import が関数の中にあるので --help は通る)
+try:
+    import comptea                                  # noqa: F401
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 DATASET = 'labelme_data/YOLODataset'
 # 帯として評価するクラス．row は縦(y)，col は横(x)で切り出しが決まる

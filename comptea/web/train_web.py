@@ -11,12 +11,6 @@ from pathlib import Path
 from ultralytics import YOLO
 from multiprocessing import freeze_support
 
-# Set WD import custom modules
-if '__file__' not in locals():
-    WD = os.getcwd()
-else:
-    WD = Path(__file__).parent
-
 from comptea import util_file
 # from progress import st_capture_stderr
 

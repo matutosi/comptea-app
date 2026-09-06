@@ -20,6 +20,13 @@ import yaml
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# **入れていなくても動くようにする**(2026-09-07)．`cli/` と `tests/` は
+# 同じことをしているが，ここだけ抜けており，パッケージを入れていない PC では
+# 実行の**途中で**落ちていた(中核の import が関数の中にあるので --help は通る)
+try:
+    import comptea                                  # noqa: F401
+except ImportError:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import make_labels                              # noqa: E402
 
 Image.MAX_IMAGE_PIXELS = None

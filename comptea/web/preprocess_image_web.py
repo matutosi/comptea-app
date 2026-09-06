@@ -7,12 +7,6 @@ import sys
 import cv2
 import numpy as np
 
-# Set WD import custom modules
-if '__file__' not in locals():
-    WD = os.getcwd()
-else:
-    WD = Path(__file__).parent
-
 # import util_file
 
 # Page config

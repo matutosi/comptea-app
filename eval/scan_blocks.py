@@ -22,6 +22,13 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# **入れていなくても動くようにする**(2026-09-07)．`cli/` と `tests/` は
+# 同じことをしているが，ここだけ抜けており，パッケージを入れていない PC では
+# 実行の**途中で**落ちていた(中核の import が関数の中にあるので --help は通る)
+try:
+    import comptea                                  # noqa: F401
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 def parse_args():

@@ -8,12 +8,6 @@ import traceback
 import tempfile
 import shutil
 
-# Set WD import custom modules
-if '__file__' not in locals():
-    WD = os.getcwd()
-else:
-    WD = Path(__file__).parent
-
 from comptea import util_file
 
 # local library

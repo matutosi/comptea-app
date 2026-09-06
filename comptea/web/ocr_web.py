@@ -11,12 +11,6 @@ import shutil
 import torch
 torch.classes.__path__ = []  # set to empty.
 
-# Set WD import custom modules
-if '__file__' not in locals():
-    WD = os.getcwd()
-else:
-    WD = Path(__file__).parent
-
 from comptea import util_file
 from comptea import ocr
 from comptea import locate

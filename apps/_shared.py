@@ -15,7 +15,6 @@ os.environ.setdefault("YOLO_CONFIG_DIR", os.path.join(tempfile.gettempdir(),
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CORE = os.path.join(ROOT, "comptea")
-WEIGHTS = os.path.join(CORE, "weights", "comptea.pt")
 SAMPLE = os.path.join(ROOT, "examples", "sample.jpg")
 # 見本の中間データ．前の工程を通さずに試せるようにしておく
 SAMPLE_GRID = os.path.join(ROOT, "examples", "sample_grid.zip")
@@ -45,6 +44,10 @@ class LocalFile(io.BytesIO):
 # `import locate` が通ってしまい，パッケージと二重に読み込まれる
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
+
+# 重みの場所は**パッケージが持つ**(2026-09-07)．ここで組み立て直すと，
+# 置き場を変えたときに 2 か所直すことになる
+from comptea import WEIGHTS                          # noqa: E402,F401
 
 # 無料枠のメモリに収まる大きさ．超える画像は手元の CUI へ誘導する
 MAX_SIDE = 4000
