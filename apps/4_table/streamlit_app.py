@@ -49,9 +49,12 @@ st.caption(f"読み取り: {len(pd.read_csv(p_ocr))} セル")
 sig = _shared.upload_sig(up)
 res = _shared.cached("4_table", sig)
 
+keep_absent = st.checkbox("非出現のセルも行として残す", value=False,
+                          help="CUI の --keep-absent と同じ")
 if st.button("組み上げる", type="primary"):
     with st.spinner("組み上げています"):
-        _, log = pipeline.run("table", [wd])
+        _, log = pipeline.run("table", [wd] + (["--keep-absent"] if keep_absent
+                                                else []))
     p_long = os.path.join(wd, "comp_table_long.csv")
     if not os.path.isfile(p_long):
         _shared.fail_with("組み上げに失敗しました", log)

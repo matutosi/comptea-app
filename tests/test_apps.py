@@ -176,17 +176,22 @@ def test_1枚に表が2つ以上あるとき別々の置き場から集める(tm
 
     wd = tmp_path / "out"
     wd.mkdir()
-    for name in ("out_t1_s1", "out_t1_s2", "out_t2"):
+    src = tmp_path / "sheet.png"                               # 受け取った紙面
+    src.write_bytes(b"\x89PNG\r\n")
+    part = tmp_path / "out_t1_s1.png"                          # 切り出した部分画像
+    part.write_bytes(b"\x89PNG\r\n")
+    for name, ref in (("out_t1_s1", part), ("out_t1_s2", src), ("out_t2", src)):
         d = tmp_path / name
         d.mkdir()
-        (d / "located.csv").write_text("x\n", encoding="utf-8")
-    (tmp_path / "out_t1_s1.png").write_bytes(b"\x89PNG\r\n")   # 部分画像
+        (d / "located.csv").write_text(f"source_image,x\n{ref},1\n",
+                                       encoding="utf-8")
     (tmp_path / "out_t9").mkdir()                              # 格子が無い置き場
 
-    got = _shared.grid_tables(str(wd))
+    got = _shared.grid_tables(str(wd), str(src))
     assert [n for n, _, _ in got] == ["out_t1_s1", "out_t1_s2", "out_t2"]
-    assert got[0][2] and got[0][2].endswith("out_t1_s1.png")   # 画像も渡す
-    assert got[1][2] is None
+    # 格子が受け取った紙面とは別の画像を指していれば，その画像も渡す
+    assert got[0][2] and got[0][2].endswith("out_t1_s1.png")
+    assert got[1][2] is None and got[2][2] is None
 
 
 def test_表が1つならそのまま渡す(tmp_path):
@@ -194,6 +199,26 @@ def test_表が1つならそのまま渡す(tmp_path):
 
     wd = tmp_path / "out"
     wd.mkdir()
-    (wd / "located.csv").write_text("x\n", encoding="utf-8")
+    (wd / "located.csv").write_text("x\n1\n", encoding="utf-8")
     got = _shared.grid_tables(str(wd))
-    assert len(got) == 1 and got[0][0] == "out"
+    assert len(got) == 1 and got[0][0] == "out" and got[0][2] is None
+
+
+def test_傾きを直した紙面はその画像も渡す(tmp_path):
+    """格子の座標は `located.csv` が指す画像のもの(2026-09-07)
+
+    CUI はそれをそのまま使うが，GUI は 3 で受け取った画像に当て直して
+    いたので，傾きを直した紙面(最大 1.5°)で座標がずれていた．
+    """
+    import _shared
+
+    wd = tmp_path / "out"
+    wd.mkdir()
+    src = tmp_path / "page.png"
+    src.write_bytes(b"\x89PNG\r\n")
+    fixed = tmp_path / "out_deskew.png"
+    fixed.write_bytes(b"\x89PNG\r\n")
+    (wd / "located.csv").write_text(f"source_image,x\n{fixed},1\n",
+                                    encoding="utf-8")
+    got = _shared.grid_tables(str(wd), str(src))
+    assert got[0][2] and got[0][2].endswith("out_deskew.png")

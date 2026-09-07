@@ -65,7 +65,8 @@ loc_path = _shared.take_zip(loc_up, wd, "located.csv",
 part = os.path.join(wd, "image.png")
 if os.path.isfile(part):
     src = part
-    st.info("2 で切り出した部分画像を使います(格子はこの画像の座標です)．")
+    st.info("2 が格子を作った画像(傾きを直したもの，または切り出した部分画像)を"
+            "使います．格子の座標はこの画像のものです．")
 
 # 画像の場所は，この場で置いた写しに読み替える
 loc = pd.read_csv(loc_path)
@@ -166,10 +167,14 @@ if res:
             if not len(i) or str(d.loc[i[0], "corrected"]) == str(r["corrected"]):
                 continue
             i = i[0]
-            d.loc[i, "corrected"] = r["corrected"]
-            # 直した値も，同じ規則で検証する(通ったかどうかを status に返す)
+            # **人の入力は「読み」として扱う**(CUI の apply_text と同じ．2026-09-07)．
+            # 同じ規則で整えて corrected と status を作る．入力をそのまま
+            # corrected に入れると，`5・5` のように整っていない値が
+            # 「OK」のまま次の工程へ行き，値として通らない
             again = correct_text.correct_cell(d.loc[i, "obj_name"],
                                               str(r["corrected"]))
+            d.loc[i, "text"] = r["corrected"]
+            d.loc[i, "corrected"] = again["corrected"]
             d.loc[i, "status"] = again["status"]
             note = str(d.loc[i, "note"] or "").strip(";") if "note" in d else ""
             d.loc[i, "note"] = (note + ";" if note else "") + "hand"

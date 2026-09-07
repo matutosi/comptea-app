@@ -83,15 +83,15 @@ if st.button("格子を作る", type="primary"):
                                        "--workdir", wd])
     # **1 枚に表が 2 つ以上あると，別々の置き場ができる**(2026-09-07)．
     # `wd` だけを見ていたので，そういう紙面は「作れなかった」ことになっていた
-    found = _shared.grid_tables(wd)
+    found = _shared.grid_tables(wd, src)
     if not found:
         _shared.fail_with("格子が作れませんでした", log)
     tables = []
     for name, d, part in found:
         p_sum = os.path.join(d, "summary.txt")
         p_over = os.path.join(d, "overlay.png")
-        # 部分画像に切り出した表は，**その画像も一緒に渡す**
-        # (格子の座標は部分画像のもの．元の紙面では合わない)
+        # 格子が別の画像(傾きを直したもの・部分画像)を指していれば，
+        # **その画像も一緒に渡す**(格子の座標はその画像のもの)
         if part:
             import shutil
 

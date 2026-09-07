@@ -426,7 +426,7 @@ def replace_in_zip(blob, name, text):
     return buf.getvalue()
 
 
-def grid_tables(wd):
+def grid_tables(wd, src=None):
     """格子ができた置き場を，表ごとに集める
 
     **1 枚の紙面に表が 2 つ以上あると，別々の置き場ができる**
@@ -434,21 +434,35 @@ def grid_tables(wd):
     そこだけを見ると「格子が作れなかった」ことになっていた
     (2026-09-07 に 23 枚を通して見つけた)．
 
-    切り出した部分画像(`<置き場>.png`)があれば，**次の工程はそれを使う**
-    (格子の座標は部分画像のもの)．
+    **格子の座標は，`located.csv` の `source_image` が指す画像のもの**．
+    傾きを直した紙面(`<wd>_deskew.png`)や，部分画像に切り出した表
+    (`<wd>_s1.png`)では，受け取った画像とは別のファイルになる．
+    CUI はそれをそのまま使うが，GUI は 3 で受け取った画像に当て直して
+    いたので，**傾きを直した紙面で座標がずれていた**(2026-09-07)．
+    その画像を一緒に渡す．
 
     Returns:
-        [(名前, 置き場, 部分画像かNone), ...]．できていなければ空
+        [(名前, 置き場, 一緒に渡す画像かNone), ...]．できていなければ空
     """
     import glob
 
+    import pandas as pd
+
     out = []
     for d in [wd] + sorted(glob.glob(wd + "_*")):
-        if not os.path.isdir(d) or not os.path.isfile(os.path.join(d, "located.csv")):
+        loc = os.path.join(d, "located.csv")
+        if not os.path.isdir(d) or not os.path.isfile(loc):
             continue
-        name = os.path.basename(d)
-        img = d + ".png"
-        out.append((name, d, img if os.path.isfile(img) else None))
+        img = None
+        try:
+            ref = pd.read_csv(loc, usecols=["source_image"], nrows=1)
+            ref = str(ref["source_image"].iloc[0])
+            if os.path.isfile(ref) and (src is None or
+                                        os.path.abspath(ref) != os.path.abspath(src)):
+                img = ref
+        except Exception:                        # noqa: BLE001  列が無い
+            img = None
+        out.append((os.path.basename(d), d, img))
     return out
 
 

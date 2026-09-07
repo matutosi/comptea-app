@@ -62,9 +62,12 @@ if up.name.lower().endswith(".pdf"):
     with st.spinner("ページを PNG に直しています"):
         for i in range(n):
             img = split_sheet.load_page(src, page=i)
-            p = os.path.join(work, f"{stem}_page{i + 1}.png")
+            # **1 ページだけなら CUI と同じ名前**(`<stem>_p1` …)にする．
+            # 以後の置き場の名前が CUI とそろう(2026-09-07)
+            name = stem if n == 1 else f"{stem}_page{i + 1}"
+            p = os.path.join(work, f"{name}.png")
             img.save(p)
-            pages.append((f"{stem}_page{i + 1}", img, p))
+            pages.append((name, img, p))
 else:
     img = Image.open(src)
     pages.append((stem, img, src))
