@@ -1,14 +1,21 @@
 """段階2: 目視で読むセルを切り出す
 
-    python crop_cells.py WORKDIR [--what review|regions|all] [--ids 12,34] [--class comp]
+    python crop_cells.py WORKDIR [--what review|regions|all] [--ids 12,34]
+                                 [--class comp] [--by-class]
 
 出力(work/crops/)
     region_<cell_id>_<クラス>.png   文章として読む領域(表頭・1回出現種)は原寸で1枚ずつ
     sheet_NN.png                    小さいセルは cell_id を焼き込んで1枚にまとめる
+    sheet_NN_<クラス>.png           `--by-class` のとき．1枚が1クラスだけになる
     index.tsv                       どの cell_id がどの画像に入っているか
 
 小さいセルを1枚ずつ渡すと読む回数が増えるので，**まとめて1枚**にする．
 番号が焼いてあるので，読んだ結果は cell_id で指して apply_text.py に渡せる．
+
+`--by-class` は，読む側が**字種を決め打ちできる**ようにするためのもの．
+組成部なら来る字は `5 4 3 2 1 + r ・` だけ，階層なら `B T S K H M` と数字だけ．
+字種を絞ると読みが良くなるのは `ocr.retry_empty_comp()` で実証済み
+(kinki_047 の組成部 0.446 → 1.000)．
 """
 import argparse
 import sys
@@ -30,6 +37,8 @@ def parse_args():
     p.add_argument('--ids', default=None, help='cell_id を直に指定(カンマ区切り)')
     p.add_argument('--class', dest='cls', default=None, help='クラスで絞る(カンマ区切り)')
     p.add_argument('--pad', type=int, default=6, help='切り出しの余白(px)')
+    p.add_argument('--by-class', action='store_true',
+                   help='一覧画像をクラスごとに分ける(1枚が1クラスだけになる)')
     return p.parse_args()
 
 
@@ -58,6 +67,25 @@ def crop(img, row, pad):
     return img.crop((x1, y1, x2, y2))
 
 
+def _sheet_groups(tiles, by_class):
+    """一覧画像に並べるまとまりを返す [(クラス名, タイル), ...]
+
+    既定は全部を1つのまとまりにする(これまでどおり)．
+    `--by-class` のときはクラスごとに分け，**1枚を1クラスだけ**にする．
+    並びは最初に出てきた順(cell_id の順)を保つ．
+    """
+    if not by_class:
+        return [('', tiles)]
+    order, groups = [], {}
+    for t in tiles:
+        cls = t[3]
+        if cls not in groups:
+            order.append(cls)
+            groups[cls] = []
+        groups[cls].append(t)
+    return [(cls, groups[cls]) for cls in order]
+
+
 def make_sheet(tiles, path):
     """cell_id を焼き込んだタイルを1枚に並べる"""
     from PIL import Image, ImageDraw, ImageFont
@@ -72,7 +100,7 @@ def make_sheet(tiles, path):
     rows = (len(tiles) + cols - 1) // cols
     sheet = Image.new('RGB', (cols * (tw + 8) + 8, rows * (th + 8) + 8), 'white')
     draw = ImageDraw.Draw(sheet)
-    for i, (cell_id, tile, label) in enumerate(tiles):
+    for i, (cell_id, tile, label, *_) in enumerate(tiles):
         x = 8 + (i % cols) * (tw + 8)
         y = 8 + (i // cols) * (th + 8)
         draw.rectangle([x - 2, y - 2, x + tw + 1, y + th + 1], outline='gray')
@@ -123,19 +151,25 @@ def main():
             scale = TILE_H / piece.height
             size = (min(TILE_W_MAX, max(1, int(piece.width * scale))), TILE_H)
             label = f'{row["obj_name"]} r{row.get("row")}c{row.get("col")}'
-            tiles.append((cell_id, piece.resize(size, Image.LANCZOS), label))
+            tiles.append((cell_id, piece.resize(size, Image.LANCZOS), label,
+                          str(row['obj_name'])))
             index.append({'cell_id': cell_id, 'obj_name': row['obj_name'],
                           'file': '', 'kind': 'tile'})
-    # まとめた画像は，1枚に詰めすぎると読めないので分ける
-    for i in range(0, len(tiles), PER_SHEET):
-        sheets += 1
-        name = f'sheet_{sheets:02d}.png'
-        chunk = tiles[i:i + PER_SHEET]
-        make_sheet(chunk, out / name)
-        ids = {c[0] for c in chunk}
-        for rec in index:
-            if rec['kind'] == 'tile' and rec['cell_id'] in ids:
-                rec['file'] = name
+    # まとめた画像は，1枚に詰めすぎると読めないので分ける．
+    # `--by-class` を付けると**1枚を1クラスだけ**にする．読む側が
+    # 「このセルに来る字は `5 4 3 2 1 + r ・` だけ」と決め打ちできる
+    # (字種を絞ると読みが良くなるのは ocr.retry_empty_comp() で実証済み)
+    for cls, group_tiles in _sheet_groups(tiles, args.by_class):
+        for i in range(0, len(group_tiles), PER_SHEET):
+            sheets += 1
+            chunk = group_tiles[i:i + PER_SHEET]
+            name = (f'sheet_{sheets:02d}_{cls}.png' if args.by_class
+                    else f'sheet_{sheets:02d}.png')
+            make_sheet(chunk, out / name)
+            ids = {c[0] for c in chunk}
+            for rec in index:
+                if rec['kind'] == 'tile' and rec['cell_id'] in ids:
+                    rec['file'] = name
 
     pd.DataFrame(index).to_csv(out / 'index.tsv', sep='\t', index=False)
     print(f'切り出した: {len(index)} セル -> {out}')
