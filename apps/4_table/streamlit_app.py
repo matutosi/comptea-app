@@ -62,6 +62,7 @@ if st.button("組み上げる", type="primary"):
     p_chk = os.path.join(wd, "checks.txt")
     # **中身を憶える**．作業ディレクトリは再実行のたびに作り直されるので，
     # 場所ではなく中身を預ける
+    _shared.strip_paths(wd)
     res = {
         "long": pd.read_csv(p_long),
         "plot": pd.read_csv(p_plot) if os.path.isfile(p_plot) else None,

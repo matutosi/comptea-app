@@ -91,6 +91,45 @@ def too_big_to_split(img):
             "(無料枠のメモリに収まらないため)．手元で CUI を使ってください．")
 
 
+PATH_COLUMNS = ("source_image", "model")
+
+
+def strip_paths(work, names=None):
+    """表の中の場所を，**ファイル名だけ**にする(2026-09-07 ユーザ指示)
+
+    画面から使うときの作業ディレクトリは一時的なもので
+    (`C:\\...\\Temp\\comptea_ab12\\out`)，そのまま書き出すと
+    **受け取った人には意味の無い長い場所**が残る．
+    次の工程は zip の中の画像を使うので，名前だけあれば足りる．
+
+    CUI は元の場所をそのまま残す(そこから画像を開くため)．
+
+    Returns:
+        直した表の数
+    """
+    import pandas as pd
+
+    n = 0
+    for name in (names or os.listdir(work)):
+        p = os.path.join(work, name)
+        if not os.path.isfile(p) or not name.lower().endswith((".csv", ".tsv")):
+            continue
+        sep = "\t" if name.lower().endswith(".tsv") else ","
+        try:
+            d = pd.read_csv(p, sep=sep, dtype=str)
+        except Exception:                        # noqa: BLE001  表でないもの
+            continue
+        cols = [c for c in PATH_COLUMNS if c in d.columns]
+        if not cols:
+            continue
+        for c in cols:
+            d[c] = d[c].map(lambda v: os.path.basename(str(v))
+                            if isinstance(v, str) and v else v)
+        d.to_csv(p, sep=sep, index=False, encoding="utf-8-sig")
+        n += 1
+    return n
+
+
 def zip_files(work, names):
     """作業ディレクトリの中の何枚かを zip にまとめて返す(無ければ None)
 

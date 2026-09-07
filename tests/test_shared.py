@@ -237,3 +237,30 @@ def test_中核の古い写しを捨てる(monkeypatch, tmp_path):
 
     from comptea import split_sheet as again           # 読み直せる
     assert hasattr(again, "cut_table")
+
+
+def test_渡す表では場所をファイル名だけにする(tmp_path):
+    """画面の作業ディレクトリは一時的なもの(2026-09-07 ユーザ指示)
+
+    そのまま書き出すと，受け取った人には意味の無い長い場所が残る．
+    次の工程は zip の中の画像を使うので，名前だけあれば足りる．
+    CUI は元の場所をそのまま残す(そこから画像を開くため)．
+    """
+    import pandas as pd
+
+    (tmp_path / "located.csv").write_text(
+        "source_image,model,x1\n"
+        r"C:\Users\x\Temp\comptea_ab\out\page.png,C:\w\comptea.pt,10" + "\n",
+        encoding="utf-8")
+    (tmp_path / "review.tsv").write_text(
+        "source_image\tcell_id\n" + r"C:\Users\x\Temp\page.png" + "\t1\n",
+        encoding="utf-8")
+    (tmp_path / "overlay.png").write_bytes(b"\x89PNG\r\n")     # 表でないもの
+
+    assert _shared.strip_paths(str(tmp_path)) == 2
+    d = pd.read_csv(tmp_path / "located.csv", dtype=str)
+    assert d["source_image"].iloc[0] == "page.png"
+    assert d["model"].iloc[0] == "comptea.pt"
+    assert d["x1"].iloc[0] == "10"                             # 他の列は触らない
+    t = pd.read_csv(tmp_path / "review.tsv", sep="\t", dtype=str)
+    assert t["source_image"].iloc[0] == "page.png"

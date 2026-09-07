@@ -96,6 +96,8 @@ if st.button("格子を作る", type="primary"):
             import shutil
 
             shutil.copy(part, os.path.join(d, "image.png"))
+        # 渡す表では，場所をファイル名だけにする
+        _shared.strip_paths(d)
         tables.append({
             "name": name,
             "overlay": open(p_over, "rb").read() if os.path.isfile(p_over) else None,

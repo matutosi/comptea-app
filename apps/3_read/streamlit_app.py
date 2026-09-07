@@ -111,7 +111,11 @@ if st.button("読む", type="primary"):
     if len(df_plot):
         df_plot.to_csv(os.path.join(wd, "plot_table.csv"), index=False,
                        encoding="utf-8-sig")
-    # **中身を憶える**．読み取りは数分かかるので，再実行でやり直させない
+    # **中身を憶える**．読み取りは数分かかるので，再実行でやり直させない．
+    # 場所をファイル名だけにしてから読み直す(画面で直した値を書き戻すときも，
+    # 一時ディレクトリの長い場所が混じらない)
+    _shared.strip_paths(wd)
+    d = pd.read_csv(p_ocr)
     res = {
         "ocred": d,
         "plot": df_plot if len(df_plot) else None,
