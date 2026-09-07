@@ -91,7 +91,10 @@ def too_big_to_split(img):
             "(無料枠のメモリに収まらないため)．手元で CUI を使ってください．")
 
 
+
+# 場所が入る列．区切りは走らせている側に依らず両方を見る
 PATH_COLUMNS = ("source_image", "model")
+BS = chr(92)                # 円記号(バックスラッシュ)
 
 
 def strip_paths(work, names=None):
@@ -104,10 +107,23 @@ def strip_paths(work, names=None):
 
     CUI は元の場所をそのまま残す(そこから画像を開くため)．
 
+    **区切りは「スラッシュ」と「円記号」の両方を見る**(2026-09-07)．
+    `os.path.basename` は走らせている側の区切りしか見ないので，
+    Windows で作った表を Linux で読むと(公開先はそちら)，場所が落ちない．
+
     Returns:
         直した表の数
     """
+    import re
+
     import pandas as pd
+
+    def leaf(v):
+        if not isinstance(v, str) or not v:
+            return v
+        # **区切りを片方に寄せてから切る**．`os.path.basename` も
+        # 正規表現も，書き方を誤ると片方の区切りしか見ない
+        return v.replace(BS, '/').rsplit('/', 1)[-1]
 
     n = 0
     for name in (names or os.listdir(work)):
@@ -123,8 +139,7 @@ def strip_paths(work, names=None):
         if not cols:
             continue
         for c in cols:
-            d[c] = d[c].map(lambda v: os.path.basename(str(v))
-                            if isinstance(v, str) and v else v)
+            d[c] = d[c].map(leaf)
         d.to_csv(p, sep=sep, index=False, encoding="utf-8-sig")
         n += 1
     return n
