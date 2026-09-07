@@ -45,7 +45,7 @@ def add_margin(img, top=20, right=20, bottom=20, left=20, color='white'):
 READER = easyocr.Reader(['ja', 'en'])   # 作るのに時間がかかるので使い回す
 
 
-def ocr_image(img, box, reader = READER, clean=False):
+def ocr_image(img, box, reader = READER, clean=False, allow=None):
     # **座標の上下・左右を整える**(2026-09-03)．格子の端で高さや幅が
     # 負になる箱ができることがあり(s01115_18_p2 の表頭の 1 行)，
     # そのまま crop すると PIL が落ちて読み取りが途中で止まる
@@ -61,6 +61,18 @@ def ocr_image(img, box, reader = READER, clean=False):
     # (s01115_13_p1 は 2,134 セルの途中で終わっていた)
     if img.width < 1 or img.height < 1:
         return [], img
+    if allow:
+        # **字種を絞って読む**．来る字が決まっているセル(いまは階層)では，
+        # 絞らないと `S・K` が `So`・`Ss` になり，1 文字ずつ繋いだ結果
+        # `S;O` という**それらしい値**になっていた(2026-09-07 ユーザ指摘)．
+        # 絞れないもの(見出しの行が列に掛かったセル)は空で返る．
+        # そのときは絞らずに読み直し，**何が写っているか**を目視へ回す
+        text = reader.readtext(np.array(img), allowlist=allow)
+        # **中身のあるときだけ採る**．絞ると，字はあるのに空の結果が返ることが
+        # ある(種群の見出しの行が列に掛かったセル)．そのときは絞らずに読み，
+        # **何が写っているか**を目視へ回す
+        if any(str(t[1]).strip() for t in text):
+            return text, img
     text = reader.readtext(np.array(img))
     return text, img
 
@@ -72,7 +84,11 @@ COMP_ALLOW = '0123456789+r.,:;・'   # 被度・群度に出る字だけ
 # (s01115_22_p2 の Need Check 46 セルで 0 件 → 字種を足すと 20 件)．
 CONSTANCY_ALLOW = COMP_ALLOW + 'IViv()-'
 # 階層に出る字だけ(docs/vegetation_science.md 3.4)．`S・K` のように 2 つ
-# 書かれることがあるので区切りも入れる．**添字は 1 か 2**
+# 書かれることがあるので区切りも入れる．**添字は 1 か 2**．
+# **最初からこれで読む**(2026-09-07 ユーザ提案．見本の 27 セルで測った)．
+#   絞らない: `S・K` が `So`・`Ss`・`So口`，`K` が `I`
+#   絞る    : `S・`(K は下線で読めない)，`K` は正しく読める
+# 見出しの行が列に掛かったセルは空で返るので，そのときだけ絞らずに読む
 LAYER_ALLOW = 'TSKBHM12・.,;'
 # 「何も無いセル」と「値のあるセル」の黒画素の間に，2つの高さを置く．
 #   RETRY_AT より濃ければ読み直す / THIN_AT より薄ければ1文字の値しか認めない
@@ -183,7 +199,9 @@ def ocr_images_df(df):
         x2 = row['x2']
         y2 = row['y2']
         box = (x1, y1, x2, y2) # crop range: left, top, right, bottom
-        text, img_ocred = ocr_image(img, box, clean=row.get('obj_name') == 'comp')
+        obj = row.get('obj_name')
+        text, img_ocred = ocr_image(img, box, clean=obj == 'comp',
+                                    allow=LAYER_ALLOW if obj == 'layer' else None)
         if text:
             # 1つのセルが複数行になることがある(表頭の調査年月日など)．
             # 先頭だけ取ると残りが落ちるので，読めたものを読み順につなぐ．

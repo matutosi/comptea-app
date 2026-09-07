@@ -193,3 +193,9 @@ def test_区切りがあるのに1つしか読めなければ値にしない():
 def test_同じ階層が二度並ぶ値は認めない():
     assert ct.validate_layer("S;K") is True
     assert ct.validate_layer("S;S") is False
+
+
+def test_読めなかったときは読んだままの字を返す():
+    """繋いだ形(`S;S`)を返すと，直すときに「階層が 2 つ」と誤解する"""
+    assert ct.correct_layer("Ss")["corrected"] == "SS"
+    assert ct.correct_layer("So")["corrected"] == "SO"

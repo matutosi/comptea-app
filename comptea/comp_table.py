@@ -536,7 +536,9 @@ def comp_table(df: pd.DataFrame, keep_absent: bool = False) -> pd.DataFrame:
                 f'階層として読めない読みが {len(raw)} 行あった'
                 f"({', '.join(kinds)}…)．"
                 "**layer 列からは外し，layer_raw に残した**．"
-                'セルを見て直すか，段階2で読み直す．')
+                'セルを見て直すか，段階2で読み直す．'
+                '(`S` のように形は正しく見えても，`S・K` の `K` を読み落として'
+                'いるものが混じる)')
 
     n_check = (res['status'] == 'Need Check').sum()
     if n_check:

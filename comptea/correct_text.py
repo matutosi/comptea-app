@@ -56,9 +56,12 @@ def correct_layer(str):
     raw = unicodedata.normalize('NFKC', str).upper()
     if len(tokens) < 2 and LAYER_SEP.sub('', raw) != raw.replace(' ', ''):
         return {'corrected': corrected, 'status': 'Need Check'}
-    corrected = ';'.join(tokens)
-    if not validate_layer(corrected):
+    joined = ';'.join(tokens)
+    if not validate_layer(joined):
+        # **繋いだ形は返さない**．`Ss` を `S;S` と返すと，読み直すときに
+        # 「階層が 2 つ」と誤解する．読んだままの字を残して目視に回す
         return {'corrected': corrected, 'status': 'Need Check'}
+    corrected = joined
     return {'corrected': corrected,
             'status': 'multi' if len(tokens) > 1 else 'OK'}
 
