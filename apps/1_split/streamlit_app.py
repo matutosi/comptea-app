@@ -69,14 +69,10 @@ else:
 
 for name, img, _ in pages:
     st.caption(f"{name}: {img.size[0]} x {img.size[1]} px")
-big = [n for n, im, _ in pages if max(im.size) > _shared.MAX_SPLIT_SIDE]
+big = [(n, _shared.too_big_to_split(im)) for n, im, _ in pages]
+big = [f"{n}: {m}" for n, m in big if m]
 if big:
-    st.error(
-        f"長辺が {_shared.MAX_SPLIT_SIDE} px を超えるページがあります({', '.join(big)})．"
-        "ここでは扱えないので，手元で CUI を使ってください．"
-    )
-    _shared.footer()
-    st.stop()
+    _shared.fail_with("大きすぎるページがあります．\n\n" + "\n\n".join(big))
 
 # **切り分けは 1 度だけ**．ここはボタンの中に無いので，前は再実行のたびに
 # やり直していた(A0 の紙面では毎回数十秒．受け取りのボタンを押しても起きる)

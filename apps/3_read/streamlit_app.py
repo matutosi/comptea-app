@@ -124,8 +124,58 @@ if res:
         for w in res["plot_warnings"]:
             st.caption(f"! {w}")
 
-    st.subheader("読んだセル (先頭 30)")
-    st.dataframe(d.head(30), use_container_width=True)
+    st.subheader("読んだセル")
+    c1, c2 = st.columns([1, 2])
+    n_show = _shared.how_many("出す行数", "n_read")
+    only_ng = c2.checkbox("Need Check だけ出す", value=False,
+                          help="直すところだけを見たいとき")
+    view = d[d["status"] == "Need Check"] if only_ng and "status" in d else d
+    view = view if n_show is None else view.head(n_show)
+    st.caption(f"{len(view)} 行を出しています(全 {len(d)} 行)．"
+               "**`corrected` は直せます**．直したら下のボタンで反映してください．")
+
+    shown = _shared.cell_images(view, src)
+    cols = [c for c in ["画像", "cell_id", "obj_name", "row", "col",
+                        "text", "corrected", "status", "note"]
+            if c in shown.columns]
+    edited = st.data_editor(
+        shown[cols], use_container_width=True, hide_index=True,
+        disabled=[c for c in cols if c != "corrected"],
+        column_config={
+            "画像": st.column_config.ImageColumn("実物", width="medium"),
+            "text": st.column_config.TextColumn("読み", width="small"),
+            "corrected": st.column_config.TextColumn("直した値", width="small"),
+        },
+        key="read_editor")
+
+    if st.button("直した値を反映する"):
+        from comptea import correct_text                  # noqa: E402
+
+        n = 0
+        for _, r in edited.iterrows():
+            i = d.index[d["cell_id"] == r["cell_id"]]
+            if not len(i) or str(d.loc[i[0], "corrected"]) == str(r["corrected"]):
+                continue
+            i = i[0]
+            d.loc[i, "corrected"] = r["corrected"]
+            # 直した値も，同じ規則で検証する(通ったかどうかを status に返す)
+            again = correct_text.correct_cell(d.loc[i, "obj_name"],
+                                              str(r["corrected"]))
+            d.loc[i, "status"] = again["status"]
+            note = str(d.loc[i, "note"] or "").strip(";") if "note" in d else ""
+            d.loc[i, "note"] = (note + ";" if note else "") + "hand"
+            n += 1
+        if n:
+            res["ocred"] = d
+            res["zip"] = _shared.replace_in_zip(
+                res["zip"], "ocred.csv", d.to_csv(index=False))
+            _shared.remember("3_read", sig, res)
+            st.success(f"{n} 件を直しました(`note` に `hand`)．"
+                       "下の zip に反映してあります．")
+            st.rerun()
+        else:
+            st.info("直したところはありませんでした．")
+
     _shared.offer(res["zip"], "read.zip",
                   "この zip をそのまま「4. 縦持ちに組んで検査する」に渡してください．")
 _shared.footer()

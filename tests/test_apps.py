@@ -128,3 +128,39 @@ exec(compile(open(path, encoding="utf-8").read(), path, "exec"),
 
     at.run()                                      # 再実行しても作り直さない
     assert at.session_state["1_split"]["value"] is kept
+
+
+# --- 扱える大きさ -------------------------------------------------------
+
+def test_折り込みは切り分けを通り検出には大きすぎると案内する():
+    """**長辺で切ってはいけない**(2026-09-07 ユーザ報告)
+
+    A0 の折り込み(9344 x 12873 px)は長辺 8000 px を超えるが，
+    それを表ごとに切るのがこの道具の役目だった．測ると切り分けの山は
+    520 MB で無料枠に収まる．検出は縮尺(imgsz)でメモリが決まる．
+    """
+    import _shared
+    from PIL import Image
+
+    sheet = Image.new("L", (9344, 12873))
+    assert _shared.too_big_to_split(sheet) is None
+    msg = _shared.too_big(sheet)
+    assert msg and "1. 折り込みを表ごとに切る" in msg
+
+    page = Image.new("L", (2286, 3293))          # 本のページ
+    assert _shared.too_big(page) is None
+    assert _shared.too_big_to_split(page) is None
+
+    huge = Image.new("L", (20000, 20000))        # 400 Mpx は切り分けも無理
+    assert _shared.too_big_to_split(huge)
+
+
+def test_Secretsが無くても画面に誤りを出さない(monkeypatch, tmp_path):
+    """`st.secrets` は，ファイルが無いと**画面に誤りを出す**
+
+    工程の一覧を作るたびに触るので，1 画面に 8 個並んでいた(2026-09-07)．
+    """
+    import _shared
+
+    monkeypatch.setattr(_shared, "_secrets_file", lambda: None)
+    assert _shared.app_url("2_grid") is None

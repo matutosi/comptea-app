@@ -73,8 +73,14 @@ if res:
     c1.metric("縦持ちの行", len(lg))
     c2.metric("OK", int((lg["status"] == "OK").sum()))
     c3.metric("Need Check", int((lg["status"] == "Need Check").sum()))
-    st.subheader("縦持ちの表 (先頭 50)")
-    st.dataframe(lg.head(50), use_container_width=True)
+    st.subheader("縦持ちの表")
+    n_show = _shared.how_many("出す行数", "n_long", default=100)
+    only_ng = st.checkbox("Need Check だけ出す", value=False)
+    view = lg[lg["status"] == "Need Check"] if only_ng and "status" in lg else lg
+    st.caption(f"{len(view if n_show is None else view.head(n_show))} 行を"
+               f"出しています(全 {len(lg)} 行)")
+    st.dataframe(view if n_show is None else view.head(n_show),
+                 use_container_width=True)
 
     if res["plot"] is not None:
         st.subheader(f"表頭 ({len(res['plot'])} 地点)")

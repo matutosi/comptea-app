@@ -3,6 +3,7 @@
 工程を分けたので，**間の受け渡しが壊れると通しで何も出ない**．
 Cloud でだけ出た不具合が 2 件あり，どちらもここに歯止めを置く．
 """
+import io
 import os
 import zipfile
 
@@ -79,11 +80,12 @@ def test_無いものだけならNoneを返す(tmp_path):
 # --- 大きすぎる画像 -----------------------------------------------------
 
 def test_大きすぎる画像は手元のCUIへ誘導する():
+    """上限は**検出の縮尺**で決まる(2026-09-07 に測って決め直した)"""
     from PIL import Image
 
     assert _shared.too_big(Image.new("L", (100, 100))) is None
-    msg = _shared.too_big(Image.new("L", (_shared.MAX_SIDE + 1, 10)))
-    assert msg and "CUI" in msg
+    msg = _shared.too_big(Image.new("L", (12000, 3000)))
+    assert msg and "折り込み" in msg
 
 
 # --- 検出の返り値 -------------------------------------------------------
@@ -166,3 +168,45 @@ def test_できないときは終了コードと理由が返る(tmp_path):
     code, out = pipeline.run("table", [str(tmp_path / "無い")])
     assert code != 0
     assert out.strip()
+
+
+# --- 表の見せ方 ---------------------------------------------------------
+
+def test_出す行数を選べる(monkeypatch):
+    """長い表をそのまま出すと画面が重い(縦持ちは数千行になる)"""
+    import streamlit as st
+
+    monkeypatch.setattr(st, "selectbox", lambda *a, **k: 100, raising=False)
+    assert _shared.how_many("出す行数", "k") == 100
+    monkeypatch.setattr(st, "selectbox", lambda *a, **k: 0, raising=False)
+    assert _shared.how_many("出す行数", "k") is None      # 0 は「すべて」
+
+
+def test_セルの実物を切り出して並べる():
+    """**読んだ字の隣に実物を置く**．読みだけでは違いに気づけない"""
+    import pandas as pd
+
+    df = pd.DataFrame([{"x1": 100, "y1": 200, "x2": 300, "y2": 260},
+                       {"x1": 100, "y1": 260, "x2": 300, "y2": 320}])
+    got = _shared.cell_images(df, conftest.SAMPLE)
+    assert list(got.columns)[0] == "画像"
+    assert all(str(v).startswith("data:image/png;base64,") for v in got["画像"])
+
+
+def test_箱が無ければ画像の列を作らない():
+    import pandas as pd
+
+    df = pd.DataFrame([{"text": "S"}])
+    assert "画像" not in _shared.cell_images(df, conftest.SAMPLE).columns
+
+
+def test_zipの中の1枚を差し替える(tmp_path):
+    """直した値を，次の工程へそのまま渡すため"""
+    (tmp_path / "ocred.csv").write_text("x\n1\n", encoding="utf-8", newline="")
+    (tmp_path / "located.csv").write_text("y\n2\n", encoding="utf-8", newline="")
+    blob = _shared.zip_files(str(tmp_path), ["ocred.csv", "located.csv"])
+    new = _shared.replace_in_zip(blob, "ocred.csv", "x\n9\n")
+    with zipfile.ZipFile(io.BytesIO(new)) as z:
+        assert sorted(z.namelist()) == ["located.csv", "ocred.csv"]
+        assert z.read("ocred.csv").decode("utf-8-sig") == "x\n9\n"
+        assert z.read("located.csv").decode("utf-8") == "y\n2\n"

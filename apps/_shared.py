@@ -49,20 +49,44 @@ if ROOT not in sys.path:
 # 置き場を変えたときに 2 か所直すことになる
 from comptea import WEIGHTS                          # noqa: E402,F401
 
-# 無料枠のメモリに収まる大きさ．超える画像は手元の CUI へ誘導する
-MAX_SIDE = 4000
-# 切り分けは検出を通さないぶん軽いので，少し大きくても扱える
-MAX_SPLIT_SIDE = 8000
+# 無料枠(1 GB ほど)に収まる大きさ．**測って決めた**(2026-09-07)．
+# Streamlit Cloud が入れる CPU 版 torch で，見本の表を検出したときの山:
+#   imgsz 1280 → 432 MB   1856 → 609 MB   2560 → 781 MB
+#   imgsz 3200 → 857 MB   4288 → 1,091 MB(収まらない)
+# 検出の縮尺は紙面の長辺で決まる(`split_sheet.auto_imgsz`)ので，
+# **imgsz が 2560 までに収まる紙面**に限る(長辺およそ 6600 px)
+MAX_IMGSZ = 2560
+# 切り分けは検出を通さないので，効くのは画素数だけ．
+# A0 の折り込み(9344 x 12873 = 120 Mpx)で山は 520 MB だった．
+# **長辺で切ってはいけない**(2026-09-07 ユーザ報告)．折り込みの PDF は
+# 長辺 12873 px あり，この道具が受け持つべき紙面そのものだった
+MAX_SPLIT_PIXELS = 150_000_000
 
 
 def too_big(img):
-    """大きすぎる画像なら，その旨の文言を返す(問題なければ None)"""
-    if max(img.size) > MAX_SIDE:
-        return (f"この画像は長辺 {max(img.size)} px あります．"
-                f"ここでは長辺 {MAX_SIDE} px までしか扱えません"
-                "(無料枠のメモリに収まらないため)．"
-                "大きな折り込みは，手元で CUI を使ってください．")
-    return None
+    """検出にかけるには大きすぎる画像なら，その旨の文言を返す(問題なければ None)"""
+    from comptea import split_sheet
+
+    sz = split_sheet.auto_imgsz(*img.size)
+    if sz <= MAX_IMGSZ:
+        return None
+    return (f"この画像は {img.size[0]} x {img.size[1]} px あります．"
+            f"学習時と同じ縮尺で検出するには imgsz={sz} が要り，"
+            f"無料枠のメモリ(1 GB ほど)に収まりません"
+            f"(ここでは imgsz={MAX_IMGSZ}，長辺 6600 px ほどまで)．"
+            "**「1. 折り込みを表ごとに切る」で表ごとに切ってから**渡すか，"
+            "大きな紙面は手元で CUI を使ってください．")
+
+
+def too_big_to_split(img):
+    """切り分けにも大きすぎる画像なら，その旨の文言を返す"""
+    px = img.size[0] * img.size[1]
+    if px <= MAX_SPLIT_PIXELS:
+        return None
+    return (f"この画像は {img.size[0]} x {img.size[1]} px "
+            f"({px / 1e6:.0f} Mpx)あります．"
+            f"ここでは {MAX_SPLIT_PIXELS / 1e6:.0f} Mpx までしか扱えません"
+            "(無料枠のメモリに収まらないため)．手元で CUI を使ってください．")
 
 
 def zip_files(work, names):
@@ -167,12 +191,28 @@ def app_url(key):
         1_split = "https://..."
         2_grid  = "https://..."
     """
+    # **`st.secrets` は，ファイルが無いと画面に誤りを出す**(2026-09-07)．
+    # 工程の一覧を作るたびに触るので，1 画面に 8 個並んでいた．
+    # 置いてあるかを先に見て，無ければ触らない
+    if not _secrets_file():
+        return None
     try:
         import streamlit as st
 
         return st.secrets.get("urls", {}).get(key)
     except Exception:                            # noqa: BLE001
         return None
+
+
+def _secrets_file():
+    """Secrets のファイルがあるか(Cloud は `~/.streamlit/secrets.toml` に置く)"""
+    import pathlib
+
+    for p in (pathlib.Path.cwd() / ".streamlit" / "secrets.toml",
+              pathlib.Path.home() / ".streamlit" / "secrets.toml"):
+        if p.is_file():
+            return p
+    return None
 
 
 def nav(current):
@@ -280,6 +320,75 @@ def offer(zip_bytes, file_name, caption=None):
                        type="primary")
     if caption:
         st.caption(caption)
+
+
+# --- 表の見せ方 ---------------------------------------------------------
+
+SHOW_CHOICES = [30, 100, 300, 1000, 0]        # 0 は「すべて」
+
+
+def how_many(label, key, default=30):
+    """何行まで出すかを選ばせる(長い表をそのまま出すと画面が重い)"""
+    import streamlit as st
+
+    n = st.selectbox(label, SHOW_CHOICES, index=SHOW_CHOICES.index(default),
+                     format_func=lambda v: "すべて" if v == 0 else f"{v} 行",
+                     key=key)
+    return None if n == 0 else int(n)
+
+
+def cell_images(df, image, max_w=260):
+    """セルの箱を切り出して，`画像` の列に入れた写しを返す
+
+    **読んだ字の隣に実物を置く**．`status` だけでは，どこが違うのか分からない
+    (`S・K` を `So` と読んだセルは，読みだけ見ても気づけない)．
+    Streamlit の `ImageColumn` は data URI をそのまま出せる．
+    """
+    import base64
+    import io
+
+    from PIL import Image
+
+    if not image or not os.path.isfile(image):
+        return df
+    need = {"x1", "y1", "x2", "y2"}
+    if not need <= set(df.columns):
+        return df
+    src = Image.open(image)
+    out = []
+    for _, r in df.iterrows():
+        try:
+            box = (int(r["x1"]), int(r["y1"]), int(r["x2"]), int(r["y2"]))
+            cell = src.crop(box).convert("L")
+            if cell.width > max_w:
+                h = max(1, int(cell.height * max_w / cell.width))
+                cell = cell.resize((max_w, h), Image.LANCZOS)
+            buf = io.BytesIO()
+            cell.save(buf, format="PNG")
+            out.append("data:image/png;base64,"
+                       + base64.b64encode(buf.getvalue()).decode())
+        except Exception:                        # noqa: BLE001  切り出せない箱
+            out.append(None)
+    df = df.copy()
+    df.insert(0, "画像", out)
+    return df
+
+
+def replace_in_zip(blob, name, text):
+    """zip の中の 1 枚を書き換えた写しを返す(直した値を次の工程へ渡すため)"""
+    import io
+    import zipfile
+
+    if not blob:
+        return blob
+    buf = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(blob)) as src, \
+            zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as dst:
+        for info in src.infolist():
+            data = text.encode("utf-8-sig") if info.filename == name \
+                else src.read(info.filename)
+            dst.writestr(info.filename, data)
+    return buf.getvalue()
 
 
 def footer():
