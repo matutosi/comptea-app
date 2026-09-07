@@ -45,6 +45,37 @@ def test_一文字の読みは完全一致だけ採る():
     assert ";" not in got["corrected"]
 
 
+def test_短い読みは濁点以外の違いでは採らない():
+    """`マソウ` が `ロソウ` になっていた(2026-09-07．実データ)
+
+    辞書 27,027 件の和名を 1 文字だけ壊して測ると，別種に化ける率は
+    4 字 8.3% に対して 5 字 1.6% で，**4 字と 5 字のあいだで一桁落ちる**．
+    印字はそのまま残し，候補は `suggest` に入れて目視へ回す．
+    """
+    got = ct.correct_name("マソウ", target="j_name")
+    assert got["corrected"] == "マソウ"
+    assert got["status"] == "Need Check"
+    assert got.get("suggest")
+
+
+def test_短くても濁点だけの違いなら採る():
+    """濁点・半濁点だけの違いは，長さによらず化ける率が 1% 前後
+
+    実データで 4 字以下が直っていた件は，ほとんどがこれだった
+    (`イヌピワ` → `イヌビワ`，`ミソシダ` → `ミゾシダ`)．
+    """
+    got = ct.correct_name("イヌピワ", target="j_name")
+    assert got["corrected"] == "イヌビワ"
+    assert got["status"] == "suggested"
+    assert "suggest" not in got
+
+
+def test_長い読みはこれまでどおり採る():
+    got = ct.correct_name("ノリウッギ", target="j_name")
+    assert got["corrected"] == "ノリウツギ"
+    assert got["status"] == "suggested"
+
+
 def test_候補が多すぎるときは並べない():
     """短い語は距離 3 以内に何百と当たり，連ねると表を壊す"""
     got = ct.correct_name("随伴種", target="j_name")

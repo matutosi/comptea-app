@@ -239,6 +239,14 @@ MAX_SUGGEST = 5
 MAX_ADOPT_DIST = 1
 # この長さ以下の読みでは，距離 1 の候補を採らない(下の注記を見る)
 MIN_MATCH_LEN = 1
+# **濁点・半濁点以外の違いで候補を採るのに要る，読みの長さ**(2026-09-07)．
+# 短い読みほど距離 1 は「半分違う」に近づき，別種に化ける．
+# 辞書 27,027 件の和名を 1 文字だけ壊して測ると，化ける率は
+#   2 字 22.3% / 3 字 12.6% / 4 字 8.3% / **5 字 1.6%** / 6 字 0.9% / 7 字以上 0.3% 以下
+# で，**4 字と 5 字のあいだで一桁落ちる**．脱落が最も危ない(4 字で 11.6%)．
+# 濁点・半濁点だけの違いは別で，**長さによらず 1% 前後**なので，そちらは採る
+# (古い印刷は「クロヅル」を「クロツル」と組む．実データの短い修正はほぼこれ)．
+MIN_ADOPT_LEN = 5
 
 
 def _clean(text):
@@ -398,6 +406,7 @@ def correct_cell(obj_name, text):
         text: OCRで読んだ文字列
     Returns:
         {'corrected': 直した文字列, 'status': 'OK' / 'Need Check' / ...}
+        和名で読みが短いときは `suggest`(採らなかった候補)が付くことがある．
     """
     # 読めなかったセルは NaN で来る．辞書との比較に渡すと落ちるので先に外す
     # (非出現のセルは comp_table 側で 'absent' として扱われる)
@@ -466,6 +475,9 @@ def correct_name(input_str: str, target="s_name", dict_path_s="s_name.txt", dict
         dict_path_s: 学名の辞書ファイルのパス
     Returns:
         dict: 比較結果に応じた辞書。
+            {'corrected': 値, 'status': 'OK' / 'suggested' / 'Need Check'}
+            **読みが短くて候補を採らなかったとき**は `suggest` が付き，
+            `corrected` には印字がそのまま残る(2026-09-07)．
     """
     if not input_str:
         return None
@@ -536,6 +548,12 @@ def correct_name(input_str: str, target="s_name", dict_path_s="s_name.txt", dict
         return {"corrected": input_str, "status": "Need Check"}
 
     suggested_name = ";".join(candidates)
+    # **短い読みは，濁点・半濁点だけの違いでなければ採らない**(2026-09-07)．
+    # 印字をそのまま残して目視へ回し，候補は `suggest` で渡す
+    # (`corrected` に入れると，そのまま採られてしまう)．
+    if not same_kana and len(input_str) < MIN_ADOPT_LEN:
+        return {"corrected": input_str, "status": "Need Check",
+                "suggest": suggested_name}
     return {"corrected": suggested_name, "status": "suggested"}
 
 @lru_cache(maxsize=4)
