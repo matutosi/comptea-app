@@ -45,6 +45,36 @@ def test_一文字の読みは完全一致だけ採る():
     assert ";" not in got["corrected"]
 
 
+def test_和名に混じった空白は落とす():
+    """辞書 27,127 件に空白を含む和名は 0 件(2026-09-08 に数えた)
+
+    `サカ キ` が距離 1 で `サカキ` に当たっていた．掃除すれば完全一致になる．
+    """
+    got = ct.correct_name("サカ キ", target="j_name")
+    assert got == {"corrected": "サカキ", "status": "OK"}
+
+
+def test_和名に混じったひらがなは完全一致のときだけ落とす():
+    """辞書にも `西湖の葭` が 1 件あるので，無条件には落とせない
+
+    `のツタ` は落とすと `ツタ` に完全一致する(実データ．kinki_047)．
+    """
+    got = ct.correct_name("のツタ", target="j_name")
+    assert got == {"corrected": "ツタ", "status": "OK"}
+
+
+def test_ひらがなを落としても辞書に無ければ落とさない():
+    """落とした結果が辞書に無いなら，印字を残して距離の判断へ回す"""
+    got = ct.correct_name("のあいうツツ", target="j_name")
+    assert "のあいう" in got["corrected"] or got["status"] == "Need Check"
+
+
+def test_学名の空白は語の区切りなので詰めない():
+    got = ct.correct_name("Actinidia  arguta", target="s_name")
+    assert got["corrected"] == "Actinidia arguta"
+    assert got["status"] == "OK"
+
+
 def test_短い読みは濁点以外の違いでは採らない():
     """`マソウ` が `ロソウ` になっていた(2026-09-07．実データ)
 
