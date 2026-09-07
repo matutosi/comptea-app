@@ -182,3 +182,46 @@ def test_表頭も本体も空の列は捨てる(tmp_path):
 def test_列の検出が無ければ左端は決められない():
     df = det([box('sname', 0, 100, 200, 700)])
     assert name_col.body_left(df) is None
+
+
+# --- 横倒しに組まれた表 -------------------------------------------------
+
+def rotated_page(tmp_path, turn):
+    """字の行が横に走る紙面(`turn` なら 90 度回して縦に走らせる)"""
+    # **短辺 1500 px 未満は判定しない**(見出しだけの帯は字の行が数本しかなく，
+    # 比が当てにならない)．そこを超える大きさにする
+    a = np.full((2400, 1600), 255, dtype=np.uint8)
+    for y in range(100, 2300, 30):                 # 字の行
+        a[y:y + 14, 100:1500] = 0
+    im = Image.fromarray(a)
+    return im.transpose(Image.ROTATE_90) if turn else im
+
+
+def test_横倒しの表を見分けて90度回す(tmp_path):
+    """紙面の都合で 90 度回して組んだ表がある(s01115_04 の 3 表)
+
+    そのまま渡すと行と列が入れ替わり，46 地点の表から 102 列の格子ができた．
+    **切り出しと回転は 1 か所にまとめてある**(2026-09-07)．前は 3 か所に
+    写してあり，アプリだけが回していなかった．
+    """
+    from comptea import ink, split_sheet
+
+    upright = rotated_page(tmp_path, turn=False)
+    sideways = rotated_page(tmp_path, turn=True)
+    assert split_sheet.looks_rotated(ink.binarize(upright)) is False
+    assert split_sheet.looks_rotated(ink.binarize(sideways)) is True
+
+    cut, turned = split_sheet.cut_table(sideways, (0, 0, *sideways.size))
+    assert turned is True
+    assert cut.size == (sideways.size[1], sideways.size[0])   # 縦横が入れ替わる
+
+    cut, turned = split_sheet.cut_table(upright, (0, 0, *upright.size))
+    assert turned is False and cut.size == upright.size
+
+
+def test_小さすぎる切れ端は回さない(tmp_path):
+    """見出しだけの帯は字の行が数本しかなく，向きの比が当てにならない"""
+    from comptea import ink, split_sheet
+
+    small = rotated_page(tmp_path, turn=True).resize((300, 400))
+    assert split_sheet.looks_rotated(ink.binarize(small)) is False

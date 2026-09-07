@@ -266,6 +266,24 @@ def find_tables(dark, min_gutter=MIN_GUTTER, min_gap=MIN_GAP,
     return sorted(result, key=lambda b: (b[0], b[1]))
 
 
+def cut_table(im, box):
+    """紙面から表を 1 つ切り出す(**横倒しなら 90 度回して正す**)
+
+    切り出しはここに 1 つだけ置く(2026-09-07)．前は切り出しと回転が
+    3 か所に写してあり，**アプリだけが回していなかった**．横倒しの表を
+    回さずに渡すと，行と列が入れ替わったまま格子ができる
+    (Tab.12 は 46 地点の表から 102 列になった)．
+
+    Returns:
+        (切り出した画像, 回したかどうか)
+    """
+    cut = im.crop(tuple(int(v) for v in box))
+    if looks_rotated(ink.binarize(cut)):
+        # 横倒しに組まれた表．**時計回りに 90 度回して**正す
+        return cut.transpose(Image.ROTATE_270), True
+    return cut, False
+
+
 def split_sheet(path, outdir, page=0, dpi=300, **kw):
     """シートを表ごとの画像に切り分けて書き出す．書いた場所と箱の一覧を返す"""
     im = load_page(path, page=page, dpi=dpi)
@@ -276,10 +294,7 @@ def split_sheet(path, outdir, page=0, dpi=300, **kw):
     written = []
     for i, box in enumerate(boxes, 1):
         dst = os.path.join(outdir, f'{stem}_p{i}.png')
-        cut = im.crop(box)
-        if looks_rotated(ink.binarize(cut)):
-            # 横倒しに組まれた表．**時計回りに 90 度回して**正す
-            cut = cut.transpose(Image.ROTATE_270)
+        cut, _ = cut_table(im, box)
         cut.save(dst)
         written.append((dst, box))
     return written
@@ -313,9 +328,8 @@ def main():
         if not a.dry_run:
             os.makedirs(a.outdir, exist_ok=True)
             dst = os.path.join(a.outdir, f'{stem}_p{i}.png')
-            cut = im.crop((x1, y1, x2, y2))
-            if looks_rotated(ink.binarize(cut)):
-                cut = cut.transpose(Image.ROTATE_270)
+            cut, turned = cut_table(im, (x1, y1, x2, y2))
+            if turned:
                 print(f'      **横倒しに組まれていたので 90 度回した** '
                       f'({cut.size[0]} x {cut.size[1]})')
             cut.save(dst)

@@ -88,12 +88,15 @@ if res is None:
                 boxes = split_sheet.find_tables(ink.binarize(img))
             names = []
             for i, b in enumerate(boxes, 1):
-                part = img.crop(tuple(int(v) for v in b)).convert("L")
+                # **横倒しに組まれた表は 90 度回す**(2026-09-07)．
+                # 前はここで自前で切っており，回していなかった
+                part, turned = split_sheet.cut_table(img, b)
+                part = part.convert("L")
                 q = io.BytesIO()
                 part.save(q, format="PNG")
                 fn = f"{name}_p{i}.png"
                 z.writestr(fn, q.getvalue())
-                names.append((fn, part.size))
+                names.append((fn, part.size, turned))
             cuts.append((name, names))
     res = {"zip": buf.getvalue(), "cuts": cuts,
            "total": sum(len(n) for _, n in cuts)}
@@ -104,9 +107,11 @@ with zipfile.ZipFile(io.BytesIO(res["zip"])) as z:
     for name, names in res["cuts"]:
         st.write(f"**{name}** — {len(names)} 個の表に分かれました")
         cols = st.columns(min(3, max(1, len(names))))
-        for i, (fn, size) in enumerate(names, 1):
+        for i, (fn, size, turned) in enumerate(names, 1):
             with cols[(i - 1) % len(cols)]:
-                st.image(z.read(fn), caption=f"{i}: {size[0]} x {size[1]} px",
+                note = "・90 度回した" if turned else ""
+                st.image(z.read(fn),
+                         caption=f"{i}: {size[0]} x {size[1]} px{note}",
                          use_container_width=True)
 
 st.download_button(f"表ごとの画像を受け取る (zip・{res['total']} 枚)", res["zip"],
