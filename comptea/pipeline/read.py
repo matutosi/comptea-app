@@ -28,6 +28,7 @@ REASONS = {
     'empty': '読めなかった(インクはあるのに文字が取れていない)',
     'need_check': '値として読めない形',
     'suggested': '辞書から直したが候補が1つ(別種に化けうる)',
+    'short_name': '読みが短いので採らなかった(候補は suggest 列)',
     'multi': '候補が複数',
     'region': '文章として読む領域(表頭・1回出現種)',
     'note': '位置決めで気になった点がある',
@@ -112,6 +113,9 @@ def reasons_for(row, suspect, reader='easyocr'):
         # 組成部の空セルは非出現が普通なので，濃いものだけを挙げる
         if row['obj_name'] != 'comp' or row['cell_id'] in suspect:
             out.append('empty')
+    if row.get('suggest'):
+        # 短くて採らなかった読み．候補は出ているので，見れば早く決まる
+        out.append('short_name')
     status = row.get('status')
     if status in ('Need Check', 'suggested', 'multi'):
         out.append({'Need Check': 'need_check'}.get(status, status))
@@ -159,10 +163,15 @@ def main(argv=None):
     if 'text' not in read.columns:
         read['text'] = None
 
+    # 短い読みは，候補があっても採らずに印字を残す(correct_text.MIN_ADOPT_LEN)．
+    # その候補は `suggest` に入って来るので，目視のために持ち回る
+    read['suggest'] = None
     for i, row in read.iterrows():
         fixed = correct_text.correct_cell(row['obj_name'], row['text'])
         read.loc[i, 'corrected'] = fixed['corrected']
         read.loc[i, 'status'] = fixed['status']
+        if fixed.get('suggest'):
+            read.loc[i, 'suggest'] = fixed['suggest']
     # AI が読み直したセルを後から見分けられるようにする
     read['read_by'] = '(未読)' if args.reader == 'ai' else 'easyocr'
     if args.reader == 'both':
@@ -192,6 +201,7 @@ def main(argv=None):
                 'cell_id': row['cell_id'], 'obj_name': row['obj_name'],
                 'block': row.get('block'), 'row': row.get('row'), 'col': row.get('col'),
                 'text': row.get('text'), 'corrected': row.get('corrected'),
+                'suggest': row.get('suggest'),
                 'reason': ','.join(rs),
             })
     review = pd.DataFrame(rows)
