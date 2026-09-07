@@ -210,3 +210,30 @@ def test_zipの中の1枚を差し替える(tmp_path):
         assert sorted(z.namelist()) == ["located.csv", "ocred.csv"]
         assert z.read("ocred.csv").decode("utf-8-sig") == "x\n9\n"
         assert z.read("located.csv").decode("utf-8") == "y\n2\n"
+
+
+def test_中核の古い写しを捨てる(monkeypatch, tmp_path):
+    """公開先では，`import` した先が古いまま残ることがある
+
+    `split_sheet.cut_table` を足した直後に「無い」と言われた
+    (2026-09-07 ユーザ報告)．ファイルの更新時刻が変わったときだけ捨てる．
+    """
+    import pathlib
+    import sys
+
+    import streamlit as st
+
+    state = {}
+    monkeypatch.setattr(st, "session_state", state, raising=False)
+    from comptea import split_sheet                    # noqa: F401
+
+    assert _shared.reload_core() == 0                  # 初回は捨てない
+    assert "comptea.split_sheet" in sys.modules
+
+    pathlib.Path(_shared.CORE, "split_sheet.py").touch()
+    assert _shared.reload_core() > 0                   # 新しくなったら捨てる
+    assert "comptea.split_sheet" not in sys.modules
+    assert _shared.reload_core() == 0                  # 続けて呼んでも捨てない
+
+    from comptea import split_sheet as again           # 読み直せる
+    assert hasattr(again, "cut_table")

@@ -20,6 +20,8 @@ import _shared                                  # noqa: E402
 # Streamlit は書き換えたファイルを走らせ直すが，`import` した先はそのままなので，
 # 更新した直後に古い `_shared` が残り，足したばかりのものが無いと言われる
 importlib.reload(_shared)
+# 中核も，古い写しが残っていれば捨てる(次に使うときに読み直される)
+_shared.reload_core()
 
 _shared.start("1_split", "切り分け",
     "A0 級の折り込みには，表が 2-5 個並んでいます．"

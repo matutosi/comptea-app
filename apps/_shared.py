@@ -129,6 +129,39 @@ def unzip_into(upload, work):
     return [name]
 
 
+def reload_core():
+    """中核 (`comptea`) の**古い写しが残らない**ようにする(2026-09-07)
+
+    Streamlit は書き換えたファイルを走らせ直すが，`import` した先は
+    そのまま残る．公開先に新しい版を入れても，画面を触り直すだけでは
+    古いモジュールが使われ，**足したばかりの関数が「無い」と言われる**
+    (`split_sheet.cut_table` で実際に起きた．ユーザ報告)．
+
+    毎回読み直すと重い(`ocr` は easyocr を読むので 5 秒)ので，
+    **ファイルの更新時刻が変わったときだけ**捨てる．次に使うときに読み直される．
+    """
+    import pathlib
+    import sys
+
+    import streamlit as st
+
+    newest = 0.0
+    for q in pathlib.Path(CORE).rglob("*.py"):
+        try:
+            newest = max(newest, q.stat().st_mtime)
+        except OSError:                          # noqa: PERF203  消えた写し
+            continue
+    key = "_core_mtime"
+    old = st.session_state.get(key)
+    st.session_state[key] = newest
+    if old is None or newest <= old:
+        return 0
+    stale = [m for m in list(sys.modules) if m == "comptea" or m.startswith("comptea.")]
+    for m in stale:
+        del sys.modules[m]
+    return len(stale)
+
+
 # --- 結果を憶えておく ---------------------------------------------------
 # **Streamlit はどのウィジェットを触っても全体を走らせ直す**(2026-09-06)．
 # 重い処理を `if st.button(...)` の中だけに置くと，次の再実行では条件が偽に
