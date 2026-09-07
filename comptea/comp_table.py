@@ -364,6 +364,8 @@ def once_species_rows(df: pd.DataFrame, text_col: str = 'corrected') -> pd.DataF
             's_name': s['corrected'] if s else r['s_name'],
             'layer': r['layer'],
             'cover': cover, 'sociability': sociability,
+            # 常在度表の1回出現種は `常在度(被度)` で書かれる(2026-09-07)
+            'constancy': r.get('constancy'),
             'comp_raw': r['comp_raw'],
             # 種名が辞書に無いもの，候補が複数のもの，
             # 学名に別の語が混じったものは目視へ回す
