@@ -186,5 +186,17 @@ def test_parse_site_notes_調査地の括弧の日付は出典にしない():
     assert [r['plot'] for r in got] == [4, 5, 6, 7]
 
 
+@pytest.mark.parametrize("head", [
+    'Nachweis d. Vegetationsaufnahmen 既発表資料',
+    'Nachweis d. Vegetationsaufnahme 既発表資料名',
+    # 印字の誤植(kinki_082)．`aufnahmen` が `anfnahmen` になっている
+    'Nachweis d. Vegetationsanfnahmen 既発表資料',
+])
+def test_parse_site_notes_出典の見出しの揺れ(head):
+    got = pt.parse_site_notes(f'{head}: 1—2: Original 原調査資料')
+    assert [(r['plot'], r['field']) for r in got] == [
+        (1, 'source_ref'), (2, 'source_ref')]
+
+
 def test_parse_site_notes_見出しが無ければ空():
     assert pt.parse_site_notes(PROSE) == []

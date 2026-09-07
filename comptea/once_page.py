@@ -45,11 +45,15 @@ HEAD_LINES = 2
 MAX_MISS = 2
 
 
-def looks_like_entries(text: str) -> bool:
+def looks_like_entries(text: str, min_hits: int = MIN_HITS) -> bool:
     """その行が「1回出現種」の並びに見えるか
 
     種の並びは**ラテン文字の学名・カタカナの和名・被度**が繰り返す．
     本文は地の文なので，カタカナが続いても被度が並ばない．
+
+    塊を**見つける**ときは 2 件を要るが，**続きを追う**ときは 1 件でよい．
+    行の終わりで種が割れると，その行の件数は 1 件に減るため
+    (kinki_073 の 11・12 行目．これで塊が途中で切れていた)．
     """
     s = parse_text.normalize(text)
     if not s or not re.search(r'[A-Za-z]', s):
@@ -59,7 +63,7 @@ def looks_like_entries(text: str) -> bool:
         tail = s[m.end():m.end() + 8]
         if _COVERISH.match(tail.lstrip(' 　')):
             hits += 1
-    return hits >= MIN_HITS
+    return hits >= min_hits
 
 
 def find_once_span(texts):
@@ -108,7 +112,7 @@ def find_once_span(texts):
         if NOTE_MARK.search(s) or HEADING.match(s):
             stop = i
             break
-        if looks_like_entries(s) or _tail_of_entries(s):
+        if looks_like_entries(s, min_hits=1) or _tail_of_entries(s):
             miss = 0
             continue
         miss += 1

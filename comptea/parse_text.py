@@ -301,7 +301,9 @@ def _split_aspect_slope(items):
 _NOTE_FIELDS = (
     ('locality', r'(?:Lage(?:\s*d\.?\s*Aufn\.?)?|Fundorte?|調査地)'),
     ('date', r'(?:Datum(?:\s*d\.?\s*Aufn\.?)?|調査年月日)'),
-    ('source_ref', r'(?:Nachweis\s*d\.?\s*Vegetationsaufnahmen|Nachweis|既発表資料)'),
+    # 印字は `Nachweis d. Vegetationsaufnahmen` `…aufnahme` `…anfnahmen`(誤植)
+    # と揺れるので，`Vegetation` から先は見ない
+    ('source_ref', r'(?:Nachweis(?:\s*d\.?\s*Vegetation\w*)?|既発表資料名?)'),
 )
 _NOTE_HEAD = re.compile(
     '(?:' + '|'.join(f'(?P<{k}>{v})' for k, v in _NOTE_FIELDS)
