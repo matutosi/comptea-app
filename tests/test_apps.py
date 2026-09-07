@@ -164,3 +164,36 @@ def test_Secretsが無くても画面に誤りを出さない(monkeypatch, tmp_p
 
     monkeypatch.setattr(_shared, "_secrets_file", lambda: None)
     assert _shared.app_url("2_grid") is None
+
+
+def test_1枚に表が2つ以上あるとき別々の置き場から集める(tmp_path):
+    """`wd` 自身は空になり，`wd_t1`・`wd_t1_s1`・`wd_t2` に格子ができる
+
+    `wd` だけを見ていたので，そういう紙面は「格子が作れなかった」ことに
+    なっていた(2026-09-07 に折り込み 23 枚を通して見つけた)．
+    """
+    import _shared
+
+    wd = tmp_path / "out"
+    wd.mkdir()
+    for name in ("out_t1_s1", "out_t1_s2", "out_t2"):
+        d = tmp_path / name
+        d.mkdir()
+        (d / "located.csv").write_text("x\n", encoding="utf-8")
+    (tmp_path / "out_t1_s1.png").write_bytes(b"\x89PNG\r\n")   # 部分画像
+    (tmp_path / "out_t9").mkdir()                              # 格子が無い置き場
+
+    got = _shared.grid_tables(str(wd))
+    assert [n for n, _, _ in got] == ["out_t1_s1", "out_t1_s2", "out_t2"]
+    assert got[0][2] and got[0][2].endswith("out_t1_s1.png")   # 画像も渡す
+    assert got[1][2] is None
+
+
+def test_表が1つならそのまま渡す(tmp_path):
+    import _shared
+
+    wd = tmp_path / "out"
+    wd.mkdir()
+    (wd / "located.csv").write_text("x\n", encoding="utf-8")
+    got = _shared.grid_tables(str(wd))
+    assert len(got) == 1 and got[0][0] == "out"

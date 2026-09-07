@@ -81,26 +81,52 @@ if st.button("格子を作る", type="primary"):
         # そのたびに torch を読み込んでいた(1 回 5 秒)
         _, log = pipeline.run("grid", [src, "--weights", _shared.WEIGHTS,
                                        "--workdir", wd])
-    overlay = os.path.join(wd, "overlay.png")
-    if not os.path.isfile(overlay):
+    # **1 枚に表が 2 つ以上あると，別々の置き場ができる**(2026-09-07)．
+    # `wd` だけを見ていたので，そういう紙面は「作れなかった」ことになっていた
+    found = _shared.grid_tables(wd)
+    if not found:
         _shared.fail_with("格子が作れませんでした", log)
-    p_sum = os.path.join(wd, "summary.txt")
+    tables = []
+    for name, d, part in found:
+        p_sum = os.path.join(d, "summary.txt")
+        p_over = os.path.join(d, "overlay.png")
+        # 部分画像に切り出した表は，**その画像も一緒に渡す**
+        # (格子の座標は部分画像のもの．元の紙面では合わない)
+        if part:
+            import shutil
+
+            shutil.copy(part, os.path.join(d, "image.png"))
+        tables.append({
+            "name": name,
+            "overlay": open(p_over, "rb").read() if os.path.isfile(p_over) else None,
+            "summary": (open(p_sum, encoding="utf-8").read()
+                        if os.path.isfile(p_sum) else ""),
+            "zip": _shared.zip_files(d, ["located.csv", "detect.csv",
+                                         "summary.txt", "overlay.png",
+                                         "image.png"]),
+        })
     # **中身を憶える**．作業ディレクトリは再実行のたびに作り直される
-    res = {
-        "overlay": open(overlay, "rb").read(),
-        "summary": (open(p_sum, encoding="utf-8").read()
-                    if os.path.isfile(p_sum) else ""),
-        # 次の工程へは zip で渡す．読み取りには格子と検出の両方が要る
-        "zip": _shared.zip_files(wd, ["located.csv", "detect.csv", "summary.txt",
-                                      "overlay.png"]),
-    }
+    res = {"tables": tables}
     _shared.remember("2_grid", sig, res)
 
 if res:
-    st.image(res["overlay"], caption="格子の重ね描き", use_container_width=True)
-    if res["summary"]:
+    tables = res["tables"]
+    if len(tables) > 1:
+        st.warning(f"**この紙面には表が {len(tables)} 個あります**．"
+                   "別々の表なので，**1 つずつ**次の工程へ渡してください"
+                   "(地点も表頭も別のものです)．")
+        names = [t["name"] for t in tables]
+        pick = st.selectbox("どの表を見ますか", names, key="which_table")
+        one = tables[names.index(pick)]
+    else:
+        one = tables[0]
+
+    if one["overlay"]:
+        st.image(one["overlay"], caption=f'{one["name"]} の格子',
+                 use_container_width=True)
+    if one["summary"]:
         with st.expander("まとめ", expanded=True):
-            st.text(res["summary"])
-    _shared.offer(res["zip"], "grid.zip",
+            st.text(one["summary"])
+    _shared.offer(one["zip"], f'{one["name"]}_grid.zip',
                   "この zip をそのまま「3. セルを読む」に渡してください．")
 _shared.footer()

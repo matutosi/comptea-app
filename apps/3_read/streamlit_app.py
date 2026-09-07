@@ -59,6 +59,13 @@ if msg:
 
 loc_path = _shared.take_zip(loc_up, wd, "located.csv",
                             "2 の zip を渡してください．")
+# **zip に画像が入っていれば，そちらを使う**(2026-09-07)．
+# 1 枚に表が 2 つある紙面は，2 が部分画像に切り出して格子を作る．
+# 格子の座標はその部分画像のものなので，元の紙面に当てるとずれる
+part = os.path.join(wd, "image.png")
+if os.path.isfile(part):
+    src = part
+    st.info("2 で切り出した部分画像を使います(格子はこの画像の座標です)．")
 
 # 画像の場所は，この場で置いた写しに読み替える
 loc = pd.read_csv(loc_path)

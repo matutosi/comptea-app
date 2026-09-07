@@ -98,7 +98,9 @@ if res is None:
                 part.save(q, format="PNG")
                 fn = f"{name}_p{i}.png"
                 z.writestr(fn, q.getvalue())
-                names.append((fn, part.size, turned))
+                # **次の工程に渡せる大きさか**をここで示す(2026-09-07)．
+                # 折り込みの表は半分ほどが大きすぎて，2 では扱えない
+                names.append((fn, part.size, turned, _shared.too_big(part)))
             cuts.append((name, names))
     res = {"zip": buf.getvalue(), "cuts": cuts,
            "total": sum(len(n) for _, n in cuts)}
@@ -109,12 +111,15 @@ with zipfile.ZipFile(io.BytesIO(res["zip"])) as z:
     for name, names in res["cuts"]:
         st.write(f"**{name}** — {len(names)} 個の表に分かれました")
         cols = st.columns(min(3, max(1, len(names))))
-        for i, (fn, size, turned) in enumerate(names, 1):
+        for i, (fn, size, turned, big) in enumerate(names, 1):
             with cols[(i - 1) % len(cols)]:
                 note = "・90 度回した" if turned else ""
                 st.image(z.read(fn),
                          caption=f"{i}: {size[0]} x {size[1]} px{note}",
                          use_container_width=True)
+                if big:
+                    st.caption("⚠ **2 には大きすぎます**．手元で "
+                               "`python cli/run_pipeline.py <この画像>` を使う")
 
 st.download_button(f"表ごとの画像を受け取る (zip・{res['total']} 枚)", res["zip"],
                    file_name=f"{stem}_tables.zip", mime="application/zip",

@@ -74,8 +74,10 @@ def too_big(img):
             f"学習時と同じ縮尺で検出するには imgsz={sz} が要り，"
             f"無料枠のメモリ(1 GB ほど)に収まりません"
             f"(ここでは imgsz={MAX_IMGSZ}，長辺 6600 px ほどまで)．"
-            "**「1. 折り込みを表ごとに切る」で表ごとに切ってから**渡すか，"
-            "大きな紙面は手元で CUI を使ってください．")
+            "**「1. 折り込みを表ごとに切る」で表ごとに切ってから**渡してください．"
+            "切っても大きい表は，手元で "
+            "`python cli/run_pipeline.py <画像> --workdir work/<名前>` を使います"
+            "(折り込みを切った 64 枚のうち，ここで扱えるのは 34 枚でした)．")
 
 
 def too_big_to_split(img):
@@ -422,6 +424,32 @@ def replace_in_zip(blob, name, text):
                 else src.read(info.filename)
             dst.writestr(info.filename, data)
     return buf.getvalue()
+
+
+def grid_tables(wd):
+    """格子ができた置き場を，表ごとに集める
+
+    **1 枚の紙面に表が 2 つ以上あると，別々の置き場ができる**
+    (`<wd>_t1`・`<wd>_t1_s1`・`<wd>_t2`)．`wd` 自身は空になるので，
+    そこだけを見ると「格子が作れなかった」ことになっていた
+    (2026-09-07 に 23 枚を通して見つけた)．
+
+    切り出した部分画像(`<置き場>.png`)があれば，**次の工程はそれを使う**
+    (格子の座標は部分画像のもの)．
+
+    Returns:
+        [(名前, 置き場, 部分画像かNone), ...]．できていなければ空
+    """
+    import glob
+
+    out = []
+    for d in [wd] + sorted(glob.glob(wd + "_*")):
+        if not os.path.isdir(d) or not os.path.isfile(os.path.join(d, "located.csv")):
+            continue
+        name = os.path.basename(d)
+        img = d + ".png"
+        out.append((name, d, img if os.path.isfile(img) else None))
+    return out
 
 
 def footer():
