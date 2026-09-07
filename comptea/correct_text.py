@@ -259,6 +259,12 @@ def _clean(text):
 _SPACES = re.compile(r'\s+')
 # ひらがなは辞書に 1 件しか無い(`西湖の葭`)．隣の欄や記号を読み違えて混じる
 _HIRAGANA = re.compile(r'[ぁ-ん]+')
+# **種まで決まっていない記載**(2026-09-08 ユーザ指摘)．
+# `ミカン科の一種`(実データ)・`アザミ属の1種`(kinki_061 の1回出現種)・`sp.`．
+# **辞書に `属`・`科` を含む和名は 1 件も無い**ので，この形は辞書では解けない．
+# 印字として正しい値なので，そのまま通して目視に回さない
+_UNRESOLVED = re.compile(
+    r'^(?:[ァ-ヶー]+[属科]の[0-9一二三四五六七八九]?種|sp\.?)$', re.I)
 
 
 def _tidy_read(text, target, sp_set):
@@ -524,6 +530,12 @@ def correct_name(input_str: str, target="s_name", dict_path_s="s_name.txt", dict
     # 印字(`printed`)をそのまま返し，目視で見比べられるようにする．
     printed = input_str
     input_str = _tidy_read(input_str, target, sp_set)
+
+    # **種まで決まっていない記載**は，辞書に無くて当たり前なので先に通す．
+    # `ミカン科の一種`・`アザミ属の1種`・`sp.`(2026-09-08 ユーザ指摘)．
+    # 距離に回すと，近いだけの別種に化けるか，永久に目視へ残る
+    if target != 's_name' and _UNRESOLVED.match(input_str):
+        return {"corrected": input_str, "status": "OK"}
 
     # 完全一致をチェック
     if input_str in sp_set:

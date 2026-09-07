@@ -45,6 +45,29 @@ def test_一文字の読みは完全一致だけ採る():
     assert ";" not in got["corrected"]
 
 
+@pytest.mark.parametrize("text", [
+    "ミカン科の一種",     # 実データ(tab4_sz1856)
+    "アザミ属の1種",      # kinki_061 の1回出現種
+    "スゲ属の種",         # 数を書かない形
+    "sp.",
+])
+def test_種まで決まっていない記載は辞書に無くて当たり前(text):
+    """辞書 27,127 件に `属`・`科` を含む和名は 1 件も無い(2026-09-08 に数えた)
+
+    距離に回すと，近いだけの別種に化けるか，永久に目視へ残る．
+    印字として正しい値なので，そのまま通す．
+    """
+    got = ct.correct_name(text, target="j_name")
+    assert got == {"corrected": text, "status": "OK"}
+
+
+def test_属や科を含んでいても普通の和名は辞書で見る():
+    """`ヒノキ` のような普通の名前まで素通しにしない"""
+    assert ct.correct_name("ヒノキ", target="j_name")["status"] == "OK"
+    got = ct.correct_name("アザミ属", target="j_name")
+    assert got["status"] != "OK" or got["corrected"] != "アザミ属"
+
+
 def test_和名に混じった空白は落とす():
     """辞書 27,127 件に空白を含む和名は 0 件(2026-09-08 に数えた)
 
