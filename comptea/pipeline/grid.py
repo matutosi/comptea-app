@@ -654,6 +654,48 @@ def build_tables(image, tables, base, args, n_orig, by_class, table_warnings):
     return done, failed
 
 
+def save_continuation(image, base):
+    """枝番の付いたページで表が無いとき，「続きのページ」として切り出す
+
+    `xxx-2.jpg` のように**枝番が付いていれば，表が無いのは想定内**
+    (組成表は `xxx-1.jpg` にあり，ここは流し込みの続き)．
+    止めずに，塊と注記を切り出して次の工程へ渡す(2026-09-08)．
+
+    枝番が無いページで表が見つからないのは，これまでどおり異常として止める．
+
+    Returns:
+        続きのページとして書き出せたら True
+    """
+    from comptea import once_page, page_group
+
+    stem, part, _ = page_group.split_name(base.name)
+    if part is None:
+        return False
+    found = once_page.find_block(image)
+    base.mkdir(parents=True, exist_ok=True)
+    (base / 'continuation.txt').write_text(
+        f'table\t{stem}\npart\t{part}\nimage\t{image}\n', encoding='utf-8')
+    if found is None:
+        print(f'このページに表は無く，流し込みも見あたらない(枝番 {part})．'
+              f'表は {stem}-1 側にある．'
+              f'\n書いた: {base / "continuation.txt"}')
+        return True
+    if found['box']:
+        from PIL import Image
+        box = tuple(int(v) for v in found['box'])
+        Image.open(image).crop(box).save(base / 'once_block.png')
+    if found['note']:
+        (base / 'note.txt').write_text(found['note'], encoding='utf-8')
+    kind = '目印あり' if found['has_mark'] else '前のページからの続き'
+    print(f'このページは**続きのページ**(枝番 {part}．表は {stem} にまとまる)．'
+          f'\n流し込み: {kind}'
+          + (f'\n  {base / "once_block.png"} を読む' if found['box'] else '')
+          + (f'\n  注記: {found["note"][:100]}' if found['note'] else '')
+          + f'\n書いた: {base}'
+          + '\n次: 塊を読んで fixes.tsv に書き，link_pages.py で表につなぐ')
+    return True
+
+
 def main(argv=None):
     args = parse_args(argv)
     image, = _common.setup([args.image])
@@ -662,17 +704,19 @@ def main(argv=None):
         args.weights = comptea.WEIGHTS
     args.imgsz = resolve_imgsz(image, args.imgsz)
 
+    base = _common.workdir(args.image, args.workdir, make=False)
+
     by_class = {'col': args.conf_col / 100}
     df_det = detect(image, args.weights, args.conf / 100, by_class, args.imgsz)
     if df_det.empty:
+        if save_continuation(image, base):
+            return
         raise SystemExit(
             '検出が0件．**このページに組成表が無い**ことが多い'
             '(本文・写真・隣のページから続く流し込みだけのページ)．'
             '画像を Read して確かめ，表があるなら conf を下げるか weights を疑う')
 
     image, df_det, skew_warn = deskew_page(image, df_det, args, by_class)
-
-    base = _common.workdir(args.image, args.workdir, make=False)
     tables, n_orig, sub_done, warn = split_page(image, df_det, args, base)
     table_warnings = skew_warn + warn
 
@@ -686,6 +730,8 @@ def main(argv=None):
     from pathlib import Path
     done += [Path(d) for d in sub_done]
     if not done:
+        if save_continuation(image, base):
+            return
         raise SystemExit(failed[0][1] if failed else '格子を作れなかった')
     if failed:
         print(f'\n表 {", ".join(str(i) for i, _ in failed)} は格子にできなかった'
