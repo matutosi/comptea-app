@@ -40,7 +40,31 @@ split_sheet.py   →  (大きな折り込みのときだけ．表ごとに切る
 run_pipeline.py  →  [段階1 格子を見る]
 run_ocr.py       →  crop_cells.py  →  [段階2 読む]  →  apply_text.py
 build_table.py   →  [段階3 検査を裁く]
+link_pages.py    →  (続きのページがあるときだけ．枝番でまとめてつなぐ)
 ```
+
+### 0.2 続きのページは，ファイル名の枝番で分かる
+
+組成表の下の流し込み(出現1回の種・調査地・調査年月日・出典)が紙面に
+収まらないと，**次のページへあふれる**．どのページが続きかは
+**ユーザがファイル名の枝番で示す**(2026-09-08 決定)．
+
+```
+組成表だけ        xxx.jpg
+組成表と続き      xxx-1.jpg(組成表)   xxx-2.jpg(続き)
+```
+
+- **枝番が付いていれば，表が無くても異常ではない**．`run_pipeline.py` は
+  止まらず，続きのページとして塊と注記を切り出す
+- **枝番の無いページで表が無いのは異常**．これまでどおり止まる
+- 通し終えたら `link_pages.py` で表につなぐ．
+  **文字列としてつないでから一度だけ解析する**ので，地点の引き継ぎ・
+  ページで割れた種名・前ページに残った注記の見出しが，いずれも自動で解ける
+
+**ノンブルの順で判断しない**．画像は 1 枚 1 ページだが，
+ノンブルが左下のページと右下のページで 1 つの見開きになり，
+**流し込みは見開きの下端を右ページ → 左ページと流れる**．
+ノンブルは左ページの方が小さいので，その順に並べると流し込みが逆になる．
 
 ### 0. 何の画像かを確かめる
 
@@ -116,9 +140,15 @@ python .claude/skills/comptea/scripts/run_pipeline.py <画像> [--conf 30] [--co
 ### 2. 読み取り(段階2)
 
 ```bash
-python .claude/skills/comptea/scripts/run_ocr.py work/<画像名> [--reader easyocr|ai|both]
-python .claude/skills/comptea/scripts/crop_cells.py work/<画像名>
+python cli/run_ocr.py work/<画像名> [--reader easyocr|ai|both]
+python cli/crop_cells.py work/<画像名> --what review --by-class
 ```
+
+**要確認のセルだけを読み直すときは `--by-class` を付ける**．
+`sheet_NN_<クラス>.png` になり，**1 枚が 1 クラスだけ**になるので，
+読む側が「このセルに来る字は `5 4 3 2 1 + r ・` だけ」と決め打ちできる
+(字種を絞る効きは `ocr.retry_empty_comp()` で実証済み)．
+**読み手に渡す文面は，スキルの `references/read-cells-prompt.md` に 1 か所化してある**．
 
 `run_ocr.py` が全セルを EasyOCR で読み，辞書と規則で補正して，
 **目視に回すセルを `review.tsv` に挙げる**(読めなかった / 値として読めない /

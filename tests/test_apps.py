@@ -222,3 +222,33 @@ def test_傾きを直した紙面はその画像も渡す(tmp_path):
                                     encoding="utf-8")
     got = _shared.grid_tables(str(wd), str(src))
     assert got[0][2] and got[0][2].endswith("out_deskew.png")
+
+
+def test_続きのページを集める(tmp_path):
+    """枝番が付いていれば，表が無くても異常ではない(2026-09-08)
+
+    GUI は `located.csv` だけを見ていたので，続きのページを
+    「格子が作れませんでした」と報告していた．
+    """
+    import _shared
+
+    wd = tmp_path / "s01114_kinki_081-2"
+    wd.mkdir()
+    (wd / "continuation.txt").write_text(
+        "table\ts01114_kinki_081\npart\t2\nimage\tx.jpg\n", encoding="utf-8")
+    (wd / "once_block.png").write_bytes(b"\x89PNG\r\n")
+    (wd / "note.txt").write_text("調査地: …", encoding="utf-8")
+    got = _shared.continuation(str(wd))
+    assert got["table"] == "s01114_kinki_081"
+    assert got["part"] == "2"
+    assert got["once"] and got["note"] is None      # note_block.png は無い
+    assert got["zip"]
+
+
+def test_続きのページでなければ何も返さない(tmp_path):
+    import _shared
+
+    wd = tmp_path / "out"
+    wd.mkdir()
+    (wd / "located.csv").write_text("x\n1\n", encoding="utf-8")
+    assert _shared.continuation(str(wd)) is None

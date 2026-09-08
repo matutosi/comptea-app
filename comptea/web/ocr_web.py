@@ -124,6 +124,10 @@ try:
             # データ修正
             result_df.loc[i, 'corrected'] = corrected['corrected']
             result_df.loc[i, 'status'] = corrected['status']
+            # 読みが短くて採らなかった候補(2026-09-08)．**誤りうる**ので，
+            # 値には入れず，目視のための参考として別の列に置く
+            if corrected.get('suggest'):
+                result_df.loc[i, 'suggest'] = corrected['suggest']
 
     st.success("✅ Text correction completed")
 

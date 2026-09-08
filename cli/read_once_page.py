@@ -1,5 +1,13 @@
 """表の載っていないページから「1回出現種」の続きと注記を拾う
 
+**【2026-09-08】本筋は枝番の経路になった**．
+ファイル名に枝番を付けておけば(`xxx-1.jpg` 表 / `xxx-2.jpg` 続き)，
+`run_pipeline.py` が止まらずに塊と注記を切り出し，`link_pages.py` が
+**つないでから一度だけ解析する**(地点の引き継ぎと，ページで割れた種名が
+自動で解ける)．こちらは**枝番を付けずに 1 枚だけ扱うとき**の道具．
+`--start-plot` を人が渡す必要があるので，組で扱えるなら枝番の方がよい．
+
+
     段階1  python cli/read_once_page.py IMAGE --out DIR
            塊の位置を決め，切り出して `once_block.png` に置く
     段階2  python cli/read_once_page.py IMAGE --out DIR --text DIR/once.txt \

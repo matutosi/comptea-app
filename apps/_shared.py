@@ -480,6 +480,43 @@ def replace_in_zip(blob, name, text):
     return buf.getvalue()
 
 
+def continuation(wd):
+    """続きのページとして書かれたものを集める(無ければ None)
+
+    流し込み(出現1回の種・調査地)は紙面に収まらないと次のページへあふれる．
+    どのページが続きかは**ファイル名の枝番**で示す(2026-09-08 決定)．
+    枝番が付いていれば，`run_pipeline.py` は表が無くても止まらず，
+    塊と注記を切り出して `continuation.txt` を書く．
+
+    Returns:
+        {'page','table','part','once','note','zip'} か None
+    """
+    import os
+
+    p = os.path.join(wd, "continuation.txt")
+    if not os.path.isfile(p):
+        return None
+    info = {}
+    with open(p, encoding="utf-8") as f:
+        for line in f:
+            k, _, v = line.rstrip("\n").partition("\t")
+            info[k] = v
+
+    def read(name):
+        q = os.path.join(wd, name)
+        return open(q, "rb").read() if os.path.isfile(q) else None
+
+    return {
+        "page": os.path.basename(wd),
+        "table": info.get("table", ""),
+        "part": info.get("part", ""),
+        "once": read("once_block.png"),
+        "note": read("note_block.png"),
+        "zip": zip_files(wd, ["continuation.txt", "once_block.png",
+                              "note_block.png", "note.txt"]),
+    }
+
+
 def grid_tables(wd, src=None):
     """格子ができた置き場を，表ごとに集める
 

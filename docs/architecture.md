@@ -18,7 +18,7 @@ The project is bilingual (Japanese/English) and targets ecological vegetation su
 | `comptea/` | The core modules. Two files that had grown to hold several concerns each were split by concern: `split_wide.py` (1,673 lines) into `strips.py` (wide tables), `col_edges.py` (column boundaries), `table_split.py` (telling two tables apart on one sheet), `body_rows.py` (the body's vertical extent and row boundaries) and `checks.py` (the independent checks); `locate.py` (1,558 lines) into `filters.py` (throwing out what must not be built on), `blocks.py` (cutting a sheet into tables and blocks), `axes.py` (building and nudging the boundaries of one axis) and `locate.py` itself (assembling the grid). It is a package: modules import each other relatively (`from . import ink`), the dictionaries and weights are resolved against the package directory, and **nothing needs a particular working directory** any more (until 2026-09-07 everything had to run inside `comptea/`) |
 | `comptea/web/` | The older all-in-one Streamlit pages, kept as they were |
 | `comptea/pipeline/` | The three stages themselves — `grid.py`, `read.py`, `table.py` — with `common.py` shared between them. `pipeline.run(stage, argv)` drives one **in the calling process**: until 2026-09-07 the apps spawned a new Python per stage and paid the torch import (5 s) every time. Measured with the CPU wheel Streamlit Cloud installs, detection peaks at 432 MB and reading at 507 MB, which fits the ~1 GB free tier (the local CUDA build reaches 1,375 MB and is what made this look impossible) |
-| `cli/` | Thin command-line entry points over those stages (`run_pipeline` → `run_ocr` → `build_table`, plus `crop_cells`, `apply_text`, `export_data`) |
+| `cli/` | Thin command-line entry points over those stages (`run_pipeline` → `run_ocr` → `build_table`, plus `crop_cells`, `apply_text`, `export_data`, and `link_pages` for the run-on blocks) |
 | `apps/` | One Streamlit app per stage, each with its own `requirements.txt` |
 | `eval/` | The yardsticks. **They need the labelled scans and truth tables, which are not published**, so they cannot be run from this repository |
 | `tests/` | Runs on the dictionaries and `examples/` alone — no source material needed |
@@ -251,6 +251,14 @@ shift.
 The same pipeline driven from the command line rather than Streamlit, for reading a
 table end to end in one go: `run_pipeline.py` (the whole run), `crop_cells.py`,
 `run_ocr.py`, `apply_text.py`, `build_table.py`, with `_common.py` shared between them.
+`link_pages.py` joins the run-on blocks: the footnote under a table (the species that
+occurred once, the localities, the dates, the sources) spills onto the next page when
+it does not fit, and **the user marks the pair with a branch number in the file name**
+(`xxx-1.jpg` the table, `xxx-2.jpg` the continuation). Page numbers cannot decide this:
+the scans are single pages, but a left-hand and a right-hand page form one spread and
+the footnote runs right to left along its foot, so ordering by page number reverses it.
+`comptea/page_group.py` reads the branch numbers; `grid.save_continuation()` keeps a
+page with a branch number from failing when it holds no table.
 Three stages — the grid, the reading, the assembled table — are rendered as images to
 be eyeballed before the run continues; `docs/references/` holds the stage guide, the
 reading guide, and the known failure modes. OCR is EasyOCR-led.
