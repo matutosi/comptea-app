@@ -294,7 +294,11 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
     # 以後の行が 1 行ずつずれる(s01115_01_p3)．格子ごとの決め直しと違って，
     # 外れた行だけを局所的に直すので，階層の副行の格子を壊さない
     from comptea import row_heights
-    df_loc, height_warn = row_heights.fix_row_heights(Image.open(image), df_loc)
+    # **上下端も同じ後処理で埋める**(2026-09-08)．`col` の箱が途中で止まると
+    # 下の行がまるごと落ちる(07_p2 は 4 行)．種名の箱まで広げて流し込みの
+    # 手前で詰めた範囲まで，組成部に字のある行だけ足す(表の下の見出しは足さない)
+    df_loc, height_warn = row_heights.fix_row_heights(Image.open(image), df_loc,
+                                                      df_det=df_det)
     warnings += height_warn
     # 行が決まったあとに，列の境だけを印字の隙間から組み直す(良いときだけ)
     df_loc, edge_warn = col_edges.fix_column_edges(Image.open(image), df_loc)

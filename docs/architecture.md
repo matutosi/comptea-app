@@ -248,10 +248,37 @@ shift.
   body has text runs for at most 0.6 of its rows (autocorrelation alone halved three
   correct 56 px tables of 8–14 rows; losing the row correspondence is the worst
   possible error, so the check is deliberately hard to trigger); and on typed sheets the letters and the `•`
-  sit about 10 px apart on the same line, so the name, Japanese-name and layer
-  columns get their own vertical offset (row numbers are assigned before the offset,
-  so the correspondence is kept). On the 9 worst tables the rows outside ±25 % went
-  from 329 to 38
+  sit about 10 px apart on the same line. The row edges are nevertheless **shared**
+  by the body and the name/layer columns (user decision, 2026-09-08 — a per-column
+  offset was tried and dropped: it put the name boxes almost a row above the body on
+  14_p1; a blank Japanese-name row under a multi-layer species is how the sheet is
+  printed, not a misalignment), and the phase stays on the body's valleys — the values
+  are what gets read, and the names lose a few pixels at the top. Two compromises were
+  measured on all 146 tables (share of rows whose edge runs through ink; baseline
+  names 32 %, layer 28 %, body 3 %) and dropped: minimising the summed per-column count
+  of cut rows (names 23 %, layer 21 %, body 13 % — the sum falls, but on 14_p1 the
+  edges land through the middle of the Latin names), and dividing the block's ink
+  extent evenly by the row count (perfectly uniform heights, but the sheet's stretch
+  puts the edges through ink at the far end — body 46 %). On the 9 worst tables the
+  rows outside ±25 % went from 329 to 38. The same pass fixes the **top and bottom** of the grid: the grid's
+  vertical range comes from `row` detections, `_extend_rows_to_block()` adds at most
+  two rows per end and stops at the median of the column boxes, so when the `col`
+  boxes stop short the rows below are lost whole (07_p2 lost four). The pass takes
+  `body_extent_ink(names=True)` — the extent widened to the species-name boxes and
+  then cut back to just above the running text — and fills up to it at the row
+  height, adding a bottom row only when the **composition columns** carry ink or both
+  name columns do (the "once-occurring species" heading below a table has ink in one
+  name column only and used to be added as a row: 02_p1_s2, 04_p2, 06_p1, 06_p2;
+  faint typed dots can vanish in binarisation — 14_p1's last row had 16 dark pixels
+  across 400 px — so the body alone would drop a real species row); a trailing row that
+  passes neither test is dropped, and so is a trailing remainder shorter than 3/4 of a
+  row (the lattice leaves 0.5–1.5 rows at the end). Ink is measured in the middle half
+  of the band (an underline from the row above and the tops of the running text below
+  both intrude on the edges), and running text is recognised by the column boundaries
+  being filled (fewer than 70 % blank — the first line of the running text has word
+  gaps that happen to land on boundaries, so 50 % was not enough on 04_p2). The top is
+  judged on full-width ink because a table's first row is often a species-group
+  heading with an empty body
 - `make_labels.py` / `build_dataset.py`: Turn a finished grid back into labelme and
   YOLO annotations, cut into page-sized tiles, so a new source can be trained on
   without labelling it by hand. Only tables whose checks pass are used, and the

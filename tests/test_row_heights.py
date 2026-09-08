@@ -95,19 +95,24 @@ def test_位相が合っていれば動かさない():
     assert np.allclose(out, edges)
 
 
-def test_種名側だけ上下にずれて打たれた紙面は種名の境だけ動かす():
-    # 組成部の「・」は行の中央，種名の字は 10 px 下に打たれている(14_p1 型)
+def test_種名側が下にずれて打たれた紙面でも境は共有し組成の点を割らない():
+    # 組成部の「・」は行の中央，種名の字は 10 px 下に打たれている(14_p1 型)．
+    # 境は全クラスで共有し，位相は組成部の谷に置く(2026-09-08 ユーザ指示で共有に決めた．
+    # 種名側との折衷は測って取り下げた)．格子は「・」を割っている状態から始める
     edges = list(range(100, 100 + 34 * 12 + 1, 34))
-    comp = _grid(edges, [300, 340, 380, 420], 'comp')
-    sname = _grid(edges, [0, 200], 'sname')
+    grid_edges = [float(e + 17) for e in edges]          # 「・」(e+14..e+20)を割る位置
+    comp = _grid(grid_edges, [300, 340, 380, 420], 'comp')
+    sname = _grid(grid_edges, [0, 200], 'sname')
     df = pd.concat([sname, comp], ignore_index=True)
-    out, warns = row_heights.fix_row_heights(_page(edges, name_shift=10), df)
-    assert any('種名側' in w for w in warns)
+    img = _page(edges, name_shift=10)
+    out, warns = row_heights.fix_row_heights(img, df)
+    assert any('まとめて' in w for w in warns)
     c, s = _rows(out, 'comp'), _rows(out, 'sname')
-    assert sorted(c['row'].unique()) == sorted(s['row'].unique())     # 行の対応は同じ
-    off = (s.groupby('row')['y1'].first() - c.groupby('row')['y1'].first())
-    assert (off == off.iloc[0]).all() and 6 <= off.iloc[0] <= 14
-    assert np.allclose(c['y1'].unique(), edges[:-1])                 # 組成部は動かない
+    assert np.array_equal(np.sort(c['y1'].unique()), np.sort(s['y1'].unique()))  # 共有
+    dark = row_heights.ink.binarize(img)
+    prof_c = row_heights._profile(dark, 300, 420)
+    for y in np.sort(c['y1'].unique())[1:]:
+        assert prof_c[int(y)] == 0                           # 「・」は割らない
 
 
 def test_半分の刻みの格子は2倍の高さに組み直す():
@@ -132,3 +137,127 @@ def test_半分の刻みの格子は2倍の高さに組み直す():
     assert h.min() >= 40 * 0.8 and h.max() <= 40 * 1.2
     for y in c['y1'].unique()[1:]:
         assert prof[int(y)] == 0                # 境は「・」の上を通らない
+
+
+def _det(x1, y1, x2, y2, obj_name):
+    return dict(obj_name=obj_name, confidence=0.9, x1=x1, y1=y1, x2=x2, y2=y2,
+                source_image='x', model='m')
+
+
+def test_下端は種名の箱まで組成の字がある行だけ足す():
+    # 印字は 12 行．格子は上 8 行で止まっている(col の箱が途中で止まった 07_p2 型)．
+    # 表の下には「出現1回の種」の見出しが種名側だけにある
+    print_edges = list(range(100, 100 + 34 * 12 + 1, 34))
+    short = print_edges[:9]
+    df = pd.concat([_grid(short, [0, 150], 'sname'),
+                    _grid(short, [160, 290], 'species_col'),
+                    _grid(short, [300, 340, 380, 420], 'comp')], ignore_index=True)
+    img = _page(print_edges, size=(500, 800))             # 学名は x 10-150
+    px = img.load()
+    for ya, yb in zip(print_edges[:-1], print_edges[1:]):  # 和名は x 170-280
+        c = (ya + yb) // 2
+        for x in range(170, 280):
+            for y in range(c - 8, c + 8):
+                px[x, y] = 0
+    y_head = print_edges[-1] + 20                       # 見出しは学名の列だけ
+    for x in range(10, 150):
+        for y in range(y_head, y_head + 16):
+            px[x, y] = 0
+    det = pd.DataFrame([
+        _det(300, 100, 420, print_edges[8], 'col'),          # 途中で止まった col
+        _det(0, 100, 150, y_head + 30, 'sname'),             # 種名の箱は見出しまで
+        _det(160, 100, 290, print_edges[-1], 'species_col'),
+    ])
+    out, warns = row_heights.fix_row_heights(img, df, df_det=det)
+    assert any('上下端' in w for w in warns)
+    c = _rows(out, 'comp')
+    assert c['row'].nunique() == 12                      # 4 行足された
+    assert (np.abs(np.sort(c['y1'].unique()) - np.array(print_edges[:-1])) <= 4).all()
+    assert c['y2'].max() <= y_head                       # 見出しの行は足さない
+    s = _rows(out, 'sname')
+    assert s['row'].nunique() == 12                      # 種名も同じ行で組み直る
+
+
+def test_組成の点が薄くて消えた最終行も学名と和名があれば残す():
+    # 14_p1 型: 最終行の「・」が二値化で消える．学名・和名は有る
+    print_edges = list(range(100, 100 + 34 * 10 + 1, 34))
+    df = pd.concat([_grid(print_edges, [0, 150], 'sname'),
+                    _grid(print_edges, [160, 290], 'species_col'),
+                    _grid(print_edges, [300, 340, 380, 420], 'comp')], ignore_index=True)
+    img = _page(print_edges, size=(500, 800))
+    px = img.load()
+    for ya, yb in zip(print_edges[:-1], print_edges[1:]):
+        c = (ya + yb) // 2
+        for x in range(170, 280):
+            for y in range(c - 8, c + 8):
+                px[x, y] = 0
+    c = (print_edges[-2] + print_edges[-1]) // 2          # 最終行の「・」を消す
+    for x in range(300, 420):
+        for y in range(c - 4, c + 5):
+            px[x, y] = 255
+    det = pd.DataFrame([_det(300, 100, 420, print_edges[-1], 'col'),
+                        _det(0, 100, 150, print_edges[-1], 'sname')])
+    out, warns = row_heights.fix_row_heights(img, df, df_det=det)
+    assert _rows(out, 'comp')['row'].nunique() == 10     # 落とされない
+
+
+def test_地点が2列で隙間の無い表でも下端を足す():
+    # 07_p2 型: 列の境が 1 本しか無く，種名と組成のあいだに空白の帯も無い．
+    # body_extent_ink はこの形で格子の下端に固定していた(26 表が例外で落ちた回もある)
+    print_edges = list(range(100, 100 + 34 * 12 + 1, 34))
+    short = print_edges[:9]
+    df = pd.concat([_grid(short, [0, 300], 'sname'),
+                    _grid(short, [300, 340, 380], 'comp')], ignore_index=True)
+    img = Image.new('L', (500, 800), 255)
+    px = img.load()
+    for ya, yb in zip(print_edges[:-1], print_edges[1:]):
+        c = (ya + yb) // 2
+        for x in (320, 360):
+            for y in range(c - 3, c + 4):
+                px[x, y] = 0
+        for x in range(10, 296):                 # 種名は組成の直前まで(隙間なし)
+            for y in range(c - 8, c + 8):
+                px[x, y] = 0
+    det = pd.DataFrame([_det(300, 100, 380, print_edges[8], 'col'),
+                        _det(0, 100, 300, print_edges[-1] + 4, 'sname')])
+    out, warns = row_heights.fix_row_heights(img, df, df_det=det)
+    assert any('上下端' in w for w in warns)
+    assert _rows(out, 'comp')['row'].nunique() == 12
+
+
+def test_直下の流し込みは行として足さない():
+    # 04_p2 型: 種名の箱が流し込みまで伸び，流し込みは幅いっぱいに字が流れる
+    print_edges = list(range(100, 100 + 34 * 8 + 1, 34))
+    df = pd.concat([_grid(print_edges, [0, 200], 'sname'),
+                    _grid(print_edges, [300, 340, 380, 420], 'comp')], ignore_index=True)
+    img = _page(print_edges, size=(500, 800))
+    px = img.load()
+    y0 = print_edges[-1] + 2
+    for k in range(6):                              # 流し込み 6 行(全幅に字)
+        for x in range(10, 420, 3):
+            for y in range(y0 + 34 * k + 8, y0 + 34 * k + 26):
+                px[x, y] = 0
+    det = pd.DataFrame([_det(300, 100, 420, print_edges[-1], 'col'),
+                        _det(0, 100, 200, y0 + 34 * 6, 'sname')])
+    out, warns = row_heights.fix_row_heights(img, df, df_det=det)
+    assert _rows(out, 'comp')['row'].nunique() == 8         # 1 行も足されない
+
+
+def test_組成の字が無い末尾の行は落とす():
+    print_edges = list(range(100, 100 + 34 * 10 + 1, 34))
+    extra = print_edges + [print_edges[-1] + 34]         # 余分な 1 行(組成は空)
+    df = pd.concat([_grid(extra, [0, 200], 'sname'),
+                    _grid(extra, [300, 340, 380, 420], 'comp')], ignore_index=True)
+    img = _page(print_edges, size=(500, 800))
+    det = pd.DataFrame([_det(300, 100, 420, extra[-1], 'col')])
+    out, warns = row_heights.fix_row_heights(img, df, df_det=det)
+    assert any('落とした' in w for w in warns)
+    assert _rows(out, 'comp')['row'].nunique() == 10
+
+
+def test_検出を渡さなければ端は触らない():
+    print_edges = list(range(100, 100 + 34 * 12 + 1, 34))
+    short = print_edges[:9]
+    df = _grid(short, [300, 340, 380, 420], 'comp')
+    out, warns = row_heights.fix_row_heights(_page(print_edges, size=(500, 800)), df)
+    assert out is df
