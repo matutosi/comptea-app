@@ -289,6 +289,13 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
             # 決め直したあとには当てはまらない(2026-09-04)
             warnings = (stray_warn + warn
                         + list(df_loc2.attrs.get('warnings', [])) + lw)
+    # **行の高さを表の中央値にそろえる**(2026-09-08 ユーザ指摘: 組成部の行の高さは
+    # 一定で，極端に高い行も低い行も無い)．検出が 1 本欠けると内挿が細い行を挟み，
+    # 以後の行が 1 行ずつずれる(s01115_01_p3)．格子ごとの決め直しと違って，
+    # 外れた行だけを局所的に直すので，階層の副行の格子を壊さない
+    from comptea import row_heights
+    df_loc, height_warn = row_heights.fix_row_heights(Image.open(image), df_loc)
+    warnings += height_warn
     # 行が決まったあとに，列の境だけを印字の隙間から組み直す(良いときだけ)
     df_loc, edge_warn = col_edges.fix_column_edges(Image.open(image), df_loc)
     warnings += edge_warn
