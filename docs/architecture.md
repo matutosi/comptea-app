@@ -232,6 +232,26 @@ shift.
   rest), and the blank gutter between the names and the body (blank header *and*
   blank body); a blank-header column that does carry ink is the layer column,
   even when a gutter column precedes it
+- `row_heights.py`: Evens out the body rows after the grid is built. Body rows are
+  the same height throughout a table (a user constraint, 2026-09-08 — with some slack,
+  never an exact multiple), but rows come from `row` detections plus interpolation,
+  so one missed box leaves a 10 px sliver and every row below it is off by one
+  (s01115_01_p3). Per-row tolerance is not enough: 36→40→54→46 px are each within
+  ±25 % while the phase drifts until text straddles the edges (07_p1). So when any
+  row is outside the tolerance the block is re-laid as a lattice at the **median**
+  detected row height (robust, unlike autocorrelation, which halves or doubles), each
+  edge snapped to an ink valley; then all edges are shifted together to the phase with
+  the least ink on them. Two more things the pass knows: a grid at **half** the printed
+  pitch (dots and underlines make a half-period; 23_p1_t1_s2 came out 231 rows of 20 px
+  for a 38 px sheet) shows as no autocorrelation at the grid pitch and a strong one at
+  twice it, and is re-laid at double — but only with 30 rows or more and only when the
+  body has text runs for at most 0.6 of its rows (autocorrelation alone halved three
+  correct 56 px tables of 8–14 rows; losing the row correspondence is the worst
+  possible error, so the check is deliberately hard to trigger); and on typed sheets the letters and the `•`
+  sit about 10 px apart on the same line, so the name, Japanese-name and layer
+  columns get their own vertical offset (row numbers are assigned before the offset,
+  so the correspondence is kept). On the 9 worst tables the rows outside ±25 % went
+  from 329 to 38
 - `make_labels.py` / `build_dataset.py`: Turn a finished grid back into labelme and
   YOLO annotations, cut into page-sized tiles, so a new source can be trained on
   without labelling it by hand. Only tables whose checks pass are used, and the
