@@ -127,6 +127,28 @@ def test_parse_once_species_地点を渡さなければ捨てる():
     assert pt.parse_once_species(K005_TAIL) == []
 
 
+def test_parse_once_species_区切りのカンマが印字で落ちていても切る():
+    """`ゼンマイ K—+Viola kusanoana …` の実例(072-2．2026-09-08)
+
+    切れないと，2 件が 1 件にまとまって**後ろの種が黙って落ちる**．
+    """
+    text = ('in 1: Osmunda japonica ゼンマイ K—+Viola kusanoana '
+            'オオタチツボスミレ K—+')
+    rows = pt.parse_once_species(text)
+    assert [(r['j_name'], r['s_name']) for r in rows] == [
+        ('ゼンマイ', 'Osmunda japonica'),
+        ('オオタチツボスミレ', 'Viola kusanoana'),
+    ]
+
+
+def test_parse_once_species_階層が続く形は切らない():
+    """`S—+, K—+・2` は同じ種の別の階層．属名が始まらないので切れない"""
+    rows = pt.parse_once_species(
+        'in 4: Fraxinus lanuginosa アオダモ S—+, K—+・2')
+    assert [(r['j_name'], r['layer']) for r in rows] == [
+        ('アオダモ', 'S'), ('アオダモ', 'K')]
+
+
 def test_parse_once_species_常在度表の形():
     """常在度表の1回出現種は `常在度(被度)` で書かれる(kinki_064)"""
     text = ('in 6: Oplismenus undulatifolius ケチヂミザサ II(+), '
