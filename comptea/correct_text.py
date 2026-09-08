@@ -255,6 +255,44 @@ def _clean(text):
     return unicodedata.normalize('NFKC', text).strip()
 
 
+# 和名に空白は無い(辞書 27,127 件を数えて 0 件)．混じるのは OCR の雑音
+_SPACES = re.compile(r'\s+')
+# ひらがなは辞書に 1 件しか無い(`西湖の葭`)．隣の欄や記号を読み違えて混じる
+_HIRAGANA = re.compile(r'[ぁ-ん]+')
+# **種まで決まっていない記載**(2026-09-08 ユーザ指摘)．
+# `ミカン科の一種`(実データ)・`アザミ属の1種`(kinki_061 の1回出現種)・`sp.`．
+# **辞書に `属`・`科` を含む和名は 1 件も無い**ので，この形は辞書では解けない．
+# 印字として正しい値なので，そのまま通して目視に回さない
+_UNRESOLVED = re.compile(
+    r'^(?:[ァ-ヶー]+[属科]の[0-9一二三四五六七八九]?種|sp\.?)$', re.I)
+
+
+def _tidy_read(text, target, sp_set):
+    """辞書と突き合わせる前に，印字に無い字を落とす(2026-09-08)
+
+    距離で直すより先に掃除する．雑音が1字混じったまま距離を測ると，
+    その1字ぶん遠くなり，**近い別種が先に当たる**
+    (`サカ キ` は `サカキ` から距離 1，`のツタ` は `ツタ` から距離 1)．
+
+    落とし方は2段階にして，**強い方は完全一致したときだけ採る**．
+
+    - **空白は必ず落とす**．和名の辞書 27,127 件に空白を含むものは 0 件で，
+      混じっていれば必ず雑音．学名は語の区切りなので，連なりを1つに詰めるだけ
+    - **ひらがなは，落とした結果が辞書に完全一致するときだけ落とす**．
+      辞書にも `西湖の葭` が 1 件あるので，無条件には落とせない
+    """
+    if target == 's_name':
+        # 学名の空白は語の区切り．連なりを詰め，前後を落とすだけ
+        return _SPACES.sub(' ', text).strip()
+    tidy = _SPACES.sub('', text)
+    if tidy in sp_set:
+        return tidy
+    dropped = _HIRAGANA.sub('', tidy)
+    if dropped and dropped != tidy and dropped in sp_set:
+        return dropped
+    return tidy
+
+
 # 文章形式の表頭では値に単位が付く(100m², 640m, 0.6m, 70%, 40°)
 _UNIT = re.compile(r'\s*(m2|m²|㎡|cm|mm|km|ha|m|%|°|度)\s*$', re.I)
 
@@ -485,6 +523,20 @@ def correct_name(input_str: str, target="s_name", dict_path_s="s_name.txt", dict
     sp_dict = dict_path_s if target == "s_name" else dict_path_j
     sp_name, sp_set = _load_names(sp_dict)
 
+    # **印字に無い字は，距離で直すより先に落とす**(2026-09-08)．
+    # 空白やひらがなが混じったまま距離を測ると，その1字ぶん遠くなり，
+    # 近い別種が先に当たる(`サカ キ` `のツタ` の実例)．
+    # **掃除した文字列は突き合わせにだけ使う**．辞書に当たらなければ
+    # 印字(`printed`)をそのまま返し，目視で見比べられるようにする．
+    printed = input_str
+    input_str = _tidy_read(input_str, target, sp_set)
+
+    # **種まで決まっていない記載**は，辞書に無くて当たり前なので先に通す．
+    # `ミカン科の一種`・`アザミ属の1種`・`sp.`(2026-09-08 ユーザ指摘)．
+    # 距離に回すと，近いだけの別種に化けるか，永久に目視へ残る
+    if target != 's_name' and _UNRESOLVED.match(input_str):
+        return {"corrected": input_str, "status": "OK"}
+
     # 完全一致をチェック
     if input_str in sp_set:
         return {"corrected": input_str, "status": "OK"}
@@ -505,7 +557,7 @@ def correct_name(input_str: str, target="s_name", dict_path_s="s_name.txt", dict
                            score_cutoff=3, limit=None)
     if not hits:
         # 編集距離が3以内のものがない場合
-        return {"corrected": input_str, "status": "Need Check"}
+        return {"corrected": printed, "status": "Need Check"}
 
     # 距離が最小のものだけを残す
     min_distance = min(hit[1] for hit in hits)
@@ -514,7 +566,7 @@ def correct_name(input_str: str, target="s_name", dict_path_s="s_name.txt", dict
     # (`Actinidia arguta` が距離3の `Actinidia rufa` になった．2026-09-01)．
     # 元の印字を残し，'Need Check' にして段階2へ回す．
     if min_distance > MAX_ADOPT_DIST:
-        return {"corrected": input_str, "status": "Need Check"}
+        return {"corrected": printed, "status": "Need Check"}
     # **1 文字の読みは，完全に一致するときだけ採る**(2026-09-06)．
     # 1 文字どうしは必ず距離 1 になるので，辞書にある 1 文字の名前が
     # 総なめで候補になる(`口` → `イ;桂;樟`)．しかも同じ文字列が何行にも
@@ -522,7 +574,7 @@ def correct_name(input_str: str, target="s_name", dict_path_s="s_name.txt", dict
     # 実物は `モミ`・`カヤ`・`クリ` で，OCR が 1 文字しか拾えていなかった．
     # 折り込みでは 115 件がこれに当たる(候補が複数 104・置き換え 11)
     if len(input_str) <= MIN_MATCH_LEN and min_distance > 0:
-        return {"corrected": input_str, "status": "Need Check"}
+        return {"corrected": printed, "status": "Need Check"}
     candidates = [hit[0] for hit in hits if hit[1] == min_distance]
 
     # **濁点・半濁点だけの違いは，同じ名前とみなして先に採る**．
@@ -545,14 +597,14 @@ def correct_name(input_str: str, target="s_name", dict_path_s="s_name.txt", dict
     # 全部を ';' で連ねると数千文字の値になって表を壊す
     # (2026-09-01．--reader ai の出力で分かった)．
     if len(candidates) > MAX_SUGGEST:
-        return {"corrected": input_str, "status": "Need Check"}
+        return {"corrected": printed, "status": "Need Check"}
 
     suggested_name = ";".join(candidates)
     # **短い読みは，濁点・半濁点だけの違いでなければ採らない**(2026-09-07)．
     # 印字をそのまま残して目視へ回し，候補は `suggest` で渡す
     # (`corrected` に入れると，そのまま採られてしまう)．
     if not same_kana and len(input_str) < MIN_ADOPT_LEN:
-        return {"corrected": input_str, "status": "Need Check",
+        return {"corrected": printed, "status": "Need Check",
                 "suggest": suggested_name}
     return {"corrected": suggested_name, "status": "suggested"}
 

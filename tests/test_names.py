@@ -45,6 +45,59 @@ def test_一文字の読みは完全一致だけ採る():
     assert ";" not in got["corrected"]
 
 
+@pytest.mark.parametrize("text", [
+    "ミカン科の一種",     # 実データ(tab4_sz1856)
+    "アザミ属の1種",      # kinki_061 の1回出現種
+    "スゲ属の種",         # 数を書かない形
+    "sp.",
+])
+def test_種まで決まっていない記載は辞書に無くて当たり前(text):
+    """辞書 27,127 件に `属`・`科` を含む和名は 1 件も無い(2026-09-08 に数えた)
+
+    距離に回すと，近いだけの別種に化けるか，永久に目視へ残る．
+    印字として正しい値なので，そのまま通す．
+    """
+    got = ct.correct_name(text, target="j_name")
+    assert got == {"corrected": text, "status": "OK"}
+
+
+def test_属や科を含んでいても普通の和名は辞書で見る():
+    """`ヒノキ` のような普通の名前まで素通しにしない"""
+    assert ct.correct_name("ヒノキ", target="j_name")["status"] == "OK"
+    got = ct.correct_name("アザミ属", target="j_name")
+    assert got["status"] != "OK" or got["corrected"] != "アザミ属"
+
+
+def test_和名に混じった空白は落とす():
+    """辞書 27,127 件に空白を含む和名は 0 件(2026-09-08 に数えた)
+
+    `サカ キ` が距離 1 で `サカキ` に当たっていた．掃除すれば完全一致になる．
+    """
+    got = ct.correct_name("サカ キ", target="j_name")
+    assert got == {"corrected": "サカキ", "status": "OK"}
+
+
+def test_和名に混じったひらがなは完全一致のときだけ落とす():
+    """辞書にも `西湖の葭` が 1 件あるので，無条件には落とせない
+
+    `のツタ` は落とすと `ツタ` に完全一致する(実データ．kinki_047)．
+    """
+    got = ct.correct_name("のツタ", target="j_name")
+    assert got == {"corrected": "ツタ", "status": "OK"}
+
+
+def test_ひらがなを落としても辞書に無ければ落とさない():
+    """落とした結果が辞書に無いなら，印字を残して距離の判断へ回す"""
+    got = ct.correct_name("のあいうツツ", target="j_name")
+    assert "のあいう" in got["corrected"] or got["status"] == "Need Check"
+
+
+def test_学名の空白は語の区切りなので詰めない():
+    got = ct.correct_name("Actinidia  arguta", target="s_name")
+    assert got["corrected"] == "Actinidia arguta"
+    assert got["status"] == "OK"
+
+
 def test_短い読みは濁点以外の違いでは採らない():
     """`マソウ` が `ロソウ` になっていた(2026-09-07．実データ)
 
