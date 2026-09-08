@@ -16,8 +16,19 @@
 並べ直し(`lattice_rows`．各境は黒画素の谷へ寄せる)，全体の位相を合わせる．
 
 - 刻みが印字の行の**半分**(「・」や下線が半周期を作る)なら，先に 2 倍にする
-- 種名・和名・階層の列は，組成部と**別の上下のずれ**をもつ(タイプ打ちでは文字と
-  「・」の高さが 10 px ほど違う)．行の対応は添字で保ったまま，列ごとにずらす
+- 上下端は，種名の箱まで広げて流し込みの手前で詰めた範囲まで行の高さで埋める．
+  下端は組成部に字のある行だけ足し，流し込み(列の境が埋まる行)には入らない
+- **行の境は全クラスで共有し，位相は組成部の谷に置く**(2026-09-08 ユーザ指示で共有に
+  決めた．複数階層の種で和名の行が空くのは紙面どおりで，ずれではない)．
+  タイプ打ちでは文字と「・」の高さが同じ行でも 10 px ほど違い，共有する限り
+  どちらかが少し切れる．読む対象の値(組成部)を優先し，種名は上端が数 px 切れるのを許す．
+  **測って取り下げた折衷**(146 表の「境が字を割る行」の割合で比べた．基準は
+  学名 32%・和名 32%・階層 28%・組成 3%):
+  (a) 列ごとに「割る行の数」を数えて和が最小の位相 → 学名 23%・和名 21%・階層 21%・
+  組成 13%．数は減るが，学名の真ん中を境が通る表が出た(14_p1)．
+  (b) 種名側と組成部の黒画素の和の外縁を上端・下端にして行数で等分 → 行の高さは
+  完全にそろうが，紙面の伸縮で端の境が字に乗り，組成 46%・学名 37%．
+  (c) 種名側の列だけ別のずれ → 学名の枠が組成より 1 行近くずれ，ユーザ指示で取り下げ
 
 行の境は同じ段の全クラス(組成・学名・和名・階層・要約)で共有しているので，
 段ごとに境を直して全クラスのセルを組み直す．表頭のセルは触らない．
@@ -27,7 +38,7 @@ import numpy as np
 import pandas as pd
 
 from . import ink
-from .body_rows import lattice_rows
+from .body_rows import RULE_RUN, _strip_long_runs, body_extent_ink, lattice_rows
 
 
 ROW_TOL = 0.25          # 行の高さの許容(中央値に対する比)．これを外れた行があれば並べ直す
@@ -46,9 +57,6 @@ PHASE_GAIN = 0.7        # 境の上の黒画素がこの倍以下に減るとき
 
 
 FINE_SNAP = 0.12        # 位相を合わせたあと，境ごとに谷へ寄せる幅(行の高さに対する比)
-
-
-CLASS_GAIN = 0.95       # 種名側のずれは，境の上の黒画素がこの倍以下に減れば動かす
 
 
 HALF_AC_MAX = 0.12      # 格子の高さでの自己相関がこれ未満なら，その高さは周期でない
@@ -157,33 +165,6 @@ def best_shift(inner, prof, med, reach=PHASE_REACH, gain=PHASE_GAIN):
     return int(d)
 
 
-def class_offsets(edges, dark, body, med, classes=('sname', 'species_col', 'layer')):
-    """種名・和名・階層の列に，組成部とは別の上下のずれを与える
-
-    タイプ打ちの紙面では「・」や数字と文字の上下位置が同じ行でも 10 px ほど
-    ずれて打たれている(s01115_14_p1 は組成部に合わせた境が種名の 209 行中
-    157 行を割った．08_p2 は逆向き)．行の境を全クラスで共有すると両方には
-    合わないので，これらの列だけ境をまとめて動かす．行の対応は添字で保つ．
-
-    Returns:
-        {obj_name: ずれ幅 px}(0 は含めない)
-    """
-    inner = np.array(edges[1:-1], dtype=float)
-    out = {}
-    for cls in classes:
-        g = body[body['obj_name'] == cls]
-        if g.empty:
-            continue
-        prof = _profile(dark, g['x1'].min(), g['x2'].max())
-        if len(prof) == 0 or prof.max() <= 0:
-            continue
-        # 行の対応は変えないので害が無い．少しでも減るなら動かす
-        d = best_shift(inner, prof, med, gain=CLASS_GAIN)
-        if d:
-            out[cls] = d
-    return out
-
-
 def rephase_edges(edges, prof, med, reach=PHASE_REACH, gain=PHASE_GAIN,
                   fine=FINE_SNAP):
     """行の境の並びを**まとめて**上下に動かし，字の上を通らない位相にする
@@ -207,9 +188,11 @@ def rephase_edges(edges, prof, med, reach=PHASE_REACH, gain=PHASE_GAIN,
         # 動かさない表の境は触らない(良い表を数 px 揺らして ±25% を外す行を作らない)
         return edges, 0
     moved = inner + d
+    # **両端の境も一緒に動かす**．内側だけ動かすと，端の行の高さが
+    # 「行の高さ ± ずれ幅」になり，細い帯が残る(04_p2 の行 138．2026-09-08)
     # 谷が平らなら元の位置にいちばん近い所を採る(平らな所で端へ寄らないように)
     r = max(1, int(med * fine))
-    out = [edges[0]]
+    out = [max(0.0, edges[0] + d)]
     for y in moved:
         lo, hi = max(int(out[-1]) + 1, int(y) - r), min(n, int(y) + r + 1)
         if hi > lo:
@@ -218,9 +201,149 @@ def rephase_edges(edges, prof, med, reach=PHASE_REACH, gain=PHASE_GAIN,
             k = ties[int(np.argmin(np.abs(lo + ties - y)))]
             y = float(lo + k)
         out.append(float(y))
-    out.append(edges[-1])
+    out.append(min(float(n), edges[-1] + d))
     out = list(np.maximum.accumulate(out))
     return out, int(d)
+
+
+END_MIN_GAP = 0.75      # 範囲の端との差が行の高さのこの倍を超えたら，行を足しにいく(端を越えるのは 0.25 行まで)
+
+
+END_MIN_INK = 0.25      # 足す行の黒画素 / 行の中央値．これ未満なら足さない(空の行は足さない)
+
+
+END_TRIM_INK = 0.05     # 末尾の行の組成の黒画素 / 行の中央値．これ未満なら落とす(余分な行)
+
+
+END_INNER = 0.25        # 下端の判定で除く，帯の上下それぞれの割合(上の行の下線と，直下の流し込みの字の上端が食い込む)
+
+
+END_SHORT = 0.75        # 末尾の行がこの倍(中央値比)に満たなければ余りとみなして落とす
+
+
+def _row_ink(prof, a, b):
+    a, b = max(0, int(a)), min(len(prof), int(b))
+    return float(prof[a:b].sum()) if b > a else 0.0
+
+
+TEXT_BLANK_MIN = 0.7    # 帯の中で空いている列の境の割合がこれ未満なら，流し込みの行とみなす(表の行はほぼ全部空く．流し込みの 1 行目は語間が境に当たって 0.5 を超えた: 04_p2)
+
+
+def text_like(dark, xs, a, b, rule):
+    """帯 `a`-`b` が流し込み(文章)の行かどうか
+
+    表の行は地点と地点のあいだ(列の境)が空いているが，流し込みは幅いっぱいに
+    字が流れるので境が埋まる(`body_rows.body_bottom` と同じ見分け方)．
+    組成部に字があるかだけでは流し込みも「字がある」ので止められず，
+    04_p2 は流し込みの 10 行が表の行として足された(2026-09-08)．
+    罫線は全部の境を一度に埋めるので，横に長い黒画素を消してから見る．
+    """
+    if not xs:
+        return False
+    band = dark[int(a):int(b)]
+    if band.size == 0:
+        return False
+    band = _strip_long_runs(band, int(rule))
+    blank = 0
+    for x in xs:
+        x = int(x)
+        lo, hi = max(0, x - 2), min(band.shape[1], x + 3)
+        if hi > lo and not band[:, lo:hi].any():
+            blank += 1
+    return blank / len(xs) < TEXT_BLANK_MIN
+
+
+def extend_edges(edges, prof_comp, prof_all, med, ext, is_text=None, prof_names=None):
+    """格子の上下端を，組成部の本当の範囲 `ext` まで行の高さで埋める
+
+    格子の縦の範囲は `row` の検出で決まり，`_extend_rows_to_block()` は片側 2 行
+    までしか足さず，端も列の箱の中央値で決める．`col` の箱が途中で止まると
+    その下の行がまるごと落ちる(s01115_07_p2 は下 4 行．2026-09-08)．
+    `ext` は種名の箱まで広げてから流し込みの手前で詰めた範囲
+    (`body_extent_ink(names=True)`)なので，そこまで行の高さで足す．
+
+    **下端の行は「組成部に字がある」か「学名と和名の両方に字がある」とき表の行**
+    とみなす．表の下の「出現1回の種」の見出しは種名の側の 1 列にしか字が無く，
+    全幅で見ると行として足されていた(02_p1_s2・04_p2・06_p1・06_p2 の余分な 1 行)．
+    組成部は非出現でも「・」があるが，タイプの薄い「・」は二値化で消えることがある
+    (14_p1 の最終行は 400 px 幅で黒画素 16)ので，組成部だけで決めると種の行を落とす．
+    学名と和名の両方に字があれば種の行(見出しは片方だけ)．
+    流し込み(列の境が埋まる行)は `is_text` で止める．
+    **上端は全幅で判断する**．最初の行は種群の見出し(組成部は空)のことが多い．
+
+    Args:
+        prof_names: {obj_name: 黒画素の並び}(sname・species_col・layer のうち有るもの)
+
+    Returns:
+        (境, 下に足した行数, 上に足した行数, 下から落とした行数)
+    """
+    out = [float(e) for e in edges]
+    if len(out) < 2 or med <= 0 or ext is None:
+        return out, 0, 0, 0
+    lo, hi = float(ext[0]), float(ext[1])
+    prof_names = prof_names or {}
+
+    # 判定は**帯の中央 1/2 だけ**で測る．表の直下に流し込みがあると，
+    # その 1 行目の字の上端が末尾の帯の下端に食い込み(14_p1 の行 217)，
+    # 上の行の値の**下線**は帯の上端に食い込む(04_p2 の行 138)．どちらも空の行が
+    # 「字がある」と判定されて落ちなかった(2026-09-08)．「・」も値も字も行の中央にある
+    def mid(prof, a, b):
+        h = (b - a) * END_INNER
+        return _row_ink(prof, a + h, b - h)
+
+    def base_of(prof):
+        vals = [mid(prof, a, b) for a, b in zip(out[:-1], out[1:])]
+        pos = [v for v in vals if v > 0]
+        return float(np.median(pos)) if pos else 0.0
+
+    base = base_of(prof_comp)
+    if base <= 0:
+        return out, 0, 0, 0
+    name_base = {k: base_of(p) for k, p in prof_names.items()}
+    name_base = {k: v for k, v in name_base.items() if v > 0}
+    need = 2 if len(name_base) >= 2 else len(name_base)
+
+    def is_row(a, b):
+        if mid(prof_comp, a, b) >= base * END_MIN_INK:
+            return True
+        if not need:
+            return False
+        hits = sum(1 for k, v in name_base.items()
+                   if mid(prof_names[k], a, b) >= v * END_MIN_INK)
+        return hits >= need
+
+    trimmed = 0
+    # 行の高さは一定なので，**中央値の 3/4 に満たない末尾の行は無条件に落とす**．
+    # 並べ直し(`lattice_rows`)は最後に 0.5〜1.5 行の余りを残し，20 px の余りが
+    # 直下の流し込みの字に触れて「字がある」と残った(14_p1 の行 219．2026-09-08)
+    while len(out) > 2 and (out[-1] - out[-2]) < med * END_SHORT:
+        out.pop()
+        trimmed += 1
+    while len(out) > 2 and (not is_row(out[-2], out[-1])
+                            or (is_text is not None and is_text(out[-2], out[-1]))):
+        out.pop()
+        trimmed += 1
+    # 足す行は**行の高さのまま**足す(範囲の端で切り詰めると短い行ができ，
+    # 行の高さがそろわない)．範囲の端は箱の端なので数 px 越えてよい
+    below = 0
+    while hi - out[-1] > med * END_MIN_GAP:
+        new = out[-1] + med
+        if is_text is not None and is_text(out[-1], new):
+            break                                   # 流し込みに入った
+        if not is_row(out[-1], new):
+            break
+        out.append(new)
+        below += 1
+    above = 0
+    base_all = float(np.median([_row_ink(prof_all, a, b)
+                                for a, b in zip(out[:-1], out[1:])]))
+    while out[0] - lo > med * END_MIN_GAP:
+        new = max(out[0] - med, 0.0)
+        if _row_ink(prof_all, new, out[0]) < base_all * END_MIN_INK:
+            break
+        out.insert(0, new)
+        above += 1
+    return out, below, above, trimmed
 
 
 def _renumber_rows(df):
@@ -254,8 +377,11 @@ def _rebuild(g, body, edges):
     return pd.concat([head, nb], ignore_index=True)
 
 
-def fix_row_heights(img, df_loc, tol=ROW_TOL):
-    """格子の行の高さを段ごとにそろえる
+def fix_row_heights(img, df_loc, df_det=None, tol=ROW_TOL):
+    """格子の行の高さを段ごとにそろえ，上下端を組成部の本当の範囲まで埋める
+
+    `df_det` を渡すと，種名の箱まで広げて流し込みの手前で詰めた範囲
+    (`body_extent_ink(names=True)`)を上下端の目安にする(無ければ端は触らない)．
 
     Returns:
         (直した格子, 警告のリスト)．直す所が無ければ元の格子をそのまま返す
@@ -268,7 +394,6 @@ def fix_row_heights(img, df_loc, tol=ROW_TOL):
     dark = None
     warnings = []
     pieces = []
-    shifts = {}
     changed = False
     for block, g in df_loc.groupby('block', sort=True):
         body = g[g['obj_name'].isin(BODY_CLASSES)]
@@ -290,6 +415,12 @@ def fix_row_heights(img, df_loc, tol=ROW_TOL):
         if len(prof) == 0 or not np.isfinite(prof).all() or prof.max() <= 0:
             pieces.append(g)
             continue
+        # **行の境は組成部と種名・和名・階層で共有し，位相は組成部の谷に置く**
+        # (2026-09-08 ユーザ指示で共有に決めた．複数階層の種で和名の行が空くのは
+        # 紙面どおりで，ずれではない)．タイプ打ちでは文字と「・」の高さが 10 px ほど
+        # 違い，共有する限りどちらかが少し切れる．読む対象の値(組成部)を優先する．
+        # 種名側との折衷(列ごとの「割る行の数」の和・上端下端からの等分)は測って
+        # 取り下げた(モジュールの docstring)
         relaid = False
         new = edges
         if is_half_pitch(prof, edges[0], edges[-1], med):
@@ -313,34 +444,50 @@ def fix_row_heights(img, df_loc, tol=ROW_TOL):
                 f'(±{tol:.0%} を外れる行が {bad} 行あった．{len(edges) - 1} 行 → '
                 f'{len(new) - 1} 行)．行の高さは表の中で一定なので，外れた行は'
                 '検出漏れか誤検出の内挿．段階1で行の対応を目で確かめる')
+        # 上下端: 種名の箱まで広げて流し込みの手前で詰めた範囲まで，行の高さで埋める
+        grew = False
+        if df_det is not None:
+            ext = body_extent_ink(dark, g, df_det, names=True)
+            prof_all = _profile(dark, body['x1'].min(), body['x2'].max())
+            # 流し込みの見分けに使う x: 地点の列の内側の境と，種名と組成部のあいだの隙間
+            xs = sorted(set(cb['x1']) | set(cb['x2']))[1:-1]
+            names = body[body['obj_name'].isin(('sname', 'species_col', 'layer'))]
+            if len(names):
+                gap_a, gap_b = float(names['x2'].max()), float(cb['x1'].min())
+                if gap_b - gap_a >= 10:
+                    xs.append((gap_a + gap_b) / 2)
+            rule = med * RULE_RUN
+
+            def is_text(a, b):
+                return text_like(dark, xs, a, b, rule)
+
+            prof_names = {}
+            for cls in ('sname', 'species_col', 'layer'):
+                nc = body[body['obj_name'] == cls]
+                if len(nc):
+                    prof_names[cls] = _profile(dark, nc['x1'].min(), nc['x2'].max())
+            new, n_below, n_above, n_trim = extend_edges(new, prof, prof_all, med, ext,
+                                                         is_text=is_text,
+                                                         prof_names=prof_names)
+            if n_below or n_above or n_trim:
+                grew = True
+                warnings.append(
+                    f'段{block}: **格子の上下端を直した**(下に {n_below} 行・上に {n_above} 行'
+                    f'足し，組成の字が無い末尾の {n_trim} 行を落とした)．'
+                    '種名の箱まで広げて流し込みの手前で詰めた範囲を目安にし，'
+                    '下端は組成部に字がある行だけ足す．段階1で表の端を目で確かめる')
         new, shift = rephase_edges(new, prof, med)
         if shift:
             warnings.append(
                 f'段{block}: **行の境をまとめて {shift:+d} px 動かした**'
                 f'(行の高さ {med:.0f} px)．境が字の上を通っていた．'
                 '行の高さが一定なので，ずれは全行で同じ向き．段階1で目で確かめる')
-        offs = class_offsets(new, dark, body, med)
-        if offs:
-            warnings.append(
-                f'段{block}: 種名側の行の境を組成部とは別に動かした('
-                + '，'.join(f'{k} {v:+d} px' for k, v in offs.items())
-                + ')．文字と「・」の上下位置が同じ行でずれて打たれている紙面．'
-                '行の対応は変えていない')
-        if not relaid and not shift and not offs:
+        if not relaid and not grew and not shift:
             pieces.append(g)
             continue
         pieces.append(_rebuild(g, body, new))
-        if offs:
-            shifts[block] = offs
         changed = True
     if not changed:
         return df_loc, warnings
     out = pd.concat(pieces, ignore_index=True)
-    # 行番号は**ずらす前**の y1 で振る(種名側をずらしたあとに振ると，
-    # 同じ行の学名と組成が別の番号になる)
-    out = _renumber_rows(out)
-    for block, offs in shifts.items():
-        for cls, off in offs.items():
-            hit = (out['block'] == block) & (out['obj_name'] == cls)
-            out.loc[hit, ['y1', 'y2']] = out.loc[hit, ['y1', 'y2']] + float(off)
-    return out, warnings
+    return _renumber_rows(out), warnings

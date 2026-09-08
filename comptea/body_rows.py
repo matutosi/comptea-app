@@ -264,7 +264,7 @@ def running_text_top(dark, x0, x1, y1, y2, pitch, cell_w,
     return float(ys[best]) if best is not None else y2
 
 
-def body_extent(df_loc, df_det=None):
+def body_extent(df_loc, df_det=None, names=False):
     """組成部の**本当の縦の範囲**を返す (y1, y2)
 
     格子の範囲で数えてはいけない(2026-09-03)．行の検出が表の一部にしか
@@ -275,6 +275,12 @@ def body_extent(df_loc, df_det=None):
     **列の検出は表の全高に伸びる**ので，そちらで下端を測る
     (18_p2 は col が y 400-10107，row は 1445-2225)．
     下は「1回出現種」の帯の手前まで．
+
+    `names=True` なら，種名の列(`sname`・`species_col`)の検出の箱まで広げる
+    (2026-09-08)．`col` の箱が表の途中で止まると，その下の行がまるごと落ちる
+    (s01115_07_p2 は下 4 行)．種名の箱は本文の範囲をよく表す(`check_body_reach`)が
+    流し込みまで行き過ぎることもある(13_p1 は 35 行ぶん)ので，広げたあとは必ず
+    `body_extent_ink()` で流し込みの手前に詰める．
     """
     comp = df_loc[df_loc['obj_name'] == 'comp']
     if comp.empty:
@@ -283,6 +289,11 @@ def body_extent(df_loc, df_det=None):
     if df_det is None:
         return y1, y2
     col = df_det[df_det['obj_name'] == 'col']
+    if names:
+        nm = df_det[df_det['obj_name'].isin(('sname', 'species_col'))]
+        if not nm.empty:
+            y2 = max(y2, float(nm['y2'].max()))
+            y1 = min(y1, float(nm['y1'].min()))
     if col.empty:
         return y1, y2
     y2 = max(y2, float(col['y2'].max()))
@@ -340,13 +351,14 @@ def find_gutter(dark, x_lo, x_hi, y1, y2, min_w=GUTTER_MIN_W, blank=GUTTER_BLANK
     return found
 
 
-def body_extent_ink(dark, df_loc, df_det=None):
+def body_extent_ink(dark, df_loc, df_det=None, names=False):
     """`body_extent()` の下端を，流し込みの始まる所でさらに詰める
 
     種名の列と組成部のあいだの隙間が取れれば，列の境と隙間の両方が
     埋まる所で(`body_bottom(gutter=…)`)，取れなければ列の境だけで見る．
+    `names` は `body_extent()` にそのまま渡す．
     """
-    ext = body_extent(df_loc, df_det)
+    ext = body_extent(df_loc, df_det, names=names)
     if ext is None:
         return None
     y1, y2 = ext
@@ -354,8 +366,10 @@ def body_extent_ink(dark, df_loc, df_det=None):
     edges = sorted(set(comp['x1']) | set(comp['x2']))[1:-1]
     pitch = float((comp['y2'] - comp['y1']).median())
     x_hi = float(comp['x1'].min())
-    names = df_loc[df_loc['obj_name'].isin(('sname', 'species_col'))]
-    x_lo = float(names['x1'].min()) if len(names) else 0.0
+    # `names`(引数)と名前がぶつかるので `name_cells`(2026-09-08 に引数を足したとき，
+    # 同名のローカルで上書きされて `if names:` が DataFrame の真偽判定になった)
+    name_cells = df_loc[df_loc['obj_name'].isin(('sname', 'species_col'))]
+    x_lo = float(name_cells['x1'].min()) if len(name_cells) else 0.0
     gutter = find_gutter(dark, x_lo, x_hi, y1, y1 + (y2 - y1) * 0.5)
     xs = sorted(set(comp['x1']) | set(comp['x2']))
     cell_w = float(np.median(np.diff(xs))) if len(xs) > 2 else float(comp['x2'].max()
@@ -367,6 +381,12 @@ def body_extent_ink(dark, df_loc, df_det=None):
         # 境も隙間も測れない(1 地点の表で種名の箱が組成部に接している)．
         # 流し込みの始まりを確かめられないので，下端は検出の格子のまま
         # (kinki_024 は列まで広げると流し込みが 1 行入った．2026-09-04)
+        # **種名の箱まで広げるときは格子に固定しない**(2026-09-08)．地点 2 列の
+        # 07_p2 はこの分岐に入り，種名の箱まで広げても格子の下端に戻されて
+        # 下 4 行が落ちたままだった．呼び出し側(`row_heights.extend_edges`)が
+        # 行ごとに組成部の字を確かめて足すので，ここでは流し込みの先頭までにする
+        if names:
+            return y1, min(y2, grow)
         return y1, min(y2, float(comp['y2'].max()), grow)
     return y1, min(body_bottom(dark, edges, y1, y2, pitch, gutter=gutter), grow)
 
