@@ -149,8 +149,12 @@ if res:
                "**`corrected` は直せます**．直したら下のボタンで反映してください．")
 
     shown = _shared.cell_images(view, src)
+    # **`suggest` は「採らなかった候補」**(2026-09-08)．読みが短いと，
+    # 濁点だけの違いでないかぎり辞書の候補を採らず，印字を残して目視に回す．
+    # 候補は**誤りうる**(`クツル` に `ハクツル` が出て，正解は `クロヅル` だった)．
+    # 見るのは画像で，候補は参考にとどめる
     cols = [c for c in ["画像", "cell_id", "obj_name", "row", "col",
-                        "text", "corrected", "status", "note"]
+                        "text", "corrected", "suggest", "status", "note"]
             if c in shown.columns]
     edited = st.data_editor(
         shown[cols], use_container_width=True, hide_index=True,
@@ -159,6 +163,10 @@ if res:
             "画像": st.column_config.ImageColumn("実物", width="medium"),
             "text": st.column_config.TextColumn("読み", width="small"),
             "corrected": st.column_config.TextColumn("直した値", width="small"),
+            "suggest": st.column_config.TextColumn(
+                "採らなかった候補", width="small",
+                help="読みが短いので採らなかった候補．**誤りうる**ので，"
+                     "実物の画像を見て決める"),
         },
         key="read_editor")
 

@@ -654,7 +654,7 @@ def build_tables(image, tables, base, args, n_orig, by_class, table_warnings):
     return done, failed
 
 
-def save_continuation(image, base):
+def save_continuation(image, base, src_name=None):
     """枝番の付いたページで表が無いとき，「続きのページ」として切り出す
 
     `xxx-2.jpg` のように**枝番が付いていれば，表が無いのは想定内**
@@ -663,12 +663,19 @@ def save_continuation(image, base):
 
     枝番が無いページで表が見つからないのは，これまでどおり異常として止める．
 
+    **枝番は，受け取った画像の名前で決める**(2026-09-08)．
+    置き場の名前で決めていたが，GUI の置き場は一時ディレクトリ(`out`)なので
+    枝番が付かず，**続きのページが「格子が作れなかった」になっていた**．
+    ユーザが枝番を書くのはファイル名なので，そちらを正とする．
+
+    Args:
+        src_name: 受け取った画像の名前(拡張子なし)．省略すると置き場の名前を見る
     Returns:
         続きのページとして書き出せたら True
     """
     from comptea import once_page, page_group
 
-    stem, part, _ = page_group.split_name(base.name)
+    stem, part, _ = page_group.split_name(src_name or base.name)
     if part is None:
         return False
     found = once_page.find_block(image)
@@ -712,11 +719,14 @@ def main(argv=None):
     args.imgsz = resolve_imgsz(image, args.imgsz)
 
     base = _common.workdir(args.image, args.workdir, make=False)
+    # 枝番は**受け取った画像の名前**で決める(置き場は GUI では一時の名前)
+    from pathlib import Path as _Path
+    src_name = _Path(args.image).stem
 
     by_class = {'col': args.conf_col / 100}
     df_det = detect(image, args.weights, args.conf / 100, by_class, args.imgsz)
     if df_det.empty:
-        if save_continuation(image, base):
+        if save_continuation(image, base, src_name):
             return
         raise SystemExit(
             '検出が0件．**このページに組成表が無い**ことが多い'
@@ -737,7 +747,7 @@ def main(argv=None):
     from pathlib import Path
     done += [Path(d) for d in sub_done]
     if not done:
-        if save_continuation(image, base):
+        if save_continuation(image, base, src_name):
             return
         raise SystemExit(failed[0][1] if failed else '格子を作れなかった')
     if failed:

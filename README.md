@@ -36,10 +36,9 @@ python cli/run_ocr.py work/<名前>                          # セルを読む
 python cli/build_table.py work/<名前>                      # 縦持ちに組む
 python cli/export_data.py work --out out --tag <資料名>    # まとめて書き出す
 
-# 表の載っていないページに，前のページの「1回出現種」が続いていたとき
-python cli/read_once_page.py <画像> --out <置き場>          # 塊を切り出す
-python cli/read_once_page.py <画像> --out <置き場> \
-    --text <置き場>/once.txt --table <前ページの表> --start-plot <地点>
+# 続きのページがあるとき(ファイル名に枝番を付けておく)
+python cli/run_pipeline.py <画像>-2.jpg --workdir work/<名前>-2  # 塊を切り出す
+python cli/link_pages.py work --out out                          # 表につなぐ
 ```
 
 **入れなくても動きます** (`cli/` は，入っていなければリポジトリの置き場を
@@ -66,9 +65,10 @@ CSV から辿れるようにします．
 
 組成表の下の流し込み (出現1回の種・調査地・調査年月日・出典) は，紙面に
 収まらないと**次のページへあふれます**．あふれた先は本文や写真だけのページに
-見えるので，格子の段では「組成表が無い」として止まります．そのページは
-`read_once_page.py` に回します (検出クラス `once_species` は，表の下にある形
-でしか学習していないため，単独で置かれた塊は出ません)．
+見えるので，そのままでは格子の段で「組成表が無い」として止まります
+(検出クラス `once_species` は，表の下にある形でしか学習していないため，
+単独で置かれた塊は出ません)．**ファイル名に枝番を付けておけば止まりません**
+(下記)．枝番を付けない一枚だけを扱うときは `read_once_page.py` を使います．
 
 ### 続きのページは，ファイル名の枝番で示す
 
