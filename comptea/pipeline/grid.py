@@ -44,6 +44,8 @@ def parse_args(argv=None):
     p.add_argument('--threth-col', type=float, default=0.8, help='列の重複除去')
     p.add_argument('--threth-row', type=float, default=0.8, help='行の重複除去')
     p.add_argument('--no-snap', action='store_true', help='境界を谷へずらさない')
+    p.add_argument('--no-track', action='store_true',
+                   help='列ごとの y のずれ (行の追跡) を吸収しない')
     p.add_argument('--no-resplit', action='store_true',
                    help='左右の切れ目で部分画像に分けてやり直さない(再帰の中で使う)')
     return p.parse_args(argv)
@@ -322,6 +324,14 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
     from comptea import row_skew
     df_loc, skew_warn = row_skew.fix_skew(Image.open(image), df_loc)
     warnings += skew_warn
+    # 行を「単位の連なり」として追う (案 e の段階 1．2026-09-09)．拍で行数を検算し，
+    # 学名・和名・階層の列ごとに y のずれ (タイプ打ちの文字と「・」の 10 px) を中央値で
+    # 吸収する．行番号は共有のまま．傾きを除いた残りだけを測るので row_skew の後
+    from comptea import row_track
+    warnings += row_track.check_beats(Image.open(image), df_loc)
+    if not getattr(args, 'no_track', False):
+        df_loc, track_warn = row_track.fix_offsets(Image.open(image), df_loc)
+        warnings += track_warn
     # 段階2で「このセルを読み直す」と指せるように通し番号を振る
     df_loc.insert(0, 'cell_id', range(1, len(df_loc) + 1))
     df_loc.to_csv(work / 'located.csv', index=False)
@@ -446,6 +456,8 @@ def resplit_parts(image, tables, base, args):
                    '--workdir', str(base.parent / name), '--no-resplit']
             if args.no_snap:
                 cmd.append('--no-snap')
+            if getattr(args, 'no_track', False):
+                cmd.append('--no-track')
             print(f'\n===== 部分画像 {name} ({crop.width} x {crop.height}) =====')
             r = subprocess.run(cmd, capture_output=True, text=True,
                                encoding='utf-8', errors='replace')

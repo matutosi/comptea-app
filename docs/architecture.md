@@ -291,6 +291,28 @@ shift.
   edges become sloping lines, row numbers are untouched, and nothing is re-detected.
   Measured per cell (edge running through ink) on 10 typed tables: Japanese names
   40 % → 34 %, layer 40 % → 31 %, body unchanged at 1 %
+- `row_track.py`: Treats a row as a **run of units** rather than a line (2026-09-09).
+  Across 146 tables the row *count* is already right (row recall 1.000 against the
+  labelled truth; the beats of the anchor columns agree with the grid within ±2 rows in
+  93 % of blocks), but the assignment of *ink to rows* is not: sharing one boundary
+  across all columns and phasing it on the body's valleys cuts the names on typed
+  sheets, where a line's characters sit ~10 px above its dots (25 % of scientific-name
+  cells, 24 % of Japanese names, against 2 % for the body). The per-column offset is
+  near-constant per table (−10 to +12 px, IQR 2–12 px), so one median absorbs it.
+  `fix_offsets()` cuts units out of each column's band (vertical runs of the projection,
+  after erasing underlines ≥ max(80 px, 2p) and vertical rules > 3p, dropping units
+  taller than 1.5p), assigns them to the nearest row centre, subtracts the median and
+  re-assigns (subtracting first matters: it moves 7.5 % of the units to a different row,
+  30 % on 14_p1, and raises the share of name/Japanese-name pairs landing on one row
+  from 93 % to 98 %), then shifts that column's y by the median — row ids stay shared.
+  A shift is applied only if it is ≥ 2 px, ≤ 0.45p, its IQR ≤ 0.4p, the column has
+  enough units, and **the number of boundaries running through ink does not grow**;
+  that last guard is what keeps letterpress sheets (already at 3–4 %) from being made
+  worse. `check_beats()` counts rows from the anchor columns (layer plus the three
+  leftmost body columns — layer alone matches the grid in only 54 % of typed blocks and
+  a single body column in 81 %, their median in 94 %) and warns when the grid's height
+  divided by the beat spacing differs by 3 rows or more (13_p2 has 66 rows where 63
+  fit). It runs right after `row_skew` so only the residual offset is measured
 - `header_lines.py`: Builds the header's item rows from the boxes of EasyOCR's
   **detector** (CRAFT, `reader.detect` — no recognition), 2026-09-09. The ink-projection
   segmentation in `locate._header_bands_from_names()` breaks on typed sheets: no valley
