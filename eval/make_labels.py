@@ -34,6 +34,8 @@ try:
     import comptea                                  # noqa: F401
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from _data import use_data_dir                       # noqa: E402
 from comptea import strips                               # noqa: E402
 
 Image.MAX_IMAGE_PIXELS = None
@@ -306,6 +308,8 @@ def main():
     p.add_argument('--tile-w', type=int, default=TILE_W)
     p.add_argument('--tile-h', type=int, default=TILE_H)
     a = p.parse_args()
+    # データの置き場へ移る(COMPTEA_DATA が無ければ，いまいる場所のまま)
+    use_data_dir()
     n = make(a.workdir, a.image, a.outdir, a.tile_w, a.tile_h)
     print(f'書いた断片: {n} 枚 -> {a.outdir}')
 

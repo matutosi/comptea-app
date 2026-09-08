@@ -37,6 +37,8 @@ try:
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from _data import use_data_dir                       # noqa: E402
+
 def plot_cols(truth):
     """正解表にある地点の列(p1, p2, ...)を，番号の順に返す"""
     cols = [c for c in truth.columns
@@ -101,6 +103,8 @@ def read_run(run):
 
 def main():
     args = parse_args()
+    # データの置き場へ移る(COMPTEA_DATA が無ければ，いまいる場所のまま)
+    use_data_dir()
     truth = read_truth(args.truth)
     cells, names, long_df = read_run(args.run)
 
