@@ -615,16 +615,44 @@ def _locate_header(df: pd.DataFrame, source_image: str, x_edges, warnings: list,
     if img is not None and hc is not None:
         name_x1 = float(hc['x1'].iloc[0])
         name_x2 = float(x_edges[0])      # 項目名(独語・和名)から値の手前まで
-        new_edges = _header_bands_from_names(
-            img, (name_x1, h_edges[0], name_x2, h_edges[-1]))
-        if new_edges is not None and len(new_edges) >= 3:
-            if len(new_edges) != len(h_edges):
+        # **まず OCR の検出器の箱から行を作る**(2026-09-09)．投影の区間分けは
+        # タイプ打ちで崩れる(行間に谷が無く 16 行が 3 行に，かけらが行になる，
+        # 字数の少ない先頭行が落ちる)．検出器は文字を語や行にまとめた箱を返すので，
+        # 箱の y を束ねればそのまま行になる(代表 6 表で真値と一致)．
+        # 領域は表頭の枠の 1 行上から(先頭行の取りこぼし対策)．表題・凡例の帯は
+        # 値側に字が無いことで落とす．3 行未満なら投影へ戻す(複数方式の候補から選ぶ)
+        from . import header_lines
+        ocr_top = float(h_edges[0])
+        if not head.empty:
+            ocr_top = min(ocr_top, float(head['y1'].min()))
+        ocr_top = max(0.0, ocr_top - median_h)
+        # 行を束ねる閾値は**組成部の行の高さ**(検出の `row` の箱の高さの中央値)の半分．
+        # 表頭の項目行は組成部と同じ行送りで組まれている
+        body_rows = filter_results(df, source_image, 'row')
+        pitch = (float((body_rows['y2'] - body_rows['y1']).median())
+                 if len(body_rows) >= 3 else float(median_h))
+        ocr_edges = header_lines.header_bands(
+            img, (name_x1, ocr_top, name_x2, float(h_edges[-1])),
+            value_x=(float(x_edges[0]), float(x_edges[-1])), pitch=pitch)
+        if ocr_edges is not None:
+            if len(ocr_edges) != len(h_edges):
                 warnings.append(
                     f'表頭の項目行は，検出({len(h_edges) - 1} 行)と'
-                    f'項目名の字の行({len(new_edges) - 1} 行)で数が違う．'
-                    '項目名の側を採った．段階1で行の対応を目で確かめる．')
-            h_edges = new_edges
+                    f'OCR の検出器の箱の行({len(ocr_edges) - 1} 行)で数が違う．'
+                    'OCR の側を採った．段階1で行の対応を目で確かめる．')
+            h_edges = ocr_edges
             n_items = len(h_edges) - 1
+        else:
+            new_edges = _header_bands_from_names(
+                img, (name_x1, h_edges[0], name_x2, h_edges[-1]))
+            if new_edges is not None and len(new_edges) >= 3:
+                if len(new_edges) != len(h_edges):
+                    warnings.append(
+                        f'表頭の項目行は，検出({len(h_edges) - 1} 行)と'
+                        f'項目名の字の行({len(new_edges) - 1} 行)で数が違う．'
+                        '項目名の側を採った(OCR の箱は 3 行未満)．段階1で行の対応を目で確かめる．')
+                h_edges = new_edges
+                n_items = len(h_edges) - 1
     h_notes = axis_notes(n=n_items)
     # **表頭は組成部と横位置がずれることがある**(2026-09-04 ユーザ指摘)．
     # s01115_22_p2(常在度の総合表)は表頭の値が組成部より 18 px 左に組まれており，

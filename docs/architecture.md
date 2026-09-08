@@ -291,6 +291,23 @@ shift.
   edges become sloping lines, row numbers are untouched, and nothing is re-detected.
   Measured per cell (edge running through ink) on 10 typed tables: Japanese names
   40 % → 34 %, layer 40 % → 31 %, body unchanged at 1 %
+- `header_lines.py`: Builds the header's item rows from the boxes of EasyOCR's
+  **detector** (CRAFT, `reader.detect` — no recognition), 2026-09-09. The ink-projection
+  segmentation in `locate._header_bands_from_names()` breaks on typed sheets: no valley
+  between lines (16 items became 3 bands on 01_p2), short first lines below the
+  threshold (the plot-number row), descenders and punctuation split off as extra
+  bands. Connected components were tried and rejected (dots and dakuten chain lines
+  together). The detector groups characters into word/line boxes, so clustering the box
+  centres at **half the body row pitch** (median height of the `row` detections)
+  reproduces the item rows: 01_p2 3 → 16 (truth 16), 01_p1 13 → 15 (17), 07_p1 4 → 17
+  (18), kinki_041 11 → 6 (6). The region starts one row above the header box (the
+  leading items were being lost), boxes taller than 1.4 rows are split into as many
+  lines (the detector links two tight lines into one box), bands are the midpoints
+  between line centres, and leading/trailing bands with no ink on the value side are
+  dropped as title or legend lines. Do not use the box height as the clustering
+  threshold (boxes can span two lines and merge neighbours) nor the box spacing to
+  estimate the pitch (German and Japanese on the same line sit 8 px apart and halve
+  it). Fewer than 3 lines falls back to the projection bands
 - `make_labels.py` / `build_dataset.py`: Turn a finished grid back into labelme and
   YOLO annotations, cut into page-sized tiles, so a new source can be trained on
   without labelling it by hand. Only tables whose checks pass are used, and the
