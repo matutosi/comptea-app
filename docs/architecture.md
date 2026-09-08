@@ -279,6 +279,18 @@ shift.
   gaps that happen to land on boundaries, so 50 % was not enough on 04_p2). The top is
   judged on full-width ink because a table's first row is often a species-group
   heading with an empty body
+- `row_skew.py`: Corrects the sheet's residual skew **in the cell coordinates only**,
+  as the last step before `located.csv` is written. `deskew_page()` rotates the image
+  and re-detects, which is restricted to single-table sheets, skips shifts under 0.3 of
+  a row and reverts whenever the re-detection loses landmarks — so it took effect on 5
+  of 146 tables and 0.1–0.8° remained, cutting cells in the leftmost body columns
+  (05_p2: 22 % of them). The pass measures the slope from the **ink centroids of the
+  cells of each row** fitted against x (median over rows — the left/right
+  cross-correlation used by `deskew.py` is ambiguous beyond half a row because the
+  dots are periodic), then shifts every cell's y by `slope × (x − body centre)`; the row
+  edges become sloping lines, row numbers are untouched, and nothing is re-detected.
+  Measured per cell (edge running through ink) on 10 typed tables: Japanese names
+  40 % → 34 %, layer 40 % → 31 %, body unchanged at 1 %
 - `make_labels.py` / `build_dataset.py`: Turn a finished grid back into labelme and
   YOLO annotations, cut into page-sized tiles, so a new source can be trained on
   without labelling it by hand. Only tables whose checks pass are used, and the

@@ -315,6 +315,13 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
     # 行の数・列の数が合っていても壊れている形がある(2026-09-03・04)
     warnings += checks.check_row_heights(df_loc)
     warnings += checks.check_header_rows(df_loc)
+    # **最後に，紙面の傾きをセルの座標だけで直す**(2026-09-09)．`deskew_page` は
+    # 画像を回して検出し直すため 146 表中 5 表にしか効かず，0.1〜0.8° が残って
+    # 組成部の左端の列でセルが切れていた(05_p2 は 22%)．格子と検査は水平のまま
+    # 済ませ，書き出す直前に各セルの y を x に応じてずらす(行番号は変えない)
+    from comptea import row_skew
+    df_loc, skew_warn = row_skew.fix_skew(Image.open(image), df_loc)
+    warnings += skew_warn
     # 段階2で「このセルを読み直す」と指せるように通し番号を振る
     df_loc.insert(0, 'cell_id', range(1, len(df_loc) + 1))
     df_loc.to_csv(work / 'located.csv', index=False)

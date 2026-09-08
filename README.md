@@ -169,7 +169,8 @@ pytest --runslow      # 検出と読み取りも実際に走らせる(30 秒ほ�
 | `tests/test_checks.py` | 格子の検査 4 つ (鳴るべきときに鳴るか) |
 | `tests/test_wiring.py` | モジュールをまたぐ参照が実在するか (移し忘れを捕まえる) |
 | `tests/test_grid_parts.py` | 短冊・種名の列・階層の列 (組み立てた紙面で) |
-| `tests/test_row_heights.py` | 行の高さをそろえる後処理 (細い行・位相・半分の刻み・種名側のずれ) |
+| `tests/test_row_heights.py` | 行の高さをそろえる後処理 (細い行・位相・半分の刻み・上下端) |
+| `tests/test_row_skew.py` | 紙面の傾きをセルの座標だけで直す後処理 (傾いた紙面・水平な紙面・列の少ない表) |
 | `tests/test_apps.py` | Streamlit の 4 アプリを画面まで走らせる |
 | `tests/test_shared.py` | 工程のあいだの受け渡し (zip・見本・検出の返り) |
 | `tests/test_pipeline.py` | 見本 1 枚の通し (`slow` は 3 段を続けて回す) |
