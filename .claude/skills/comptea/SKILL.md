@@ -5,12 +5,22 @@ description: 植生学の組成表(vegetation composition table)をスキャン�
 
 # 組成表からデータを取り出す
 
+## 置き場
+
+**このスキルは `comptea-app`(公開リポジトリ)が正**(2026-09-08 に移した)．
+以前は private の `comptea/.claude/skills/` にも同じものがあり，
+**2 か所に置いた結果，中身が離れた**(公開側に枝番の話が無かった)．
+
+コードは `comptea-app`，**データは `comptea`**(`yolo/labelme_data/`・
+`yolo/truth/`・`yolo/work*/`)にある．
+下のコマンドは**`comptea/` を作業ディレクトリにして**書いてある．
+
 ## このスキルの立ち位置
 
 **測れるものは Python が測り，判断が要るところを目で見る**．
 
-`comptea/` のモジュールが，検出・格子・辞書補正・被度の検証・表の組み立てを
-すでに持っている．このスキルはそれを呼び出す薄い層で，
+`../comptea-app` の `comptea` パッケージが，検出・格子・辞書補正・被度の検証・
+表の組み立てをすでに持っている(**コードの正はそちら**)．このスキルはそれを呼び出す薄い層で，
 **アルゴリズムを新しく書かない**．代わりに，自動化しないと決めた判断
 (領域が「1回出現種」か「調査地の記載」か，段落がどこで終わるか，
 崩れた文字が何と書いてあるか)を，画像を見て決める．
@@ -26,12 +36,12 @@ description: 植生学の組成表(vegetation composition table)をスキャン�
 
 ## 前提
 
-- `comptea/weights/comptea.pt` があること
+- `yolo/weights/comptea.pt` があること
 - Python に ultralytics / easyocr / pandas / Pillow が入っていること
-- 中間物は `work/<画像名>/` に置かれる(`--workdir` で変えられる)
+- 中間物は `yolo/work/<画像名>/` に置かれる(`--workdir` で変えられる)
 
-スクリプトはパッケージを読むだけで作業ディレクトリを変えないので，**どこから呼んでもよい**．
-`comptea/` が別の場所にあるときは環境変数 `COMPTEA_YOLO` で指す．
+スクリプトは `yolo/` へ自分で移動してから動くので，**どこから呼んでもよい**．
+`yolo/` が別の場所にあるときは環境変数 `COMPTEA_YOLO` で指す．
 
 ## 流れ
 
@@ -40,31 +50,8 @@ split_sheet.py   →  (大きな折り込みのときだけ．表ごとに切る
 run_pipeline.py  →  [段階1 格子を見る]
 run_ocr.py       →  crop_cells.py  →  [段階2 読む]  →  apply_text.py
 build_table.py   →  [段階3 検査を裁く]
-link_pages.py    →  (続きのページがあるときだけ．枝番でまとめてつなぐ)
+export_data.py   →  (何枚も通したあと．結果を 1 か所にまとめる)
 ```
-
-### 0.2 続きのページは，ファイル名の枝番で分かる
-
-組成表の下の流し込み(出現1回の種・調査地・調査年月日・出典)が紙面に
-収まらないと，**次のページへあふれる**．どのページが続きかは
-**ユーザがファイル名の枝番で示す**(2026-09-08 決定)．
-
-```
-組成表だけ        xxx.jpg
-組成表と続き      xxx-1.jpg(組成表)   xxx-2.jpg(続き)
-```
-
-- **枝番が付いていれば，表が無くても異常ではない**．`run_pipeline.py` は
-  止まらず，続きのページとして塊と注記を切り出す
-- **枝番の無いページで表が無いのは異常**．これまでどおり止まる
-- 通し終えたら `link_pages.py` で表につなぐ．
-  **文字列としてつないでから一度だけ解析する**ので，地点の引き継ぎ・
-  ページで割れた種名・前ページに残った注記の見出しが，いずれも自動で解ける
-
-**ノンブルの順で判断しない**．画像は 1 枚 1 ページだが，
-ノンブルが左下のページと右下のページで 1 つの見開きになり，
-**流し込みは見開きの下端を右ページ → 左ページと流れる**．
-ノンブルは左ページの方が小さいので，その順に並べると流し込みが逆になる．
 
 ### 0. 何の画像かを確かめる
 
@@ -80,13 +67,45 @@ link_pages.py    →  (続きのページがあるときだけ．枝番でまと
   「調査番号：SO-216, 調査面積：100m²…」と流し込んであるなら文章形式．
   地点数では決まらない(1地点でも表形式の例がある)．
 
+### 0.2 続きのページは，ファイル名の枝番で分かる
+
+組成表の下の流し込み(出現1回の種・調査地・調査年月日・出典)が紙面に
+収まらないと，**次のページへあふれる**．どのページが続きかは
+**ユーザがファイル名の枝番で示す**(2026-09-08 決定)．
+
+```
+組成表だけ        xxx.jpg
+組成表と続き      xxx-1.jpg(組成表)   xxx-2.jpg(続き)
+```
+
+枝番は 1 から**読む順**に振ってある．**組成表が 2 ページ以上に渡ることもある**．
+
+- **枝番が付いていれば，表が無くても異常ではない**．`run_pipeline.py` は
+  止まらず，続きのページとして塊と注記を切り出す
+- **枝番の無いページで表が無いのは異常**．これまでどおり止まる
+- 通し終えたら `link_pages.py` で表につなぐ
+
+```bash
+python ../comptea-app/cli/link_pages.py work --out out
+```
+
+**つなぐのは，文字列としてつないでから一度だけ解析するため**．そうすると
+地点の引き継ぎ・ページで割れた種名・前ページに残った注記の見出しが，
+いずれも自動で解ける(1ページずつ解析すると，どれも解けない)．
+
+**ノンブルの順で判断しない**．画像は 1 枚 1 ページだが，
+**ノンブルが左下のページと右下のページで 1 つの見開き**になり，
+**流し込みは見開きの下端を右ページ → 左ページと流れる**．
+ノンブルは左ページの方が小さいので，**ノンブルの順に並べると流し込みが逆になる**
+(`052-1` = p.261 に表と書き出し，`052-2` = p.260 にその続き)．**枝番を正とする**．
+
 ### 0.5 大きな折り込みなら，先に表ごとに切る
 
 A0 級の折り込み(`s01115` の 23 枚)には，**1枚に表が2つ3つ載っている**．
 1枚のまま渡しても行が1本も取れないので，先に切り分ける．
 
 ```bash
-py -3.12 -m comptea.split_sheet <PDF か画像> --outdir <置き場> [--dry-run]
+py -3.12 yolo/split_sheet.py <PDF か画像> --outdir <置き場> [--dry-run]
 ```
 
 `<画像名>_p1.png`・`_p2.png` … が並び，**左の段から，段の中は上から**の順になる．
@@ -101,7 +120,7 @@ py -3.12 -m comptea.split_sheet <PDF か画像> --outdir <置き場> [--dry-run]
 `auto` が**上限で頭打ち**と出たら，学習時より縮尺が小さく，行が取れないことがある．
 
 **地点が 10 を超える横長の表は，`run_pipeline.py` が自分で短冊に分けて検出する**
-(`strips.py`)．そうしないと `row` が1本も取れない．
+(`split_wide.py`)．そうしないと `row` が1本も取れない．
 分けたときは警告に「組成部を N つに分けて検出した」と出るので，
 **段階1では短冊の境目の列**を必ず見る．
 併せて，**列の境が印字の地点の隙間から離れていないか**を機械で測っており，
@@ -118,7 +137,7 @@ py -3.12 -m comptea.split_sheet <PDF か画像> --outdir <置き場> [--dry-run]
 ### 1. 検出と格子(段階1)
 
 ```bash
-python .claude/skills/comptea/scripts/run_pipeline.py <画像> [--conf 30] [--conf-col 20]
+python ../comptea-app/cli/run_pipeline.py <画像> [--conf 30] [--conf-col 20]
 ```
 
 `work/<画像名>/overlay.png` を **Read して目で確かめる**．
@@ -140,15 +159,9 @@ python .claude/skills/comptea/scripts/run_pipeline.py <画像> [--conf 30] [--co
 ### 2. 読み取り(段階2)
 
 ```bash
-python cli/run_ocr.py work/<画像名> [--reader easyocr|ai|both]
-python cli/crop_cells.py work/<画像名> --what review --by-class
+python ../comptea-app/cli/run_ocr.py work/<画像名> [--reader easyocr|ai|both]
+python ../comptea-app/cli/crop_cells.py work/<画像名>
 ```
-
-**要確認のセルだけを読み直すときは `--by-class` を付ける**．
-`sheet_NN_<クラス>.png` になり，**1 枚が 1 クラスだけ**になるので，
-読む側が「このセルに来る字は `5 4 3 2 1 + r ・` だけ」と決め打ちできる
-(字種を絞る効きは `ocr.retry_empty_comp()` で実証済み)．
-**読み手に渡す文面は，スキルの `references/read-cells-prompt.md` に 1 か所化してある**．
 
 `run_ocr.py` が全セルを EasyOCR で読み，辞書と規則で補正して，
 **目視に回すセルを `review.tsv` に挙げる**(読めなかった / 値として読めない /
@@ -166,7 +179,7 @@ python cli/crop_cells.py work/<画像名> --what review --by-class
 まで通して初めて値が入る．`both` では `apply_text.py` が EasyOCR の読みと
 突き合わせ，`ocred.csv` の `agree` 列に `ok` / `disagree` を残す．
 
-正解表3枚 (非公開) と `eval/eval_read.py` で比べた結果 (組成部のセル)．
+正解表3枚 (`yolo/truth/`) と `yolo/eval_read.py` で比べた結果 (組成部のセル)．
 
 | ページ | easyocr | ai |
 |:---|---:|---:|
@@ -183,6 +196,26 @@ python cli/crop_cells.py work/<画像名> --what review --by-class
 - `crops/region_*.png` — 表頭・1回出現種の領域．**原寸**．丸ごと読む
 - `crops/sheet_*.png` — 小さいセル．`#cell_id` を焼き込んで1枚にまとめてある
 
+**要確認のセルだけを読み直すときは，クラスごとに分ける**．
+
+```bash
+python ../comptea-app/cli/crop_cells.py work/<画像名> --what review --by-class
+```
+
+`sheet_NN_<クラス>.png` になり，**1枚が1クラスだけ**になる．
+読む側が「このセルに来る字は `5 4 3 2 1 + r ・` だけ」と決め打ちできるので，
+読みが良くなる(字種を絞る効きは `ocr.retry_empty_comp()` で実証済み)．
+
+**読み手に渡す文面は [references/read-cells-prompt.md](references/read-cells-prompt.md)
+に置いてある**．クラスごとに来る字・書き方・してはいけないことが書いてあり，
+**そのまま渡せる形**にしてある(**誰が読んでも同じ文面を使う**．
+2 か所に置くと必ずずれるため)．
+
+量の目安は，手元の全コーパスで要確認 **2,051 セル**(105 表)，
+24 セル/枚で **約 85 枚**．1 表なら数枚に収まるので，
+**表ごとに読んで `apply_text.py` まで通し，次の表へ進む**
+(何十枚もまとめて読むと，どの番号がどの表か分からなくなる)．
+
 これらを Read して読み，**読めた分だけ** TSV に書く．
 
 ```
@@ -196,7 +229,7 @@ cell_id	text
 (無理に埋めない)．
 
 ```bash
-python .claude/skills/comptea/scripts/apply_text.py work/<画像名> --tsv fixes.tsv
+python ../comptea-app/cli/apply_text.py work/<画像名> --tsv fixes.tsv
 ```
 
 流し込んだ文字は EasyOCR のときと同じ補正を通る．
@@ -205,7 +238,7 @@ python .claude/skills/comptea/scripts/apply_text.py work/<画像名> --tsv fixes
 ### 3. 表に組んで検査(段階3)
 
 ```bash
-python .claude/skills/comptea/scripts/build_table.py work/<画像名>
+python ../comptea-app/cli/build_table.py work/<画像名>
 ```
 
 出力は `comp_table_long.csv`(正)，`comp_table_wide.csv`(確認用)，
@@ -219,6 +252,26 @@ python .claude/skills/comptea/scripts/build_table.py work/<画像名>
 
 直すときは段階2に戻る(`crop_cells.py --ids ...` → 読む → `apply_text.py`)．
 最後に，結果と残った `Need Check` の件数をユーザーに伝える．
+
+### 4. まとめて書き出す
+
+何枚も通したあとは，結果を 1 か所にまとめる．
+
+```bash
+python ../comptea-app/cli/export_data.py work --out yolo/work_out --tag kinki
+```
+
+作業ディレクトリの親を渡せば，その下の表を全部拾う．出力は次の 5 つ．
+
+- `comp_table_long_<tag>.csv` — 縦持ちの本体(全部の表を縦に積む)
+- `plot_table_<tag>.csv` — 表頭の項目(1 行 = 1 地点)
+- `summary_<tag>.csv` — 表ごとの行・列・セル・OK・Need Check
+- `_need_check/<表>/<cell_id>.png` — **Need Check のセルの画像**
+- `_need_check/<表>/once_species.png` — 1回出現種の流し込み
+
+**Need Check の行には `image` 列でフルパスが入る**ので，どのセルを見れば
+よいかが CSV だけで分かる．作業ディレクトリは一時のものなので，
+渡す前にここへ写しておく．
 
 ## 出力の見方
 
@@ -237,7 +290,7 @@ python .claude/skills/comptea/scripts/build_table.py work/<画像名>
 
 ## 参照
 
-- `references/checkpoints.md` — 3つの段階で何を見るか
+- `references/checkpoints.md` — 3つの関門で何を見るか
 - `references/failure-modes.md` — 既知の崩れ方と直し方
 - `references/reading-guide.md` — 画像を読むときの約束(被度・階層・学名)
 - `docs/vegetation_science.md` — 分野の背景知識．用語が出たらまずここ

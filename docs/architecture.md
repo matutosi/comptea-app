@@ -260,8 +260,11 @@ the footnote runs right to left along its foot, so ordering by page number rever
 `comptea/page_group.py` reads the branch numbers; `grid.save_continuation()` keeps a
 page with a branch number from failing when it holds no table.
 Three stages — the grid, the reading, the assembled table — are rendered as images to
-be eyeballed before the run continues; `docs/references/` holds the stage guide, the
-reading guide, and the known failure modes. OCR is EasyOCR-led.
+be eyeballed before the run continues; `.claude/skills/comptea/references/` holds the
+stage guide, the reading guide, the prompt handed to whoever reads the crops, and the
+known failure modes. OCR is EasyOCR-led. The skill that drives all this from Claude
+Code lives in `.claude/skills/comptea/` in **this** repository: it used to be kept in
+the private one as well, and the two copies drifted apart.
 
 ## Running it
 

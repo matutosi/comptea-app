@@ -200,6 +200,11 @@ pytest --runslow      # 検出と読み取りも実際に走らせる(30 秒ほ�
 - [docs/lessons.md](docs/lessons.md) — 規則づくりの知見と，測って取り下げた案
 - [docs/vegetation_science.md](docs/vegetation_science.md) — 分野の背景 (被度階級・階層・常在度)
 - [docs/architecture.md](docs/architecture.md) — コードの構成
+- [.claude/skills/comptea/](.claude/skills/comptea/) — Claude Code から通しで回すスキル．
+  段階ごとの見どころ (`references/checkpoints.md`)，崩れ方と直し方
+  (`references/failure-modes.md`)，画像を読むときの約束
+  (`references/reading-guide.md`)，読み手に渡す文面
+  (`references/read-cells-prompt.md`)．**このリポジトリが正**です
 - [eval/README.md](eval/README.md) — 物差し (**非公開の資料が要るので，ここからは動きません**)
 
 作業ディレクトリを省くと，**いまいる場所**の `work/<画像名>/` に書きます．
