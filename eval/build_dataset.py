@@ -27,6 +27,8 @@ try:
     import comptea                                  # noqa: F401
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from _data import use_data_dir                       # noqa: E402
 import make_labels                              # noqa: E402
 
 Image.MAX_IMAGE_PIXELS = None
@@ -113,6 +115,8 @@ def main():
     p.add_argument('--tile-w', type=int, default=make_labels.TILE_W)
     p.add_argument('--tile-h', type=int, default=make_labels.TILE_H)
     a = p.parse_args()
+    # データの置き場へ移る(COMPTEA_DATA が無ければ，いまいる場所のまま)
+    use_data_dir()
 
     with open(os.path.join(a.src, 'dataset.yaml'), encoding='utf-8') as f:
         names = yaml.safe_load(f)['names']

@@ -11,9 +11,13 @@ description: 植生学の組成表(vegetation composition table)をスキャン�
 以前は private の `comptea/.claude/skills/` にも同じものがあり，
 **2 か所に置いた結果，中身が離れた**(公開側に枝番の話が無かった)．
 
-コードは `comptea-app`，**データは `comptea`**(`yolo/labelme_data/`・
-`yolo/truth/`・`yolo/work*/`)にある．
-下のコマンドは**`comptea/` を作業ディレクトリにして**書いてある．
+コードは `comptea-app`，**データ**(`labelme_data/`・`truth/`・`work*/`・
+`weights/`)は**このリポジトリの外**にある(著作権のため公開していない)．
+下のコマンドは，**データを置いたディレクトリを作業ディレクトリにして**書いてある．
+
+**場所は環境変数で指す**．`COMPTEA_DATA` を設定しておけば，
+物差し(`eval/`)はどこから呼んでも動く．**実際の場所はここに書かない**
+(人によって違い，公開する情報でもない)．
 
 ## このスキルの立ち位置
 
@@ -36,12 +40,14 @@ description: 植生学の組成表(vegetation composition table)をスキャン�
 
 ## 前提
 
-- `yolo/weights/comptea.pt` があること
 - Python に ultralytics / easyocr / pandas / Pillow が入っていること
-- 中間物は `yolo/work/<画像名>/` に置かれる(`--workdir` で変えられる)
+- 重みはパッケージに同梱してある(`comptea/weights/comptea.pt`)．
+  試作の重みを使うときだけ `--weights` で指す
+- 中間物は `work/<画像名>/` に置かれる(`--workdir` で変えられる)
 
-スクリプトは `yolo/` へ自分で移動してから動くので，**どこから呼んでもよい**．
-`yolo/` が別の場所にあるときは環境変数 `COMPTEA_YOLO` で指す．
+**中核は，入れていなくてもどこから呼んでもよい**
+(場所が違うときは環境変数 `COMPTEA_CORE`)．
+**物差し(`eval/`)が使うデータの場所は `COMPTEA_DATA`** で指す．
 
 ## 流れ
 
@@ -105,7 +111,7 @@ A0 級の折り込み(`s01115` の 23 枚)には，**1枚に表が2つ3つ載っ
 1枚のまま渡しても行が1本も取れないので，先に切り分ける．
 
 ```bash
-py -3.12 yolo/split_sheet.py <PDF か画像> --outdir <置き場> [--dry-run]
+py -3.12 -m comptea.split_sheet <PDF か画像> --outdir <置き場> [--dry-run]
 ```
 
 `<画像名>_p1.png`・`_p2.png` … が並び，**左の段から，段の中は上から**の順になる．
@@ -179,7 +185,7 @@ python ../comptea-app/cli/crop_cells.py work/<画像名>
 まで通して初めて値が入る．`both` では `apply_text.py` が EasyOCR の読みと
 突き合わせ，`ocred.csv` の `agree` 列に `ok` / `disagree` を残す．
 
-正解表3枚 (`yolo/truth/`) と `yolo/eval_read.py` で比べた結果 (組成部のセル)．
+正解表3枚 (`truth/`) と `../comptea-app/eval/eval_read.py` で比べた結果 (組成部のセル)．
 
 | ページ | easyocr | ai |
 |:---|---:|---:|
@@ -258,7 +264,7 @@ python ../comptea-app/cli/build_table.py work/<画像名>
 何枚も通したあとは，結果を 1 か所にまとめる．
 
 ```bash
-python ../comptea-app/cli/export_data.py work --out yolo/work_out --tag kinki
+python ../comptea-app/cli/export_data.py work --out work_out --tag kinki
 ```
 
 作業ディレクトリの親を渡せば，その下の表を全部拾う．出力は次の 5 つ．

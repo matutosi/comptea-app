@@ -31,6 +31,8 @@ try:
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from _data import use_data_dir                       # noqa: E402
+
 DATASET = 'labelme_data/YOLODataset'
 # 帯として評価するクラス．row は縦(y)，col は横(x)で切り出しが決まる
 BANDS = {'row': 'y', 'col': 'x'}
@@ -291,6 +293,8 @@ def note_counts(df_loc):
 
 def main():
     args = parse_args()
+    # データの置き場へ移る(COMPTEA_DATA が無ければ，いまいる場所のまま)
+    use_data_dir()
     dataset = Path(args.dataset)
     names = class_names(dataset)
     img_dir = dataset / 'images' / args.split

@@ -30,6 +30,8 @@ try:
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from _data import use_data_dir                       # noqa: E402
+
 
 def parse_args():
     p = argparse.ArgumentParser(description='段が丸ごと落ちる件数を数える')
@@ -75,6 +77,8 @@ def scan_one(image, args, eval_grid, locate):
 
 def main():
     args = parse_args()
+    # データの置き場へ移る(COMPTEA_DATA が無ければ，いまいる場所のまま)
+    use_data_dir()
     # Windows の既定のコードページだと日本語が化ける
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, 'reconfigure'):

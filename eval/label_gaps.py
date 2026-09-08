@@ -38,6 +38,8 @@ try:
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from _data import use_data_dir                       # noqa: E402
+
 import eval_grid as eg
 from comptea import ink
 
@@ -219,6 +221,8 @@ def apply(args):
 
 def main():
     args = parse_args()
+    # データの置き場へ移る(COMPTEA_DATA が無ければ，いまいる場所のまま)
+    use_data_dir()
     if args.apply:
         return apply(args)
     scan(args)
