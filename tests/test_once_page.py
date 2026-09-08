@@ -78,6 +78,25 @@ def test_note_text():
     assert once_page.note_text(lines, span) == pt.normalize(K046_NOTE)
 
 
+def test_note_text_柱を読み飛ばして注記を拾う():
+    """塊の無いページでは 0 行目から見るので，紙面の柱で止めてはいけない
+
+    `s01114_kinki_010-2` で注記が丸ごと落ちていた(2026-09-08 に実データで発覚)．
+    注記が**始まってから**の見出しは，これまでどおり区切りとして使う．
+    """
+    texts = ['37. ハマエンドウーテリハノイバラ群落',
+             'テリハノイバラの優占しているマント群落は，海岸砂丘…',
+             '7: Koza-cho, Higashimuro-gun 東牟婁郡古座町田原 (29. Apr. 1983)',
+             'Lfd. Nr. 1—9: Original 原調査資料.',
+             '38. つぎの群落']
+    lines = [{'text': t, 'x1': 0, 'x2': 10, 'y1': i * 10, 'y2': i * 10 + 5}
+             for i, t in enumerate(texts)]
+    got = once_page.note_text(lines, None)
+    assert '古座町田原' in got and '原調査資料' in got
+    assert '38.' not in got          # 始まったあとの見出しでは止める
+    assert 'マント群落' not in got     # 本文は拾わない
+
+
 def test_block_box():
     lines = [{'text': K046, 'x1': 10, 'x2': 900, 'y1': 100, 'y2': 160}]
     assert once_page.block_box(lines, (0, 1), pad=5) == (5, 95, 905, 165)

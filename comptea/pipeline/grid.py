@@ -680,19 +680,26 @@ def save_continuation(image, base):
               f'表は {stem}-1 側にある．'
               f'\n書いた: {base / "continuation.txt"}')
         return True
-    if found['box']:
-        from PIL import Image
-        box = tuple(int(v) for v in found['box'])
-        Image.open(image).crop(box).save(base / 'once_block.png')
+    from PIL import Image
+
+    img = None
+    for key, name in (('box', 'once_block.png'), ('note_box', 'note_block.png')):
+        if found.get(key):
+            img = img or Image.open(image)
+            img.crop(tuple(int(v) for v in found[key])).save(base / name)
     if found['note']:
         (base / 'note.txt').write_text(found['note'], encoding='utf-8')
     kind = '目印あり' if found['has_mark'] else '前のページからの続き'
     print(f'このページは**続きのページ**(枝番 {part}．表は {stem} にまとまる)．'
           f'\n流し込み: {kind}'
           + (f'\n  {base / "once_block.png"} を読む' if found['box'] else '')
-          + (f'\n  注記: {found["note"][:100]}' if found['note'] else '')
+          + (f'\n  {base / "note_block.png"} を読む(注記)'
+             if found.get('note_box') else '')
+          + (f'\n  EasyOCR が読んだ注記: {found["note"][:100]}'
+             if found['note'] else '')
           + f'\n書いた: {base}'
-          + '\n次: 塊を読んで fixes.tsv に書き，link_pages.py で表につなぐ')
+          + '\n次: 塊と注記を読んで once_text.txt / note.txt に書き，'
+            'link_pages.py で表につなぐ')
     return True
 
 

@@ -43,6 +43,8 @@ MIN_HITS = 2
 HEAD_LINES = 2
 # 種の並びに見えない行が，これだけ続いたら塊の終わりとみなす
 MAX_MISS = 2
+# 注記を切り出すとき，この行数だけ手前から取る(1行目の取りこぼし対策)
+NOTE_PAD_LINES = 1
 
 
 def looks_like_entries(text: str, min_hits: int = MIN_HITS) -> bool:
@@ -137,27 +139,48 @@ def _tail_of_entries(text: str) -> bool:
                 r'[+r十1-5]\s*[・.,]?\s*[1-5]?\s*[.。,，一ー―—–・]*\s*$', s)))
 
 
-def note_text(lines, span):
-    """塊の後ろに続く注記の行をつないで返す
+def note_span(lines, span):
+    """注記の行の範囲 (始まり, 終わりの次)．見つからなければ None
 
     注記は見出し(`調査地` `Datum` など)で始まり，地点ごとの並びが続く．
     始まったあとは「見出しか地点の指定がある行」だけを取り，どちらも無い行が
     来たら止める(本文の段落を巻き込まないため)．
+
+    **注記の1行目は，取りこぼすことがある**．OCR がコロンを落とすと
+    地点の指定に見えない(`4一6 Kumihama-cho …`)．範囲を返すのは，
+    **切り出して読み直せる**ようにするため(2026-09-08)．
     """
     if not lines:
-        return ''
+        return None
     start = span[1] if span else 0
-    out = []
-    for ln in lines[start:]:
-        s = parse_text.normalize(ln['text'])
+    first = last = None
+    for i in range(start, len(lines)):
+        s = parse_text.normalize(lines[i]['text'])
         if HEADING.match(s):
-            break
+            # **注記が始まる前の見出しは，読み飛ばす**(2026-09-08)．
+            # 塊の無いページでは 0 行目から見るので，紙面の柱
+            # (`37. ハマエンドウーテリハノイバラ群落`)で即座に打ち切っていた．
+            # 注記だけが載るページ(010-2)で，注記が丸ごと落ちていた
+            if first is not None:
+                break
+            continue
         cont = NOTE_MARK.search(s) or parse_text._PLOT_SPEC.search(s)
-        if out and not (cont or _note_wrap(s)):
+        if first is not None and not (cont or _note_wrap(s)):
             break
-        if cont or out:
-            out.append(s)
-    return ' '.join(out)
+        if cont or first is not None:
+            if first is None:
+                first = i
+            last = i
+    return None if first is None else (first, last + 1)
+
+
+def note_text(lines, span):
+    """塊の後ろに続く注記の行をつないで返す"""
+    got = note_span(lines, span)
+    if got is None:
+        return ''
+    return ' '.join(parse_text.normalize(ln['text'])
+                    for ln in lines[got[0]:got[1]])
 
 
 def _note_wrap(text: str) -> bool:
@@ -214,11 +237,17 @@ def find_block(image, reader=None):
     if not lines:
         return None
     span = find_once_span([ln['text'] for ln in lines])
+    nspan = note_span(lines, span)
     note = note_text(lines, span)
-    if span is None and not note:
+    if span is None and nspan is None:
         return None
+    # 注記は 1 行目を取りこぼすことがある(OCR がコロンを落とす)．
+    # **1 行手前から切り出して**，読み直せるようにする
+    if nspan is not None:
+        nspan = (max(0, nspan[0] - NOTE_PAD_LINES), nspan[1])
     return {'box': block_box(lines, span) if span else None, 'span': span,
-            'lines': lines,
+            'note_box': block_box(lines, nspan) if nspan else None,
+            'note_span': nspan, 'lines': lines,
             'has_mark': bool(span) and bool(START_MARK.search(
                 parse_text.normalize(lines[span[0]]['text']))),
             'note': note}
