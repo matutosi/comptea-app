@@ -80,6 +80,16 @@ RULE_H_P = 2.0          # 同上 (行の高さの倍数．大きいほう)
 RULE_V_P = 3.0          # 縦に行の高さのこの倍を超えて続く黒は縦罫線
 
 
+RULE_SLANT = 2          # 縦罫線を探すとき，左右にこの px までのぶれを許す (紙面に
+                        # 0.1〜0.8 度の傾きが残るので，まっすぐな連なりを探すと
+                        # 途中で切れて消せない．消し残ると帯の全部の行に黒画素が
+                        # あることになり，単位が縦に数珠つなぎになる (2026-09-09)
+
+
+MIN_ROW_INK = 2         # 1 行の黒画素がこれ以下なら，その行は字が無いものとして扱う
+                        # (斑点 1〜3 px が単位をつなぐ．「・」は 5 px 角ほどあるので消えない)
+
+
 CUT_INK = 0.5           # 境が字の上を通るとみなす黒画素 (列の黒画素の中央値に対する比)
 
 
@@ -110,7 +120,26 @@ FIT_REACH = 0.4         # 境を空白へ寄せて探す範囲 (行の高さの�
 MIN_BAND = 0.5          # 行の高さのこの倍を下回る帯は作らない
 
 
-def clean_rules(dark, x1, x2, y1, y2, pitch):
+def _strip_slanted(band, min_len, slant=RULE_SLANT):
+    """縦に長く続く黒を，左右のぶれを許して消した写しを返す (`band` は転置済み)
+
+    傾いた縦罫線は，まっすぐな連なりを探す `_strip_long_runs` では途中で切れて
+    残る．左右 `slant` px に広げた写しで「長い連なり」を見つけ，その範囲にある
+    **元の**黒画素だけを消す (広げた分まで消すと，罫線の脇の字が欠ける)．
+    """
+    if band.size == 0 or slant <= 0:
+        return _strip_long_runs(band, min_len)
+    wide = band.copy()
+    for k in range(1, slant + 1):            # 転置してあるので，軸 0 が画像の x
+        wide[k:, :] |= band[:-k, :]
+        wide[:-k, :] |= band[k:, :]
+    keep = _strip_long_runs(wide, min_len)       # 長い連なりだけが False になる
+    out = band.copy()
+    out[wide & ~keep] = False
+    return out
+
+
+def clean_rules(dark, x1, x2, y1, y2, pitch, slant=RULE_SLANT):
     """帯 `dark[y1:y2, x1:x2]` から下線・横罫線と縦罫線を消した写しを返す"""
     h, w = dark.shape
     x1, x2 = max(0, int(x1)), min(w, int(x2))
@@ -119,16 +148,22 @@ def clean_rules(dark, x1, x2, y1, y2, pitch):
     if band.size == 0:
         return band.copy()
     out = _strip_long_runs(band, int(max(RULE_H, RULE_H_P * pitch)))
-    out = _strip_long_runs(np.ascontiguousarray(out.T), int(RULE_V_P * pitch) + 1).T
+    out = _strip_slanted(np.ascontiguousarray(out.T), int(RULE_V_P * pitch) + 1,
+                         slant).T
     return np.ascontiguousarray(out)
 
 
-def units_in_band(band, y0=0, min_area=MIN_AREA, gap=UNIT_GAP):
-    """帯の縦の射影の連なりを単位にして [(y 中心, 高さ, 黒画素)] を返す (画像の座標)"""
+def units_in_band(band, y0=0, min_area=MIN_AREA, gap=UNIT_GAP, floor=MIN_ROW_INK):
+    """帯の縦の射影の連なりを単位にして [(y 中心, 高さ, 黒画素)] を返す (画像の座標)
+
+    1 行の黒画素が `floor` 以下の行は「字が無い」とみなす．罫線の消し残りや紙の
+    汚れが 1〜3 px の斑点として全部の行に出ることがあり，そのままだと単位が縦に
+    数珠つなぎになる (03_p2 は 157 行が 39 単位になっていた．2026-09-09)．
+    """
     if band.size == 0:
         return []
     prof = band.sum(axis=1).astype(float)
-    idx = np.flatnonzero(prof > 0)
+    idx = np.flatnonzero(prof > floor)
     if len(idx) == 0:
         return []
     breaks = np.flatnonzero(np.diff(idx) > gap + 1)
@@ -145,12 +180,12 @@ def units_in_band(band, y0=0, min_area=MIN_AREA, gap=UNIT_GAP):
     return out
 
 
-def unit_spans(band, y0=0, min_area=MIN_AREA, gap=UNIT_GAP):
+def unit_spans(band, y0=0, min_area=MIN_AREA, gap=UNIT_GAP, floor=MIN_ROW_INK):
     """帯の縦の射影の連なりを [(上, 下, 黒画素)] で返す (画像の座標)"""
     if band.size == 0:
         return []
     prof = band.sum(axis=1).astype(float)
-    idx = np.flatnonzero(prof > 0)
+    idx = np.flatnonzero(prof > floor)
     if len(idx) == 0:
         return []
     breaks = np.flatnonzero(np.diff(idx) > gap + 1)
