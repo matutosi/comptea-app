@@ -174,6 +174,7 @@ pytest --runslow      # 検出と読み取りも実際に走らせる(30 秒ほ�
 | `tests/test_row_track.py` | 行を単位の連なりとして追う後処理 (列ごとの y のずれ・拍による行数の検算．`slow` は実データ) |
 | `tests/test_header_cols.py` | 表頭の独文と和文を分ける縦の境 (票の谷・表題の行・罫線・和文が無い表) |
 | `tests/test_row_kinds.py` | 行の種類の見分け (見出し・学名だけの行・凡例・枠線・行を落とさないこと) |
+| `tests/test_row_track_rules.py` | 傾いた縦罫線の消し方と，単位を切るときの雑音の床 |
 | `tests/test_header_lines.py` | 表頭の項目行を OCR の検出器の箱から作る (束ね方・帯・表題の除外．`slow` は描いた表頭で検出器を走らせる) |
 | `tests/test_apps.py` | Streamlit の 4 アプリを画面まで走らせる |
 | `tests/test_shared.py` | 工程のあいだの受け渡し (zip・見本・検出の返り) |
