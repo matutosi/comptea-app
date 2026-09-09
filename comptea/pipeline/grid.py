@@ -332,6 +332,11 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
     if not getattr(args, 'no_track', False):
         df_loc, track_warn = row_track.fix_offsets(Image.open(image), df_loc)
         warnings += track_warn
+    # 和名と階層の境を 1 本にする (2026-09-09 ユーザ提案)．階層は和名の右にあり，
+    # いまは 2 本の境が別々に決まるので字を割る．階層が無い段では和名の右端を字まで広げる
+    df_loc, nl_warn = col_edges.fix_name_layer_edge(Image.open(image), df_loc)
+    warnings += nl_warn
+
     # 階層の列の幅を，記号の黒画素に合わせて決め直す (対策 E．2026-09-09)．
     # 階層の列は地点の列の幅を引き継ぐので，記号が枠をはみ出す段がある．
     # 直すのは**いまはみ出している段だけ** (全段に当てると良い段と悪い段が釣り合う)
