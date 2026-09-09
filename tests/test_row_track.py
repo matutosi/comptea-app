@@ -87,17 +87,18 @@ def _rows(out, cls):
 EDGES = list(range(100, 100 + 34 * 12 + 1, 34))     # 12 行，高さ 34
 
 
-def test_学名が下にずれて打たれた紙面は学名の列だけ下へずらす():
+def test_学名が下にずれて打たれた紙面は学名の列の境だけ下げる():
     img = _sheet(EDGES, name_shift=10)
     df = _df(EDGES)
     out, warns = row_track.fix_offsets(img, df)
-    assert any('sname' in w and 'ずらした' in w for w in warns)
+    assert any('sname' in w and '境を直した' in w for w in warns)
     c, s = _rows(out, 'comp'), _rows(out, 'sname')
     assert np.array_equal(c[['y1', 'y2']].values, _rows(df, 'comp')[['y1', 'y2']].values)
     assert set(s['row']) == set(c['row'])                       # 行番号は共有
     d = s['y1'].values - c[c.col == 1]['y1'].values
-    assert np.all(np.abs(d - 10) <= 2)
-    assert (s['note'] == 'y_shifted').all()
+    assert np.all((d > 2) & (d < 18))                           # 下へ動いた
+    assert s['note'].str.startswith('y_').all()
+    assert _split(out, img, 'sname')[0] == 0                    # 字を割らない
 
 
 def test_ずれが無ければ触らない():
@@ -107,22 +108,25 @@ def test_ずれが無ければ触らない():
     assert out is df and warns == []
 
 
-def test_半行を超えるずれは信用しない():
-    img = _sheet(EDGES, name_shift=16)                          # 0.47 p (上限 0.45 p の外)
-    df = _df(EDGES)
-    out, warns = row_track.fix_offsets(img, df)
+def test_半行を超えるずれでも境を空白へ置いて直す():
+    # 中央値のずらしは上限 (0.45 p) の外で使わないが，境を空白へ置く段で直る．
+    # 最下段だけは直らない: 表の下端は組成部の字で決まっており，ここでは動かさない
+    img = _sheet(EDGES, name_shift=16)                          # 0.47 p
+    out, _warns = row_track.fix_offsets(img, _df(EDGES))
+    n_bad, n_all = _split(out, img, 'sname')
+    assert n_all == 12 and n_bad <= 1
     s = _rows(out, 'sname')
-    assert np.array_equal(s['y1'].values, _rows(df, 'sname')['y1'].values)
-    assert any('sname' in w and '信用' in w for w in warns)
+    assert np.all(np.diff(s['y1'].values) > 0)
 
 
-def test_学名と和名は別々のずれで動く():
+def test_学名と和名は別々に動く():
     img = _sheet(EDGES, name_shift=10, ja_shift=-6)
     out, _ = row_track.fix_offsets(img, _df(EDGES))
-    c = _rows(out, 'comp')
-    c1 = c[c.col == 1]['y1'].values
-    assert np.all(np.abs(_rows(out, 'sname')['y1'].values - c1 - 10) <= 2)
-    assert np.all(np.abs(_rows(out, 'species_col')['y1'].values - c1 + 6) <= 2)
+    sn = _rows(out, 'sname')['y1'].values
+    ja = _rows(out, 'species_col')['y1'].values
+    assert np.all(sn > ja)                                      # 学名は下，和名は上
+    assert _split(out, img, 'sname')[0] == 0
+    assert _split(out, img, 'species_col')[0] == 0
 
 
 def test_下線つきの見出し行があっても推定は乱れない():
@@ -133,21 +137,30 @@ def test_下線つきの見出し行があっても推定は乱れない():
     assert np.all(np.abs(d - 10) <= 2)
 
 
-def test_和名が1行おきに空いても動く():
+def test_和名が1行おきに空いていても字を割らない():
+    # 複数階層の種は和名が空く．空く行があっても，字のある行の字は割らない
     img = _sheet(EDGES, ja_shift=8, ja_rows=range(1, 13, 2))    # 12 行中 6 行
     out, _ = row_track.fix_offsets(img, _df(EDGES))
-    c = _rows(out, 'comp')
-    d = _rows(out, 'species_col')['y1'].values - c[c.col == 1]['y1'].values
-    assert np.all(np.abs(d - 8) <= 2)
+    n_bad, n_all = _split(out, img, 'species_col')
+    assert n_all == 6 and n_bad == 0
 
 
 def test_単位が少ない列は触らない():
+    # 字が 3 行にしか無く，しかもどれも割れていない列は，黙って触らない
     img = _sheet(EDGES, ja_shift=8, ja_rows=(1, 5, 9))         # 12 行中 3 行
     df = _df(EDGES)
     out, warns = row_track.fix_offsets(img, df)
     assert np.array_equal(_rows(out, 'species_col')['y1'].values,
                           _rows(df, 'species_col')['y1'].values)
-    assert any('species_col' in w and '少ない' in w for w in warns)
+    assert not any('species_col' in w and '境を直した' in w for w in warns)
+
+
+def test_単位が少なくても境を空白へ置く段は効く():
+    # ずれの中央値は測れない (3 行) が，境を空白へ置くのは 1 本ずつなので効く
+    img = _sheet(EDGES, ja_shift=17, ja_rows=(1, 5, 9))        # 境が字を割る位置
+    out, warns = row_track.fix_offsets(img, _df(EDGES))
+    assert any('species_col' in w and '空白へ' in w for w in warns)
+    assert _split(out, img, 'species_col')[0] == 0
 
 
 def test_傾き補正のあとに残るずれだけを測る():
@@ -214,6 +227,91 @@ def test_clean_rulesは長い横線と縦線だけ消す():
     out = row_track.clean_rules(dark, 0, 300, 0, 300, 34.0)
     assert not out[50:52, 10:100].any() and out[50:52, 120:140].all()
     assert not out[20:200, 200:202].any() and out[100:120, 250:252].all()
+
+
+# ---- 段階 1b: 行ごとの追従と，境を字の間の空白に置く --------------------------------
+
+def _drift(edges, amp):
+    """行ごとに少しずつ増えるずれ (紙面の伸縮や打ち方の癖)"""
+    return [amp * i / (len(edges) - 2) for i in range(len(edges) - 1)]
+
+
+def _jitter(n, amp=6):
+    """行ごとに上下に振れるずれ"""
+    return [amp * (1 if i % 3 == 0 else -1 if i % 3 == 1 else 0) for i in range(n)]
+
+
+def _sheet_rows(edges, shifts, size=(500, 800)):
+    """行ごとに学名の y を `shifts[i]` px ずらして打った紙面"""
+    img = Image.new('L', size, 255)
+    px = img.load()
+    for i, (ya, yb) in enumerate(zip(edges[:-1], edges[1:])):
+        c = int((ya + yb) // 2)
+        for xa, xb in zip(X_COMP[:-1], X_COMP[1:]):
+            xc = (xa + xb) // 2
+            _fill(px, xc - 2, xc + 3, c - 3, c + 4)
+        d = int(round(shifts[i]))
+        _text(px, 10, 140, c - 8 + d, c + 8 + d)
+    return img
+
+
+def _split(out, img, cls, pitch=34.0):
+    """字の単位のうち，セルの境が割っているものの数と全体の数"""
+    dark = row_track.ink.binarize(img)
+    cells = out[out.obj_name == cls]
+    x1, x2 = int(cells.x1.min()), int(cells.x2.max())
+    ys = np.unique(np.r_[cells.y1.values, cells.y2.values].astype(float))
+    return row_track.split_units(dark, x1, x2, ys, pitch)
+
+
+def test_split_unitsは境が字を割る数を数える():
+    img = _sheet(EDGES)
+    dark = row_track.ink.binarize(img)
+    centers = np.array([(a + b) / 2.0 for a, b in zip(EDGES[:-1], EDGES[1:])])
+    assert row_track.split_units(dark, 0, 150, centers, 34.0)[0] == 12   # 字の真ん中を通る
+    assert row_track.split_units(dark, 0, 150, np.array(EDGES, float), 34.0)[0] == 0
+
+
+def test_行ごとに増えるずれは追従で吸収する():
+    img = _sheet_rows(EDGES, _drift(EDGES, 24))          # 0 → 24 px へずれる
+    df = _df(EDGES)
+    out, warns = row_track.fix_offsets(img, df)
+    n_bad, n_all = _split(out, img, 'sname')
+    assert n_all >= 10 and n_bad == 0
+    assert any('追従' in w or 'ずらした' in w for w in warns)
+
+
+def test_行ごとに振れるずれは境を空白へ置いて吸収する():
+    img = _sheet_rows(EDGES, _jitter(len(EDGES) - 1, 6))
+    out, _warns = row_track.fix_offsets(img, _df(EDGES))
+    n_bad, _n = _split(out, img, 'sname')
+    assert n_bad == 0
+
+
+def test_境は重ならず順序も保つ():
+    img = _sheet_rows(EDGES, _jitter(len(EDGES) - 1, 6))
+    out, _warns = row_track.fix_offsets(img, _df(EDGES))
+    s = out[out.obj_name == 'sname'].sort_values('row')
+    assert np.all(np.diff(s.y1.values) > 0)
+    assert np.allclose(s.y2.values[:-1], s.y1.values[1:])       # 隙間も重なりも無い
+    assert np.all((s.y2.values - s.y1.values) > 34 * 0.5)
+    assert list(s['row']) == list(range(1, 13))                 # 行番号は変わらない
+
+
+def test_元から中央にある紙面は触らない():
+    img = _sheet(EDGES)
+    df = _df(EDGES)
+    out, warns = row_track.fix_offsets(img, df)
+    assert out is df and warns == []
+
+
+def test_空白が無ければその境は動かさない():
+    edges = list(range(100, 100 + 20 * 12 + 1, 20))      # 行 20 px に字 16 px (空白が乏しい)
+    img = _sheet_rows(edges, [0] * 12, size=(500, 500))
+    df = _df(edges)
+    out, warns = row_track.fix_offsets(img, df)
+    s = out[out.obj_name == 'sname'].sort_values('row')
+    assert np.all(np.diff(s.y1.values) > 0)
 
 
 # ---- 実データ (一時ディレクトリにあるときだけ) ------------------------------------
