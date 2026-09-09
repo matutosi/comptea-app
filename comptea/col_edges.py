@@ -400,3 +400,194 @@ def align_header_columns(df_loc, img=None):
         out['cell_id'] = range(1, len(out) + 1)
     return out, [f'表頭の列を本体の境から作り直した({n_head} 列 → {n_body} 列)．'
                  '本体で捨てた列が表頭に残ると，表頭の項目が地点とずれる']
+
+
+# ---- 和名と階層の境を 1 本にする (2026-09-09 ユーザ提案) ---------------------------
+#
+# 階層は**和名の右**にある (階層のある 81 段すべて)．重なるのは 8 段だけで，
+# しかも 3〜21 px．いまは「和名の右端」と「階層の左端」が別々に決まるので，
+# 字を割る行が 685 ある．**1 本の境**にして，いまの境の ±1.5 行の窓で
+# 「字を割る行がいちばん少ない x」に置くと 33 になる (悪化する段は無い)．
+#
+# 窓は必須．窓を外すと 10_p2 で境が 223 px 飛び，和名の列ごと外へ出る．
+# 階層の無い段では，和名の右端を**字の右端**まで広げる (組成部は越えない)．
+# はみ出す行が 477 → 16 になり，組成部に食い込む段は無い．
+
+NL_WINDOW = 1.5         # 境を動かす窓 (行の高さの倍数)
+NL_MIN_GAP = 4          # 列の幅がこれ未満になる位置へは動かさない (px)
+NL_PAD = 3              # 字の右端に足す余白 (px)
+
+
+def _split_rows(dark, x, y_rows):
+    """境 `x` の左右にインクが続く行 (字を割っている行) の数"""
+    n = 0
+    xi = int(x)
+    if xi < 1 or xi + 1 >= dark.shape[1]:
+        return 10 ** 6
+    for a, b in y_rows:
+        a, b = max(0, int(a)), min(dark.shape[0], int(b))
+        if b - a < 2:
+            continue
+        if dark[a:b, xi - 1].any() and dark[a:b, xi + 1].any():
+            n += 1
+    return n
+
+
+def _ink_right(dark, x1, x2, y_rows):
+    """帯の中で，インクのいちばん右の x (無ければ None)"""
+    x1, x2 = max(0, int(x1)), min(dark.shape[1], int(x2))
+    if x2 - x1 < 2:
+        return None
+    best = None
+    for a, b in y_rows:
+        a, b = max(0, int(a)), min(dark.shape[0], int(b))
+        if b - a < 2:
+            continue
+        cols = np.flatnonzero(dark[a:b, x1:x2].any(axis=0))
+        if cols.size:
+            r = int(cols[-1]) + x1
+            best = r if best is None else max(best, r)
+    return best
+
+
+def _blank_runs(blank):
+    """空白の列が続く区間を [(始まり, 終わり)] で返す (終わりは含まない)"""
+    b = np.asarray(blank)
+    if b.size == 0 or not b.any():
+        return []
+    pad = np.concatenate(([0], b.astype(np.int8), [0]))
+    d = np.diff(pad)
+    return list(zip(np.flatnonzero(d == 1).tolist(), np.flatnonzero(d == -1).tolist()))
+
+
+def _has_ink_col(dark, x, y_rows):
+    """境の候補 `x` の列に，どれかの行の字があるか"""
+    xi = int(x)
+    if xi < 0 or xi >= dark.shape[1]:
+        return True
+    for a, b in y_rows:
+        a, b = max(0, int(a)), min(dark.shape[0], int(b))
+        if b - a >= 2 and dark[a:b, xi].any():
+            return True
+    return False
+
+
+def _ink_left(dark, x1, x2, y_rows):
+    """帯の中で，インクのいちばん左の x (無ければ None)"""
+    x1, x2 = max(0, int(x1)), min(dark.shape[1], int(x2))
+    if x2 - x1 < 2:
+        return None
+    best = None
+    for a, b in y_rows:
+        a, b = max(0, int(a)), min(dark.shape[0], int(b))
+        if b - a < 2:
+            continue
+        cols = np.flatnonzero(dark[a:b, x1:x2].any(axis=0))
+        if cols.size:
+            v = int(cols[0]) + x1
+            best = v if best is None else min(best, v)
+    return best
+
+
+def fix_name_layer_edge(img, df_loc, window=NL_WINDOW):
+    """和名の右端と階層の左端を 1 本の境にする (階層が無ければ字の右端まで広げる)
+
+    Returns:
+        (直した格子, 警告のリスト)．直す所が無ければ元の格子をそのまま返す
+    """
+    from . import row_track
+    if df_loc is None or len(df_loc) == 0 or 'obj_name' not in df_loc.columns:
+        return df_loc, []
+    if 'block' not in df_loc.columns or 'row' not in df_loc.columns:
+        return df_loc, []
+    if not (df_loc['obj_name'] == 'species_col').any():
+        return df_loc, []
+    dark = None
+    out = df_loc
+    warnings = []
+    changed = False
+    for block, g in df_loc.groupby('block', sort=True):
+        ja = g[g['obj_name'] == 'species_col']
+        lay = g[g['obj_name'] == 'layer']
+        comp = g[g['obj_name'] == 'comp']
+        if ja.empty or comp.empty or ja['row'].nunique() < 5:
+            continue
+        pitch = float(np.median(comp['y2'].astype(float) - comp['y1'].astype(float)))
+        if not pitch > 0:
+            continue
+        if dark is None:
+            dark = ink.binarize(img)
+        y_rows = [(float(a), float(b)) for a, b in
+                  ja.drop_duplicates('row')[['y1', 'y2']].values]
+        ja_r = float(ja['x2'].max())
+        comp_l = float(comp['x1'].min())
+        if lay.empty:
+            # 階層が無い段: 和名の右端を字の右端まで広げる (組成部は越えない)
+            right = _ink_right(dark, ja_r, comp_l, y_rows)
+            if right is None or right + NL_PAD <= ja_r + 1:
+                continue
+            new = min(float(right + NL_PAD), comp_l - NL_MIN_GAP)
+            if new - float(ja['x1'].min()) < NL_MIN_GAP or new <= ja_r + 1:
+                continue
+            # 広げて字を割るようになるなら広げない (組成部の左端まで届くと，
+            # 最初の地点の「・」に接することがある)
+            n_old = _split_rows(dark, ja_r, y_rows)
+            if _split_rows(dark, new, y_rows) > n_old:
+                warnings.append(f'段{block}: 和名の列は広げなかった'
+                                f'(広げると字を割る行が増える)')
+                continue
+            mask = (out['block'] == block) & (out['obj_name'] == 'species_col')
+            out = out.copy() if out is df_loc else out
+            out.loc[mask, 'x2'] = new
+            changed = True
+            warnings.append(
+                f'段{block}: **和名の列の右端を字の右端まで広げた** '
+                f'({ja_r:.0f} → {new:.0f} px．組成部は {comp_l:.0f} px)')
+            continue
+        lay_l = float(lay['x1'].min())
+        lay_r = float(lay['x2'].max())
+        base = (ja_r + lay_l) / 2.0
+        lo = max(float(ja['x1'].min()) + NL_MIN_GAP, base - window * pitch)
+        hi = min(lay_r - NL_MIN_GAP, base + window * pitch)
+        if hi <= lo:
+            continue
+        xs = np.arange(int(lo), int(hi) + 1)
+        # **どの行にも字が無い x の帯**があればそこに置く．「字を割る行」の数だけで
+        # 選ぶと，語間の空白に落ちて和名の末尾が枠の外に残る (「アラゲミツバ|ツツジ」の
+        # 類．この指標には出ない)．字が接している段 (81 段中 32 段) では帯が無いので，
+        # そのときだけ「字を割る行が最小」に戻す
+        blank = np.array([not _has_ink_col(dark, x, y_rows) for x in xs])
+        counts = np.array([_split_rows(dark, x, y_rows) for x in xs])
+        runs = _blank_runs(blank)
+        if runs:
+            # **いちばん広い空白の帯**を採る．語間も空白になるが，和名と記号のあいだの
+            # 空きの方が広い．同じ幅なら，いまの境に近い方
+            w = max(b - a for a, b in runs)
+            wide = [(a, b) for a, b in runs if b - a == w]
+            a, b = min(wide, key=lambda ab: abs((ab[0] + ab[1]) / 2 + xs[0] - base))
+            new = float(xs[0] + (a + b - 1) / 2.0)
+            best = int(counts[xs == int(new)][0]) if (xs == int(new)).any() else 0
+        else:
+            best = int(counts.min())
+            cand = xs[counts == best]
+            new = float(cand[np.abs(cand - lay_l).argmin()])   # 同点は階層の左端に近い方
+        n_old = min(_split_rows(dark, ja_r, y_rows), _split_rows(dark, lay_l, y_rows))
+        if abs(new - ja_r) < 1 and abs(new - lay_l) < 1:
+            continue
+        if best > n_old:
+            warnings.append(f'段{block}: 和名と階層の境はまとめなかった'
+                            f'(字を割る行が {n_old} → {best} に増える)')
+            continue
+        m_ja = (out['block'] == block) & (out['obj_name'] == 'species_col')
+        m_lay = (out['block'] == block) & (out['obj_name'] == 'layer')
+        out = out.copy() if out is df_loc else out
+        out.loc[m_ja, 'x2'] = new
+        out.loc[m_lay, 'x1'] = new
+        changed = True
+        warnings.append(
+            f'段{block}: **和名と階層の境を 1 本にした** '
+            f'(和名の右端 {ja_r:.0f} / 階層の左端 {lay_l:.0f} → {new:.0f} px．'
+            f'字を割る行 {n_old} → {best})')
+    if not changed:
+        return df_loc, warnings
+    return out, warnings
