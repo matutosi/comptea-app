@@ -332,6 +332,12 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
     if not getattr(args, 'no_track', False):
         df_loc, track_warn = row_track.fix_offsets(Image.open(image), df_loc)
         warnings += track_warn
+    # 階層の列の幅を，記号の黒画素に合わせて決め直す (対策 E．2026-09-09)．
+    # 階層の列は地点の列の幅を引き継ぐので，記号が枠をはみ出す段がある．
+    # 直すのは**いまはみ出している段だけ** (全段に当てると良い段と悪い段が釣り合う)
+    df_loc, lw_warn = layer_col.refit_layer_width(Image.open(image), df_loc)
+    warnings += lw_warn
+
     # 行の種類 (見出し・学名だけの行・凡例) を見分けて note に付ける (案 e の段階 3)．
     # **行は落とさない**．落とすと真値との一致 (行の recall 1.000) が下がる
     from comptea import row_kinds
