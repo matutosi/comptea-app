@@ -313,6 +313,25 @@ shift.
   a single body column in 81 %, their median in 94 %) and warns when the grid's height
   divided by the beat spacing differs by 3 rows or more (13_p2 has 66 rows where 63
   fit). It runs right after `row_skew` so only the residual offset is measured
+- `row_kinds.py`: Labels body rows that are not species rows — group **headings**
+  ("Kenn- u. Trennarten d. Ass.:", "群集標徴種"), **name-only** rows (a scientific name
+  set in two lines, with its Japanese name and values on the next row) and **legends** —
+  by writing `heading` / `name_only` / `legend` into `note` (2026-09-09). Rows are never
+  dropped: the grid matches the labelled truth at row recall 1.000 and marking is
+  advisory for stage 2. A heading has ink on the name side and none in the body, but
+  "none in the body" has to be judged **relative to the species rows** (below 0.35 of
+  their median): a heading's band catches the box drawn around the neighbouring group
+  and parts of its values, so an absolute threshold reads it as filled — on kinki_010-1
+  the three headings carry 269–397 ink against 1000–6900 for species rows, and the
+  relative test is what takes that table from 2 to the truth's 5. Rules and box lines
+  are erased **over the block's full height** (erasing within a one-row band leaves a
+  table-spanning vertical line looking short), which leaves a few pixels at the corners,
+  so the ink floor scales with the row height. Headings are told from name-only rows by
+  the **length of the underline** (136–560 px against 17–23 px), falling back to whether
+  the next row carries a Japanese name and values. A legend cannot be found by "spans
+  columns" alone — 47 % of species rows do too — so it must be a single run crossing
+  **from the name side into the body**, which cut false positives on typed sheets from
+  26 to 4. Across 146 tables: 273 headings, 177 name-only rows, 106 legends
 - `header_cols.py`: Places the **vertical divider between the header's German and
   Japanese item names** from ink rather than from the detector (2026-09-09). The only
   divider used to be the right edge of the `header_col` box, which is detected twice on
