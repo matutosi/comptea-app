@@ -281,3 +281,177 @@ def fix_columns(img, df_loc, ink_max=HEADER_INK_MAX, min_cols=MIN_COLS,
             '(常在度など)とみなして地点から外した(obj_name は summary)．'
             '地点なら --conf を疑う．段階1で列の中身を目で確かめる')
     return out, warnings
+
+
+# ---- 階層の列の幅を黒画素で決め直す (対策 E．2026-09-09) ----------------------------
+#
+# 階層の列は「表頭が空」であることから組成部の先頭の列を階層とみなして作るので，
+# **幅は地点の列のまま**になる．記号 (B1・B2・S・K) の実際の幅とは合わず，81 段中
+# 66 段で枠の右端が縦罫線の上に乗り，13.5% の行で記号が枠をはみ出していた．
+#
+# 幅は**票** (その x に黒画素がある行の数．対策 B の `header_cols` と同じ考え) の
+# かたまりから決める．黒画素の和ではいけない (1 行の長い塊が谷を埋める)．
+# 全段に当てると良い段と悪い段が釣り合うので (24 対 24)，**いまはみ出している段だけ**
+# 直す．広げると種名を巻き込む紙面があるため，上限と「太いかたまりを越えない」枷を置く．
+
+LAYER_LO_F = 0.05       # 票がこの割合 (行数比) を超える x を，かたまりとみなす
+LAYER_GAP_P = 0.8       # 行の高さのこの倍までの隙間は，同じかたまりとしてつなぐ
+LAYER_MIN_W = 0.25      # かたまりの幅の下限 (行の高さの倍数．5 px 未満は縦罫線の spike)
+LAYER_MAX_W_P = 2.0     # 幅の上限 (行の高さの倍数)
+LAYER_MAX_W_C = 1.5     # 幅の上限 (地点の列の幅の倍数．大きいほうを使う)
+LAYER_THICK_P = 1.5     # 幅がこの倍 (行の高さ) を超えるかたまりは種名とみなし，越えない
+LAYER_CLIP_MIN = 0.05   # はみ出す行がこの割合を超える段だけ直す
+LAYER_PAD = 2           # 決めた範囲の外側に足す余白 (px)
+
+
+def _layer_votes(dark, x1, x2, rows, pitch):
+    """x ごとに「黒画素のある行の数」(票) を返す
+
+    罫線は**段の全高で 1 回**消す．1 行ぶんの帯ごとに消すと，表をまたぐ縦罫線が
+    その帯の中では短く見えて残り，枠の右端に乗った罫線を記号と数えてしまう
+    (81 段中 66 段で枠の右端が縦罫線の上にある．2026-09-09)．
+    """
+    from . import row_track
+    x1, x2 = int(x1), int(x2)
+    if x2 - x1 < 5 or not rows:
+        return np.zeros(0)
+    top = max(0, int(min(a for a, _b in rows)))
+    bot = min(dark.shape[0], int(max(b for _a, b in rows)))
+    if bot - top < 2:
+        return np.zeros(0)
+    clean = row_track.clean_rules(dark, x1, x2, top, bot, pitch)
+    votes = np.zeros(x2 - x1, dtype=int)
+    for a, b in rows:
+        a, b = max(top, int(a)) - top, min(bot, int(b)) - top
+        if b - a < 2:
+            continue
+        votes += (clean[a:b].sum(axis=0) > 0).astype(int)
+    return votes
+
+
+def _blobs(votes, need, gap):
+    """票が `need` を超える x を，`gap` px までの隙間でつないだかたまり"""
+    on = np.flatnonzero(votes > need)
+    if on.size == 0:
+        return []
+    breaks = np.flatnonzero(np.diff(on) > gap)
+    starts = np.r_[on[0], on[breaks + 1]]
+    ends = np.r_[on[breaks], on[-1]] + 1
+    return list(zip(starts.tolist(), ends.tolist()))
+
+
+def _clip_rows(dark, x1, x2, rows, pitch):
+    """記号が枠の左右をはみ出している行の数 (罫線は段の全高で消してから見る)"""
+    from . import row_track
+    if not rows:
+        return 0
+    xa, xb = max(0, int(x1) - 1), min(dark.shape[1], int(x2) + 1)
+    top = max(0, int(min(a for a, _b in rows)))
+    bot = min(dark.shape[0], int(max(b for _a, b in rows)))
+    if xb - xa < 3 or bot - top < 2:
+        return 0
+    clean = row_track.clean_rules(dark, xa, xb, top, bot, pitch)
+    n = 0
+    for a, b in rows:
+        a, b = max(top, int(a)) - top, min(bot, int(b)) - top
+        if b - a < 2:
+            continue
+        cols = clean[a:b].sum(axis=0) > 0
+        if cols[0] or cols[-1]:
+            n += 1
+    return n
+
+
+def refit_layer_width(img, df_loc):
+    """階層の列の x を，記号の黒画素に合わせて決め直す
+
+    直すのは**いま記号がはみ出している段だけ** (`LAYER_CLIP_MIN` を超える段)．
+    行番号・行の境・他の列は変えない．
+
+    Returns:
+        (直した格子, 警告のリスト)．直す所が無ければ元の格子をそのまま返す
+    """
+    from . import row_track
+    if df_loc is None or len(df_loc) == 0 or 'obj_name' not in df_loc.columns:
+        return df_loc, []
+    if 'block' not in df_loc.columns or 'row' not in df_loc.columns:
+        return df_loc, []
+    if not (df_loc['obj_name'] == 'layer').any():
+        return df_loc, []
+    dark = None
+    out = df_loc
+    warnings = []
+    changed = False
+    for block, g in df_loc.groupby('block', sort=True):
+        lay = g[g['obj_name'] == 'layer']
+        comp = g[g['obj_name'] == 'comp']
+        names = g[g['obj_name'].isin(('sname', 'species_col'))]
+        if lay.empty or comp.empty or lay['row'].nunique() < 5:
+            continue
+        pitch = float(np.median(comp['y2'].astype(float) - comp['y1'].astype(float)))
+        if not pitch > 0:
+            continue
+        if dark is None:
+            dark = ink.binarize(img)
+        rows = [(float(a), float(b)) for a, b in
+                lay.drop_duplicates('row')[['y1', 'y2']].values]
+        x1, x2 = float(lay['x1'].min()), float(lay['x2'].max())
+        n_clip = _clip_rows(dark, x1, x2, rows, pitch)
+        if n_clip <= LAYER_CLIP_MIN * len(rows):
+            continue
+        # 帯は「種名の右端」から「組成部の左端」まで．種名が無ければ枠の 2 倍幅
+        left = float(names['x2'].max()) if not names.empty else x1 - (x2 - x1)
+        # 右は組成部の左端から**半行ぶん先まで**見る．記号が枠の右へはみ出している
+        # (その先は縦罫線か余白であることが多い) 場合に，はみ出した分を拾うため
+        right = float(comp['x1'].min()) + 0.5 * pitch
+        if right - left < 10:
+            continue
+        votes = _layer_votes(dark, left, right, rows, pitch)
+        if votes.size == 0:
+            continue
+        blobs = _blobs(votes, LAYER_LO_F * len(rows),
+                       max(1, int(LAYER_GAP_P * pitch)))
+        min_w = max(5, int(LAYER_MIN_W * pitch))
+        blobs = [(a, b) for a, b in blobs if b - a >= min_w]
+        if not blobs:
+            continue
+        # いまの枠と重なるかたまりのうち，票の山がいちばん高いものを芯にする
+        cx1, cx2 = x1 - left, x2 - left
+        over = [(a, b) for a, b in blobs if a < cx2 and b > cx1]
+        if not over:
+            continue
+        core = max(over, key=lambda ab: int(votes[ab[0]:ab[1]].max()))
+        # 太いかたまり (種名) は越えない
+        thick = [(a, b) for a, b in blobs if b - a > LAYER_THICK_P * pitch]
+        lo_stop = max([b for a, b in thick if b <= core[0]] + [0])
+        hi_stop = min([a for a, b in thick if a >= core[1]] + [len(votes)])
+        a, b = core
+        cap = max(LAYER_MAX_W_P * pitch, LAYER_MAX_W_C * float(
+            np.median(comp.groupby('col')['x2'].max() - comp.groupby('col')['x1'].min())))
+        na = max(lo_stop, a - LAYER_PAD)
+        nb = min(hi_stop, b + LAYER_PAD)
+        if nb - na > cap:                       # 上限を超えたら芯の中心から切る
+            mid = (a + b) / 2.0
+            na = max(lo_stop, int(mid - cap / 2))
+            nb = min(hi_stop, int(mid + cap / 2))
+        nx1, nx2 = left + na, left + nb
+        if nx2 - nx1 < min_w or (abs(nx1 - x1) < 2 and abs(nx2 - x2) < 2):
+            continue
+        after = _clip_rows(dark, nx1, nx2, rows, pitch)
+        if after > n_clip:
+            warnings.append(f'段{block}: 階層の列の幅は直さなかった'
+                            f'(直すと記号のはみ出しが {n_clip} → {after} 行に増える)')
+            continue
+        mask = (out['block'] == block) & (out['obj_name'] == 'layer')
+        out = out.copy() if out is df_loc else out
+        out.loc[mask, 'x1'] = float(nx1)
+        out.loc[mask, 'x2'] = float(nx2)
+        changed = True
+        warnings.append(
+            f'段{block}: **階層の列の幅を黒画素で決め直した** '
+            f'({x1:.0f}-{x2:.0f} → {nx1:.0f}-{nx2:.0f} px．'
+            f'記号のはみ出し {n_clip} → {after} / {len(rows)} 行)．'
+            '段階1で階層の記号が入っているかを目で確かめる')
+    if not changed:
+        return df_loc, warnings
+    return out, warnings
