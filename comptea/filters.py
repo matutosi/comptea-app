@@ -14,7 +14,7 @@ import pandas as pd
 
 # 組成表でないページとみなす 'row' の上限(これ未満なら表ではない)．
 # 手元の組成表は，最も少ないページでも行が数十本ある
-NO_TABLE_MAX_ROWS = 5
+NO_TABLE_MAX_ROWS = 5    # 種名の列のセルがこれ未満なら，組成表の載っていないページ
 
 
 FRAGMENT_CLASSES = ('header', 'plot_row', 'header_col', 'sname',
@@ -41,11 +41,16 @@ def looks_like_no_table(df_loc: pd.DataFrame) -> bool:
     ページが混ざっている(2026-09-01 に 88 枚中 9 枚を確認)．
     これを失敗に数えると切り出しの実力を過小に見せ，閾値の比較もゆがむ．
 
-    **本物の表なのに 'col' が取れない段**(旧 kinki_047 の型)を
+    **本物の表なのに 'col' が取れない段**(kinki_047 の型)を
     巻き込んで隠さないよう，判定は次の3つをすべて満たすときだけにする．
       - ページ全体で組成セルが1つも無い(段が1つでも作れていれば表とみなす)
       - 'col' が1本も無い
-      - 'row' が NO_TABLE_MAX_ROWS 本未満(本物の表なら数十本ある)
+      - **種名の列(学名・和名)のセルが NO_TABLE_MAX_ROWS 未満**(本物の表なら数十行ある)
+
+    3つ目は 'row' の本数で見ていたが，`locate_items()` は `obj_name` に 'row' を
+    **一度も作らない**ので常に 0 で，例外は一度も発動していなかった(2026-09-09)．
+    そのため 1 調査区の 2 段組(kinki_047 は種名の列 120 行，053 は 100 行)が
+    「組成表が見あたらない」として格子ごと失われていた．
 
     検出が0件のときも表ではないので，空の表を渡せば True を返す．
 
@@ -55,9 +60,10 @@ def looks_like_no_table(df_loc: pd.DataFrame) -> bool:
     if df_loc is None or len(df_loc) == 0 or 'obj_name' not in df_loc:
         return True
     name = df_loc['obj_name']
+    n_body = int(name.isin(('sname', 'species_col')).sum())
     return (not (name == 'comp').any()
             and not (name == 'col').any()
-            and int((name == 'row').sum()) < NO_TABLE_MAX_ROWS)
+            and n_body < NO_TABLE_MAX_ROWS)
 
 
 def filter_results(df: pd.DataFrame, 

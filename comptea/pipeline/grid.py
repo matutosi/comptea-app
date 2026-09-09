@@ -249,6 +249,13 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
     df_det, name_warn = name_col.name_columns_from_ink(Image.open(image), df_det)
     stray_warn += name_warn
     df_det.to_csv(work / 'detect.csv', index=False)
+    # 1 調査区を左右 2 段に折り返した紙面では，地点の列が 1 本しかないので `col` の
+    # 検出が育たず，被度が丸ごと落ちる．段ごとに階層と被度の列を黒画素から作る
+    # (対策 G．2026-09-09)
+    from comptea import one_plot
+    df_det, one_warn = one_plot.columns_from_ink(Image.open(image), df_det)
+    stray_warn += one_warn
+
     df_loc = locate.locate_items(
         df_det, threth_col=args.threth_col, threth_row=args.threth_row,
         image=image, snap=not args.no_snap)
