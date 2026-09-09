@@ -196,6 +196,11 @@ def bands_from_centers(centers, top, bottom):
 SNAP_REACH = 0.4        # 境を寄せて探す範囲 (行の高さの倍数)
 
 
+SNAP_MIN_BAND = 0.6     # 寄せた結果でも，帯の高さは行の高さのこの倍を下回らせない
+                        # (下限が無いと隣り合う境が寄り合って 9〜13 px の帯ができた:
+                        # 01_p2 で 2 本，03_p2 で 4 本．2026-09-09)
+
+
 def snap_to_gap(edges, dark, value_x, pitch, reach=SNAP_REACH):
     """境を，値の側の黒画素が**いちばん少ない** y へ寄せる (順序は保つ)
 
@@ -210,18 +215,19 @@ def snap_to_gap(edges, dark, value_x, pitch, reach=SNAP_REACH):
     prof = dark[:, x1:x2].sum(axis=1).astype(float)
     h = len(prof)
     r = max(1, int(reach * pitch))
+    band = max(2, int(SNAP_MIN_BAND * pitch))
     out = [e[0]]
     for i in range(1, len(e) - 1):
-        lo = max(int(out[-1]) + 1, int(e[i]) - r, 0)
-        hi = min(int(e[i]) + r, int(e[i + 1]) - 1, h - 1)
+        lo = max(int(out[-1]) + band, int(e[i]) - r, 0)
+        hi = min(int(e[i]) + r, int(e[i + 1]) - band, h - 1)
         if hi < lo:
-            out.append(max(e[i], out[-1] + 1))
+            out.append(max(e[i], out[-1] + band))
             continue
         seg = prof[lo:hi + 1]
         best = int(np.flatnonzero(seg == seg.min())[
             np.abs(np.flatnonzero(seg == seg.min()) + lo - e[i]).argmin()]) + lo
         out.append(float(best))
-    out.append(e[-1])
+    out.append(max(e[-1], out[-1] + band))
     return np.maximum.accumulate(np.array(out, dtype=float))
 
 

@@ -138,7 +138,81 @@ LAYER_GAP_MIN_W = 20      # 隙間の幅(画素)．これ未満は字が入ら�
 LAYER_GAP_MIN_INK = 0.45  # 隙間の黒画素 / 種名の列の黒画素(どちらも罫線を除く)
 
 
-def _guess_layer_column(img, name_ranges, x_edges, y_edges):
+LAYER_BLOB_GAP = 0.3      # 隙間の中のかたまりをつなぐ幅 (行の高さの倍数)．
+                          # 0.5 だと，階層の記号と隣の未検出の地点の列がつながる
+                          # (20_p3 は K と最初の値が 1 つの 198 px のかたまりになった)
+
+
+LAYER_BLOB_MIN_W = 0.15   # かたまりの幅の下限 (行の高さの倍数．縦罫線の spike を落とす)
+
+
+LAYER_BLOB_MAX_W = 3.5    # 同上限 (これを超えるものは階層の列ではない．「B1,B2」の
+                          # ような 2 つ組の記号は 3.2 行ぶんある: 06_p2 は 111 px / 35 px)
+
+
+LAYER_BLOB_ROWS = 0.4     # 行のこの割合より少ない行にしか字が無いかたまりは，
+                          # 種名のはみ出しとみなす．**距離では分けられない** (記号が
+                          # 和名の枠に接している表がある: 079-1・06_p2・17_p1・20_p3 は
+                          # 隙間の先頭からかたまりが始まる)．はみ出すのは長い和名だけ
+                          # なので行の割合が低く，記号はほとんどの行にある
+
+
+def _gap_text_blob(dark, gx1, gx2, gy1, gy2, pitch):
+    """種名と組成部の隙間の中から，階層の記号のかたまりを 1 つ選んで (x1, x2) を返す
+
+    選ぶのは**字の比がいちばん高い**かたまり．幅が広すぎるもの (検出されなかった
+    地点の列を含む)，狭すぎるもの (罫線の spike)，種名に接するもの (種名のはみ出し) は
+    候補から外す．縦罫線は消してから見る (罫線だけの隙間を階層の列にしていた事故がある)．
+    """
+    from . import row_track
+    gx1, gx2 = int(gx1), int(gx2)
+    gy1, gy2 = int(gy1), int(gy2)
+    if gx2 - gx1 < 3 or gy2 - gy1 < 3:
+        return None
+    clean = row_track.clean_rules(dark, gx1, gx2, gy1, gy2, pitch)
+    if clean.size == 0:
+        return None
+    cols = clean.sum(axis=0) > 1
+    if not cols.any():
+        return None
+    gap = max(1, int(LAYER_BLOB_GAP * pitch))
+    on = np.flatnonzero(cols)
+    breaks = np.flatnonzero(np.diff(on) > gap)
+    starts = np.r_[on[0], on[breaks + 1]]
+    ends = np.r_[on[breaks], on[-1]] + 1
+    lo_w = max(3, int(LAYER_BLOB_MIN_W * pitch))
+    hi_w = LAYER_BLOB_MAX_W * pitch
+    n_row = max(1, int(round((gy2 - gy1) / pitch)))
+    best, best_r = None, -1.0
+    for a, b in zip(starts.tolist(), ends.tolist()):
+        if b - a < lo_w or b - a > hi_w:
+            continue
+        # 行の何割に字があるか (種名のはみ出しは長い和名の行だけなので低い)
+        rows = clean[:, a:b].any(axis=1)
+        hit = 0
+        y = 0
+        while y < len(rows):
+            if rows[y]:
+                hit += 1
+                y += max(1, int(pitch * 0.6))
+            else:
+                y += 1
+        if hit < LAYER_BLOB_ROWS * n_row:
+            continue
+        r = ink.text_ratio(dark, gy1, gy2, gx1 + a, gx1 + b)
+        if r > best_r:
+            best, best_r = (gx1 + a, gx1 + b), r
+    return best
+
+
+LAYER_HEAD_MAX = 0.5      # 表頭の字が地点の列の中央値のこの倍以上なら，階層ではなく
+                          # **検出されなかった地点の列**．値と記号は「行の何割に字が
+                          # あるか」では分けられない (どちらもほとんどの行にある)．
+                          # 表頭が空かどうかが効く (kinki_040 は最初の値の列を階層と
+                          # 誤って拾った．2026-09-09)
+
+
+def _guess_layer_column(img, name_ranges, x_edges, y_edges, head_y=None):
     """検出されなかった階層の列を，種名の列と組成部の隙間から補う
 
     `layer` はラベルが 22 件しかなく検出が育っていない．example.jpg では
@@ -178,9 +252,40 @@ def _guess_layer_column(img, name_ranges, x_edges, y_edges):
     base = ink.text_ratio(dark, gy1, gy2, name_x1, name_x2)
     if not base:
         return None, False
-    if ink.text_ratio(dark, gy1, gy2, gx1, gx2) / base < LAYER_GAP_MIN_INK:
+    # **隙間を丸ごと測ってはいけない** (2026-09-09)．隙間が広く記号が一部にしかない表で
+    # 比が薄まって「階層なし」になり (07_p3 は 222 px の隙間に記号が 75 px だけで
+    # 比 0.25．閾値 0.45 に届かない)，逆に隙間に検出されなかった地点の列が入ると
+    # 階層の列が組成部まで広がる (03_p1 は枠が 561 px になり 202 行 x 3 列を巻き込んだ)．
+    # 隙間の中の**字のかたまり**を見つけ，そのかたまりだけで測る
+    pitch = (float(np.median(np.diff(np.asarray(y_edges, dtype=float))))
+             if len(y_edges) >= 3 else (gy2 - gy1) / 10.0)
+    blob = _gap_text_blob(dark, gx1, gx2, gy1, gy2, pitch)
+    if blob is None:
         return None, False
-    return pd.DataFrame({'x1': [gx1], 'x2': [gx2]}), True
+    bx1, bx2 = blob
+    if ink.text_ratio(dark, gy1, gy2, bx1, bx2) / base < LAYER_GAP_MIN_INK:
+        return None, False
+    if _looks_like_value_column(dark, bx1, bx2, x_edges, head_y):
+        return None, False
+    return pd.DataFrame({'x1': [float(bx1)], 'x2': [float(bx2)]}), True
+
+
+def _looks_like_value_column(dark, bx1, bx2, x_edges, head_y):
+    """かたまりの上の表頭に字があれば，階層ではなく**検出されなかった地点の列**"""
+    if head_y is None or x_edges is None or len(x_edges) < 4:
+        return False
+    hy1, hy2 = float(head_y[0]), float(head_y[1])
+    if hy2 - hy1 < 10:
+        return False
+    vals = [ink.text_ratio(dark, hy1, hy2, float(a), float(b))
+            for a, b in zip(x_edges[:-1], x_edges[1:])]
+    vals = [v for v in vals if v]
+    if len(vals) < 3:
+        return False
+    med = float(np.median(vals))
+    if not med:
+        return False
+    return ink.text_ratio(dark, hy1, hy2, bx1, bx2) / med >= LAYER_HEAD_MAX
 
 
 # 段の端に行を足すときの条件(2026-09-01)
@@ -434,8 +539,11 @@ def _locate_block(df: pd.DataFrame, source_image: str, img, max_shift_ratio: flo
     layer_guessed = False
     if layer_x_range is None:
         name_ranges = [r for r in (spec_x_range, sname_x_range) if r is not None]
+        head_box = df[df['obj_name'] == 'header'] if 'obj_name' in df else None
+        head_y = ((float(head_box['y1'].min()), float(head_box['y2'].max()))
+                  if head_box is not None and len(head_box) else None)
         layer_x_range, layer_guessed = _guess_layer_column(
-            img, name_ranges, x_edges, y_edges)
+            img, name_ranges, x_edges, y_edges, head_y=head_y)
         if layer_guessed:
             warnings.append(
                 f"'{class_layer}' は検出されなかったが，種名の列と組成部の隙間に"
