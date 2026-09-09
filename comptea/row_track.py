@@ -95,6 +95,21 @@ BEAT_DIFF = 3           # 格子と拍の行数がこれ以上食い違えば警
 SHIFT_CLASSES = ('sname', 'species_col', 'layer')
 
 
+FOLLOW_K = 5            # 行ごとのずれを滑らかにする窓 (行数．3・5・10 で差は無く，3 は活字で雑音を拾った)
+
+
+FOLLOW_MAX = 0.25       # 行ごとのずれの上限 (行の高さの倍数)
+
+
+FOLLOW_STEP = 0.15      # 隣り合う行のずれの差の上限 (行の高さの倍数．段差を作らない)
+
+
+FIT_REACH = 0.4         # 境を空白へ寄せて探す範囲 (行の高さの倍数)
+
+
+MIN_BAND = 0.5          # 行の高さのこの倍を下回る帯は作らない
+
+
 def clean_rules(dark, x1, x2, y1, y2, pitch):
     """帯 `dark[y1:y2, x1:x2]` から下線・横罫線と縦罫線を消した写しを返す"""
     h, w = dark.shape
@@ -128,6 +143,134 @@ def units_in_band(band, y0=0, min_area=MIN_AREA, gap=UNIT_GAP):
         cy = float(np.dot(seg, np.arange(a, b)) / area)
         out.append((y0 + cy, float(b - a), area))
     return out
+
+
+def unit_spans(band, y0=0, min_area=MIN_AREA, gap=UNIT_GAP):
+    """帯の縦の射影の連なりを [(上, 下, 黒画素)] で返す (画像の座標)"""
+    if band.size == 0:
+        return []
+    prof = band.sum(axis=1).astype(float)
+    idx = np.flatnonzero(prof > 0)
+    if len(idx) == 0:
+        return []
+    breaks = np.flatnonzero(np.diff(idx) > gap + 1)
+    starts = np.r_[idx[0], idx[breaks + 1]]
+    ends = np.r_[idx[breaks], idx[-1]] + 1
+    out = []
+    for a, b in zip(starts, ends):
+        area = float(prof[a:b].sum())
+        if area >= min_area:
+            out.append((y0 + float(a), y0 + float(b), area))
+    return out
+
+
+def split_count(spans, ys):
+    """境 `ys` が単位を割る数 (単位の内側を境が通るもの)"""
+    if not spans:
+        return 0
+    arr = np.asarray(sorted(float(y) for y in ys))
+    n = 0
+    for a, b, _area in spans:
+        if b - a <= 1:
+            continue
+        if np.any((arr > a + 0.5) & (arr < b - 0.5)):
+            n += 1
+    return int(n)
+
+
+def split_units(dark, x1, x2, ys, pitch):
+    """境 `ys` が字の単位を割る数と，単位の数
+
+    「セルの上辺の黒画素が閾値を超えるか」より厳しく，閾値に頼らない物差し．
+    緩い閾値の物差しは，境を字の薄い所へ置くだけで 0 になってしまう (2026-09-09)．
+    """
+    arr = sorted(float(y) for y in ys)
+    if len(arr) < 2:
+        return 0, 0
+    y0, y1e = arr[0] - pitch, arr[-1] + pitch
+    band = clean_rules(dark, x1, x2, y0, y1e, pitch)
+    spans = unit_spans(band, y0=max(0, int(y0)))
+    return split_count(spans, arr), len(spans)
+
+
+def row_offsets(cys, centers, pitch, k=FOLLOW_K):
+    """行ごとのずれを，前後 `k` 行の中央値で滑らかにして返す
+
+    列ごとの中央値 1 つでは，同じ列の中の散らばり (四分位範囲 2〜12 px) が残る．
+    近くの行だけで測ると紙面の癖に従える．欠けた行 (字の無い行) は前後から埋め，
+    上限 (`FOLLOW_MAX`) と隣との差 (`FOLLOW_STEP`) で縛って段差を作らない．
+    """
+    centers = np.asarray(centers, dtype=float)
+    arr = np.asarray(sorted(float(c) for c in cys))
+    d = np.full(len(centers), np.nan)
+    if arr.size:
+        for i, c in enumerate(centers):
+            near = arr[(arr >= c - 0.5 * pitch) & (arr <= c + 0.5 * pitch)]
+            if near.size:
+                d[i] = float(np.median(near)) - c
+    if np.all(np.isnan(d)):
+        return np.zeros(len(centers))
+    half = max(1, int(k) // 2)
+    out = np.zeros(len(centers))
+    for i in range(len(centers)):
+        w = d[max(0, i - half):i + half + 1]
+        w = w[~np.isnan(w)]
+        out[i] = float(np.median(w)) if w.size else np.nan
+    if np.any(np.isnan(out)):                       # 前後から埋める
+        idx = np.flatnonzero(~np.isnan(out))
+        out = np.interp(np.arange(len(out)), idx, out[idx])
+    out = np.clip(out, -FOLLOW_MAX * pitch, FOLLOW_MAX * pitch)
+    step = FOLLOW_STEP * pitch
+    for i in range(1, len(out)):                    # 隣との差を縛る (前へ)
+        out[i] = min(max(out[i], out[i - 1] - step), out[i - 1] + step)
+    for i in range(len(out) - 2, -1, -1):           # 後ろへも
+        out[i] = min(max(out[i], out[i + 1] - step), out[i + 1] + step)
+    return out
+
+
+def follow_edges(edges, offs):
+    """行ごとのずれを境に移す (境は前後の行のずれの平均で動かす)"""
+    e = np.asarray(edges, dtype=float).copy()
+    o = np.asarray(offs, dtype=float)
+    if len(o) + 1 != len(e) or len(o) == 0:
+        return e
+    e[0] += o[0]
+    e[-1] += o[-1]
+    e[1:-1] += (o[:-1] + o[1:]) / 2.0
+    return e
+
+
+def fit_edges(dark, x1, x2, edges, pitch, reach=FIT_REACH):
+    """内側の境を，最寄りの**黒画素ゼロ**の位置へ寄せる (順序と最小の高さを保つ)
+
+    字は行の高さ (22〜35 px) に対して 16〜20 px なので片側 3〜9 px の余裕がある．
+    その余裕を使い切るには，境を 1 本ずつ空白へ置くのがいちばん効く (実データで
+    字を割る割合 46% → 3%．2026-09-09)．空白は**黒画素ゼロ**で定める (緩い閾値だと
+    薄い字の上を空白と見なす)．±`reach` 倍に空白が無い境は動かさない．
+    """
+    e = [float(v) for v in edges]
+    if len(e) < 3:
+        return e, 0
+    h = dark.shape[0]
+    prof = dark[:, int(x1):int(x2)].sum(axis=1)
+    r = max(1, int(reach * pitch))
+    out = [e[0]]
+    stuck = 0
+    for i in range(1, len(e) - 1):
+        lo = max(int(out[-1] + MIN_BAND * pitch), int(e[i]) - r, 0)
+        hi = min(int(e[i]) + r, int(e[i + 1] - MIN_BAND * pitch), h - 1)
+        best = None
+        if hi >= lo:
+            zeros = np.flatnonzero(prof[lo:hi + 1] == 0)
+            if zeros.size:
+                cand = zeros + lo
+                best = float(cand[np.abs(cand - e[i]).argmin()])
+        if best is None:
+            stuck += 1
+            best = max(e[i], out[-1] + MIN_BAND * pitch)
+        out.append(best)
+    out.append(e[-1])
+    return out, stuck
 
 
 def beat_rows(cys, pitch):
@@ -301,8 +444,37 @@ def shift_column(df, mask, dy):
     return out
 
 
+def _edges_of(cells):
+    """1 つの列の帯の境 (行 n 本 + 1)．行の順に並べる"""
+    c = cells.sort_values('row')
+    y1 = c.drop_duplicates('row')['y1'].astype(float).values
+    y2 = c.drop_duplicates('row')['y2'].astype(float).values
+    return np.r_[y1, y2[-1]]
+
+
+def _apply_edges(df, mask, edges, note):
+    """境の並びを，その帯のセルの y1/y2 に書き戻す"""
+    out = df.copy()
+    idx = out.index[mask]
+    rows = out.loc[idx, 'row'].astype(int)
+    order = {r: i for i, r in enumerate(sorted(rows.unique()))}
+    pos = rows.map(order).values
+    out.loc[idx, 'y1'] = np.asarray(edges, dtype=float)[pos]
+    out.loc[idx, 'y2'] = np.asarray(edges, dtype=float)[pos + 1]
+    out.loc[idx, 'note'] = note
+    return out
+
+
 def fix_offsets(img, df_loc, classes=SHIFT_CLASSES):
-    """列の種類ごとに y のずれを中央値で吸収する (行番号は共有のまま)
+    """列ごとの y のずれを吸収する (段階 1・1b．行番号は全列で共有のまま)
+
+    3 段で作り，**字の単位を境が割る数**がいちばん小さい案を採る (元のままが最小なら
+    触らない)．物差しに「セルの上辺の黒画素」を使ってはいけない: 閾値が緩く，境を
+    薄い所へ置くだけで 0 になる (2026-09-09)．
+
+    1. 列ごとの**中央値**でずらす (系統的なずれ．タイプ打ちの文字と「・」の 10 px)
+    2. **行ごとの追従** (前後 5 行の中央値．紙面の癖で行ごとに散らばる分)
+    3. 境を**字の間の空白**へ置く (残りを詰める．いちばん効く)
 
     Returns:
         (直した格子, 警告のリスト)．直す所が無ければ元の格子をそのまま返す
@@ -327,41 +499,73 @@ def fix_offsets(img, df_loc, classes=SHIFT_CLASSES):
             dark = ink.binarize(img)
         for cls in classes:
             cells = g[g['obj_name'] == cls]
-            if cells.empty:
+            if cells.empty or cells['row'].nunique() < MIN_ROWS:
                 continue
-            cys, (x1, x2) = _units_of(dark, cells, pitch)
-            need = max(MIN_UNITS, int(np.ceil(MIN_MATCH * n_rows)))
-            dy, iqr, n = column_offset(cys, _row_centers(cells), pitch)
-            # 階層の列は行の一部にしか記号が無い (14_p1 は 211 行に 17 個)．
-            # 数が少なくても**ずれがそろっていれば**測ってよい (四分位範囲 ≤ 0.25 p)
-            if len(cys) < need and not (len(cys) >= FEW_UNITS and iqr <= FEW_IQR * pitch):
-                warnings.append(f'段{block}: 列 {cls} はずらさなかった'
-                                f'(単位が少ない: {len(cys)} < {need})')
-                continue
-            if abs(dy) < MIN_SHIFT:
-                continue
-            if abs(dy) > MAX_SHIFT * pitch or iqr > MAX_IQR * pitch:
-                warnings.append(f'段{block}: 列 {cls} はずらさなかった'
-                                f'(推定が信用できない: ずれ {dy:+.0f} px，四分位範囲 {iqr:.0f} px，'
-                                f'行の高さ {pitch:.0f} px)')
-                continue
-            dy_px = int(round(dy))
-            ys = np.concatenate([cells['y1'].astype(float).values,
-                                 cells['y2'].astype(float).values])
-            before = cut_count(dark, x1, x2, ys)
-            after = cut_count(dark, x1, x2, ys + dy_px)
-            if after > before:
-                warnings.append(f'段{block}: 列 {cls} はずらさなかった'
-                                f'(ずらすと字の上を通る境が {before} → {after} に増える)')
-                continue
-            mask = (out['block'] == block) & (out['obj_name'] == cls)
-            out = shift_column(out, mask, dy_px)
-            changed = True
-            warnings.append(
-                f'段{block}: **列 {cls} の y を {dy_px:+d} px ずらした**'
-                f'(単位 {n} 個，四分位範囲 {iqr:.0f} px．字の上を通る境 {before} → {after})．'
-                '行番号は共有のまま．タイプ打ちでは文字と「・」の高さが違う．'
-                '段階1で目で確かめる')
+            for x1 in sorted(cells['x1'].unique()):
+                band = cells[cells['x1'] == x1]
+                if band['row'].nunique() < MIN_ROWS:
+                    continue
+                w = _fit_band(dark, band, pitch)
+                if w is None:
+                    continue
+                edges, note, msg = w
+                mask = ((out['block'] == block) & (out['obj_name'] == cls)
+                        & (out['x1'] == x1))
+                if note is None:
+                    warnings.append(f'段{block}: 列 {cls} は' + msg)
+                    continue
+                out = _apply_edges(out, mask, edges, note)
+                changed = True
+                warnings.append(f'段{block}: **列 {cls} の境を直した**' + msg)
     if not changed:
         return df_loc, warnings
     return out, warnings
+
+
+def _fit_band(dark, band, pitch):
+    """1 つの列の帯で 3 段の案を作り，字を割る数がいちばん小さいものを返す
+
+    Returns:
+        (境, note, 説明) か，触らないときは (None, None, 理由)．測れなければ None
+    """
+    x1, x2 = _band_x(band)
+    edges0 = _edges_of(band)
+    n_rows = len(edges0) - 1
+    cys, _x = _units_of(dark, band, pitch)
+    need = max(MIN_UNITS, int(np.ceil(MIN_MATCH * n_rows)))
+    y0, y1e = edges0[0] - pitch, edges0[-1] + pitch
+    spans = unit_spans(clean_rules(dark, x1, x2, y0, y1e, pitch), y0=max(0, int(y0)))
+    if not spans:
+        return None
+    base = split_count(spans, edges0)
+    if base == 0:
+        return None                       # 元から字を割っていない列は触らない (黙る)
+    centers = (edges0[:-1] + edges0[1:]) / 2.0
+
+    cands = [(edges0, None, 'ずらさなかった')]
+    dy, iqr, n = column_offset(cys, centers, pitch) if cys else (0.0, 0.0, 0)
+    few = len(cys) >= FEW_UNITS and iqr <= FEW_IQR * pitch
+    ok = len(cys) >= need or few
+    if ok and abs(dy) <= MAX_SHIFT * pitch and iqr <= MAX_IQR * pitch:
+        e1 = edges0 + round(dy)
+        cands.append((e1, f'y_shifted:{round(dy):+d}', f'({round(dy):+d} px ずらし'))
+        offs = row_offsets(cys, centers + round(dy), pitch)
+        e2 = follow_edges(e1, offs)
+        cands.append((e2, 'y_followed',
+                      f'({round(dy):+d} px ずらし，行ごとに追従'))
+    else:
+        e2 = edges0
+    e3, stuck = fit_edges(dark, x1, x2, cands[-1][0], pitch)
+    cands.append((e3, 'y_fitted', ('(' if len(cands) == 1 else cands[-1][2] + '，')
+                  + '境を字の間の空白へ'))
+    scores = [split_count(spans, e) for e, _n, _m in cands]
+    best = int(np.argmin(scores))
+    if best == 0 or scores[best] >= base:
+        if not ok:
+            return None, None, f'ずらさなかった(単位が少ない: {len(cys)} < {need})'
+        return None, None, f'ずらさなかった(直しても字を割る数が {base} から減らない)'
+    e, note, msg = cands[best]
+    return (np.round(e, 1), note,
+            f'{msg}．字を割る単位 {base} → {scores[best]}/{len(spans)}'
+            + (f'．空白が無く動かせない境 {stuck} 本' if note == 'y_fitted' and stuck else '')
+            + ')')
