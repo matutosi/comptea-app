@@ -450,6 +450,26 @@ def _ink_right(dark, x1, x2, y_rows):
     return best
 
 
+NL_BLANK = 0.5          # 和名の列を広げるとき，越えない空白の幅 (行の高さの倍数)
+
+
+def _first_wide_blank(dark, x1, x2, y_rows, pitch, frac=NL_BLANK):
+    """`x1` から右へ見て，**幅 `frac` 行ぶん以上の空白**が始まる x を返す (無ければ x2)
+
+    和名の右にある空白のうち，語間より広いものは「別の列との境」．そこで止めないと，
+    検出されなかった階層の記号を和名の列に取り込む．
+    """
+    x1, x2 = max(0, int(x1)), min(dark.shape[1], int(x2))
+    if x2 - x1 < 3:
+        return float(x2)
+    need = max(3, int(frac * pitch))
+    blank = np.array([not _has_ink_col(dark, x, y_rows) for x in range(x1, x2)])
+    for a, b in _blank_runs(blank):
+        if b - a >= need:
+            return float(x1 + a)
+    return float(x2)
+
+
 def _blank_runs(blank):
     """空白の列が続く区間を [(始まり, 終わり)] で返す (終わりは含まない)"""
     b = np.asarray(blank)
@@ -522,11 +542,14 @@ def fix_name_layer_edge(img, df_loc, window=NL_WINDOW):
         ja_r = float(ja['x2'].max())
         comp_l = float(comp['x1'].min())
         if lay.empty:
-            # 階層が無い段: 和名の右端を字の右端まで広げる (組成部は越えない)
-            right = _ink_right(dark, ja_r, comp_l, y_rows)
+            # 階層が無い段: 和名の右端を字の右端まで広げる (組成部は越えない)．
+            # ただし**広い空白は越えない**．越えると，検出されなかった階層の記号を
+            # 和名の列に飲み込む (07_p3 の記号 1190-1265 が和名の列に入った．2026-09-09)
+            stop = _first_wide_blank(dark, ja_r, comp_l, y_rows, pitch)
+            right = _ink_right(dark, ja_r, stop, y_rows)
             if right is None or right + NL_PAD <= ja_r + 1:
                 continue
-            new = min(float(right + NL_PAD), comp_l - NL_MIN_GAP)
+            new = min(float(right + NL_PAD), stop, comp_l - NL_MIN_GAP)
             if new - float(ja['x1'].min()) < NL_MIN_GAP or new <= ja_r + 1:
                 continue
             # 広げて字を割るようになるなら広げない (組成部の左端まで届くと，
