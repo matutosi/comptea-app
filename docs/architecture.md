@@ -313,6 +313,24 @@ shift.
   a single body column in 81 %, their median in 94 %) and warns when the grid's height
   divided by the beat spacing differs by 3 rows or more (13_p2 has 66 rows where 63
   fit). It runs right after `row_skew` so only the residual offset is measured
+- `header_cols.py`: Places the **vertical divider between the header's German and
+  Japanese item names** from ink rather than from the detector (2026-09-09). The only
+  divider used to be the right edge of the `header_col` box, which is detected twice on
+  most of the broken sheets, so their union either cut into the Japanese text (splitting
+  a name across two columns on kinki_004-1/027/032/036/071/085/088) or sat to its right,
+  merging German and Japanese into one column (kinki_025/038/069/081-1, s01115_01_p3,
+  02_p1_s1); on 9 tables the box reached the value columns and no Japanese column was
+  built at all. Taking the widest valley of the ink projection does not work: on 9 of 20
+  tables the gap between Japanese and values is wider, and a single title or
+  scientific-name line crossing above the Japanese text fills the real valley
+  (kinki_004-1: 87 px → 15 px). Two changes fix it — count, per x, **how many item rows
+  carry ink** (a vote, so one crossing line cannot fill a valley), and select by the
+  valley's **right edge in relative terms**, which is 0.44–0.77 for the German/Japanese
+  gap against 0.98+ for the Japanese/value gap. The threshold starts at 1 vote and rises
+  only if no valley qualifies (103 of 146 tables settle at 1). Across 146 tables the
+  divider crosses ink on 9 tables instead of 43, the ink share of the Japanese column
+  rises on 109 of 112, and 9 tables gain a Japanese column. The detector box is kept
+  only to fix the region's left edge, as in `col_edges.fix_column_edges`
 - `header_lines.py`: Builds the header's item rows from the boxes of EasyOCR's
   **detector** (CRAFT, `reader.detect` — no recognition), 2026-09-09. The ink-projection
   segmentation in `locate._header_bands_from_names()` breaks on typed sheets: no valley

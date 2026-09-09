@@ -674,11 +674,26 @@ def _locate_header(df: pd.DataFrame, source_image: str, x_edges, warnings: list,
             '値だけでは，どの行が何の項目か決められない．')
         return out
     left, right = float(hc['x1'].iloc[0]), float(hc['x2'].iloc[0])
+    # **独文と和文の境は，検出枠でなく黒画素で決める**(対策 B．2026-09-09)．
+    # 枠は 2 つ検出されることがあり，その和が境になると和文にかかって和名が割れるか，
+    # 和文の右に出て独文と和文が 1 列にまとまる(146 表で 43 表の境が字を横切っていた)．
+    # 枠は**領域の左端を決めるためだけ**に使う(col_edges.fix_column_edges と同じ考え)
+    from . import header_cols
+    split = header_cols.split_x(
+        ink.binarize(img), (left, float(x_edges[0])),
+        [(float(a), float(b)) for a, b in zip(h_edges[:-1], h_edges[1:])])
+    if split is not None and left + 20 < split < float(x_edges[0]) - 20:
+        if abs(split - right) > 5:
+            warnings.append(
+                f'表頭の独文と和文の境を，検出枠の右端 {right:.0f} px から'
+                f'黒画素の谷 {split:.0f} px へ移した．'
+                '段階1で和名の列に字がそろって入っているかを目で確かめる')
+        right = split
     out.append(coord_item(np.array([left, right]), h_edges,
                           obj_name='header_item', y_notes=h_notes))
     # 項目名は2言語で入っていることが多い(header_col はドイツ語で，
     # その右に和名の列がある)．和名の方がOCRも突き合わせも確実なので，
-    # header_col の右端から値の左端までを別に切り出す
+    # 独文と和文の境から値の左端までを別に切り出す
     gap = float(x_edges[0]) - right
     if gap > (right - left) * 0.2:
         out.append(coord_item(np.array([right, float(x_edges[0])]), h_edges,
