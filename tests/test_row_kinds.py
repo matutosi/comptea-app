@@ -1,0 +1,145 @@
+"""行の種類を見分けて note に付ける (row_kinds.py．案 e の段階 3)
+
+行は落とさない．落とすと真値との一致 (recall 1.000) が下がるので，**印だけ**を付ける．
+"""
+import numpy as np
+import pandas as pd
+from PIL import Image
+
+from comptea import row_kinds
+
+
+X_SN = [0, 300]                    # 学名
+X_JA = [310, 560]                  # 和名
+X_LAYER = [570, 610]               # 階層
+X_COMP = [620, 660, 700, 740]      # 組成 3 列
+EDGES = list(range(100, 100 + 34 * 12 + 1, 34))
+
+
+def _fill(px, x1, x2, y1, y2):
+    for x in range(int(x1), int(x2)):
+        for y in range(int(y1), int(y2)):
+            px[x, y] = 0
+
+
+def _text(px, x1, x2, y1, y2, w=7, gap=4):
+    x = int(x1)
+    while x + w <= int(x2):
+        _fill(px, x, x + w, y1, y2)
+        x += w + gap
+
+
+def _grid(edges, x_edges, obj_name, block=1):
+    rows = []
+    for c, (xa, xb) in enumerate(zip(x_edges[:-1], x_edges[1:]), 1):
+        for r, (ya, yb) in enumerate(zip(edges[:-1], edges[1:]), 1):
+            rows.append(dict(x1=float(xa), x2=float(xb), y1=float(ya), y2=float(yb),
+                             obj_name=obj_name, note='', block=block, row=r, col=c))
+    return pd.DataFrame(rows)
+
+
+def _df(edges=EDGES):
+    return pd.concat([_grid(edges, X_SN, 'sname'), _grid(edges, X_JA, 'species_col'),
+                      _grid(edges, X_LAYER, 'layer'), _grid(edges, X_COMP, 'comp')],
+                     ignore_index=True)
+
+
+def _sheet(edges=EDGES, headings=(), name_only=(), legends=(), blank_ja=(),
+           size=(800, 700)):
+    """種の行・見出し行・学名だけの行・凡例を描いた紙面
+
+    種の行: 学名・和名・階層・組成の「・」がそろう．
+    見出し行 (`headings`): 学名側だけに字があり，下に長い下線がある．
+    学名だけの行 (`name_only`): 学名だけ (下線なし)．次の行に和名と値がある．
+    凡例 (`legends`): 学名から組成まで 1 つながりの文が流れる．
+    """
+    img = Image.new('L', size, 255)
+    px = img.load()
+    for i, (ya, yb) in enumerate(zip(edges[:-1], edges[1:]), 1):
+        c = int((ya + yb) // 2)
+        if i in headings:
+            _text(px, 10, 250, c - 8, c + 8)
+            _fill(px, 10, 290, c + 11, c + 13)              # 280 px の下線
+            continue
+        if i in name_only:
+            _text(px, 10, 250, c - 8, c + 8)
+            continue
+        if i in legends:
+            _fill(px, 10, 730, c - 8, c + 8)                # 列をまたぐ 1 つの塊
+            continue
+        _text(px, 10, 250, c - 8, c + 8)
+        if i not in blank_ja:
+            _text(px, 320, 550, c - 8, c + 8)
+        _fill(px, X_LAYER[0] + 10, X_LAYER[0] + 25, c - 8, c + 8)
+        for xa, xb in zip(X_COMP[:-1], X_COMP[1:]):
+            xc = (xa + xb) // 2
+            _fill(px, xc - 2, xc + 3, c - 3, c + 4)
+    return img
+
+
+def _kinds(img, df):
+    out, _warns = row_kinds.mark_rows(img, df)
+    k = (out[out.obj_name == 'sname'].sort_values('row')
+         .set_index('row')['note'].fillna(''))
+    return {r: v for r, v in k.items()}
+
+
+def test_種の行には印を付けない():
+    kinds = _kinds(_sheet(), _df())
+    assert all(v == '' for v in kinds.values())
+
+
+def test_見出し行に印を付ける():
+    kinds = _kinds(_sheet(headings=(1, 7)), _df())
+    assert 'heading' in kinds[1] and 'heading' in kinds[7]
+    assert all('heading' not in kinds[r] for r in (2, 3, 8))
+
+
+def test_学名だけの行は見出しと区別する():
+    # 下線が無く，次の行に和名と値がある = 前の行から続く学名 (見出しではない)
+    kinds = _kinds(_sheet(name_only=(5,)), _df())
+    assert 'name_only' in kinds[5] and 'heading' not in kinds[5]
+
+
+def test_凡例に印を付ける():
+    kinds = _kinds(_sheet(legends=(12,)), _df())
+    assert 'legend' in kinds[12]
+    assert all('legend' not in kinds[r] for r in (2, 5, 9))
+
+
+def test_複数階層で和名が空く行は種の行のまま():
+    kinds = _kinds(_sheet(blank_ja=(3, 6, 9)), _df())
+    assert all(v == '' for v in kinds.values())
+
+
+def test_印は全クラスのセルに付く():
+    out, _w = row_kinds.mark_rows(_sheet(headings=(4,)), _df())
+    for cls in ('sname', 'species_col', 'layer', 'comp'):
+        note = out[(out.obj_name == cls) & (out.row == 4)]['note'].fillna('')
+        assert note.str.contains('heading').all()
+
+
+def test_行も列も落とさない():
+    df = _df()
+    out, _w = row_kinds.mark_rows(_sheet(headings=(1,), legends=(12,)), df)
+    assert len(out) == len(df)
+    assert out['row'].nunique() == df['row'].nunique()
+    assert np.array_equal(out.sort_index()[['y1', 'y2']].values,
+                          df.sort_index()[['y1', 'y2']].values)
+
+
+def test_警告に数を出す():
+    _out, warns = row_kinds.mark_rows(_sheet(headings=(1, 7), legends=(12,)), _df())
+    assert warns and any('見出し 2' in w for w in warns)
+
+
+def test_組成の枠線は字と数えない():
+    # 見出し (行 6) の帯に，その下の区分種 (行 7〜9) を囲む枠線の上辺と縦線が
+    # 入り込んでいる紙面 (活字の 010・066 型)．枠線は段の全高で消してから見る
+    img = _sheet(headings=(6,))
+    px = img.load()
+    ya, yb = EDGES[5], EDGES[9]
+    _fill(px, X_COMP[0], X_COMP[-1], ya + 2, ya + 4)        # 枠の上辺 (横線)
+    _fill(px, X_COMP[0], X_COMP[0] + 2, ya, yb)             # 枠の左辺 (縦線)
+    _fill(px, X_COMP[-1] - 2, X_COMP[-1], ya, yb)           # 枠の右辺 (縦線)
+    assert 'heading' in _kinds(img, _df())[6]

@@ -332,6 +332,12 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
     if not getattr(args, 'no_track', False):
         df_loc, track_warn = row_track.fix_offsets(Image.open(image), df_loc)
         warnings += track_warn
+    # 行の種類 (見出し・学名だけの行・凡例) を見分けて note に付ける (案 e の段階 3)．
+    # **行は落とさない**．落とすと真値との一致 (行の recall 1.000) が下がる
+    from comptea import row_kinds
+    df_loc, kind_warn = row_kinds.mark_rows(Image.open(image), df_loc)
+    warnings += kind_warn
+
     # 段階2で「このセルを読み直す」と指せるように通し番号を振る
     df_loc.insert(0, 'cell_id', range(1, len(df_loc) + 1))
     df_loc.to_csv(work / 'located.csv', index=False)
