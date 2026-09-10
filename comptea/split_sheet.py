@@ -404,26 +404,29 @@ def find_tables(dark, min_gutter=MIN_GUTTER, min_gap=MIN_GAP,
         if (box[2] - box[0]) * (box[3] - box[1]) < w * h * min_area:
             continue                            # 見出しの札や折り目の汚れ
         result.append(box)
-    result = reach_notes(dark, result)
     return sorted(result, key=lambda b: (b[0], b[1]))
 
 
 NOTE_BLANK = 0.002      # 行の黒画素が幅のこの割合未満なら空白の行
 
 
-def reach_notes(dark, boxes, gap=BLOB_REACH_GAP, blank=NOTE_BLANK):
-    """箱の下端を，**すぐ下に続く注記**まで伸ばす (2026-09-11 ユーザ指摘: 02_p1・02_p2)
+def note_boxes(dark, boxes, gap=BLOB_REACH_GAP, blank=NOTE_BLANK):
+    """表の箱ごとに，**すぐ下に続く注記**の箱を返す (無ければ None)
 
-    `_reach_down` は塊で切った箱にしか掛かっていませんでした．**帯で切った箱**では
-    表の下の「出現 1 回の種」と調査地の注記が丸ごと落ちます (s01115_02 の 1 表目は
-    1,580 px ぶんが箱の外)．そこには種のデータと地点の情報があるので落とせません．
+    表の下には「出現 1 回の種」と調査地・調査年月日・出典が書かれており，
+    **表頭に無い地点の情報の出どころ**です (2026-09-11 ユーザ指摘: 02_p1・02_p2 で
+    欠落)．帯で切った箱では，これが丸ごと落ちていました．
 
-    塊では拾えません (注記は 1 行ずつが小さく，`BLOB_STOP_AREA` に届かない)．
-    箱の x の幅で黒画素の並びを見て，**空白の行が箱の高さの `gap` ぶん続くまで**
-    下へ辿ります．**他の箱の上端は越えません** (帯で分けた隣の表を巻き込まない)．
+    **表の画像には含めません**．含めると画像が高くなり，検出器の入力の縮尺が
+    変わって列や階層の枠が動きます (09_p5 は組成の 1 列目が階層の枠に食われた)．
+    注記は別の画像として書き出し，読む側 (`once_page.parse_site_notes`) が使います．
+
+    箱の x の幅で黒画素の並びを見て，空白の行が箱の高さの `gap` ぶん続くまで
+    下へ辿ります．**他の箱の上端は越えません**．
+
+    Returns:
+        [(x1, y1, x2, y2) または None] を `boxes` と同じ並びで
     """
-    if not boxes:
-        return boxes
     h, w = dark.shape
     out = []
     for x1, y1, x2, y2 in boxes:
@@ -442,7 +445,13 @@ def reach_notes(dark, boxes, gap=BLOB_REACH_GAP, blank=NOTE_BLANK):
                 run = 0
                 bottom = y + 1
             y += 1
-        out.append((x1, y1, x2, int(min(max(bottom, y2), limit_y, h))))
+        top = None
+        for y in range(int(y2), int(bottom)):    # 注記の最初の字まで詰める
+            if prof[y] >= thr:
+                top = y
+                break
+        out.append((x1, top, x2, int(bottom)) if top is not None and bottom - top > 10
+                   else None)
     return out
 
 
@@ -496,12 +505,17 @@ def split_sheet(path, outdir, page=0, dpi=300, **kw):
     boxes = find_tables(dark, **kw)
     stem = os.path.splitext(os.path.basename(path))[0]
     os.makedirs(outdir, exist_ok=True)
+    notes = note_boxes(dark, boxes)
     written = []
-    for i, box in enumerate(boxes, 1):
+    for i, (box, note) in enumerate(zip(boxes, notes), 1):
         dst = os.path.join(outdir, f'{stem}_p{i}.png')
         cut, _ = cut_table(im, box)
         cut.save(dst)
         written.append((dst, box))
+        if note is not None:
+            # **注記は別の画像**．表の画像に含めると検出器の入力の縮尺が変わる
+            im.crop(tuple(int(v) for v in note)).save(
+                os.path.join(outdir, f'{stem}_p{i}_note.png'))
     return written
 
 

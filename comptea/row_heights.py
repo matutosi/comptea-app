@@ -374,15 +374,20 @@ def extend_edges(edges, prof_comp, prof_all, med, ext, is_text=None, prof_names=
         return hits >= need
 
     def is_flow(a, b):
-        """文章の行か (行としても取れるときは，読んだ内容で決める)"""
-        if is_text is None or not is_text(a, b):
-            return False
-        if judge is None or not is_row(a, b):
-            return True
-        # **「出現 1 回の種」の見出しが読めたら流し込み**．そこには種名も並ぶので，
-        # 見出しを先に見る (2026-09-11 ユーザ指示: 見出しはそのまま書かれている．
-        # ただし 1 は漢数字とアラビア数字の両方がある)
-        return judge(a, b) != 'species'
+        """文章の行か
+
+        **読んだ内容を先に見る** (2026-09-11 ユーザ指示)．「出現 1 回の種」の見出しが
+        読めたら，形の判定によらずそこから下は流し込みです (17_p1 は形の判定だけでは
+        見出しの下に 2 行入っていた)．見出しの中には種名も並ぶので，見出しを先に見ます．
+        読めて種名なら表の行です (kinki_079-1 の最終行)．
+        """
+        if judge is not None:
+            kind = judge(a, b)
+            if kind == 'once':
+                return True
+            if kind == 'species' and is_row(a, b):
+                return False
+        return is_text is not None and is_text(a, b)
 
     trimmed = 0
     # 行の高さは一定なので，**中央値の 3/4 に満たない末尾の行は無条件に落とす**．

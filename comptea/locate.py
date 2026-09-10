@@ -783,7 +783,11 @@ def _locate_header(df: pd.DataFrame, source_image: str, x_edges, warnings: list,
     # 971-6199) に出ていた)．行の検出の上端より下の `plot_row` は誤検出として捨てる
     det_rows = filter_results(df, source_image, 'row')
     if len(det_rows) >= 3:
-        body_top = float(det_rows['y1'].min())
+        # **上端は 10% 分位で見る** (2026-09-11)．`row` は表頭の中にも誤検出される
+        # ので，最小値を使うと表頭ごと捨ててしまう (14_p1 は y 430 の 1 本のせいで
+        # 表頭の 18 本すべてが「組成部の中」になった)．本体の途中に出た表頭
+        # (11_p1 は y 4085，本体は 971-6199) は分位でも下に来る
+        body_top = float(np.percentile(det_rows['y1'].astype(float), 10))
         keep = rows['y1'] < body_top + float((rows['y2'] - rows['y1']).median())
         if not keep.all():
             n_drop = int((~keep).sum())
