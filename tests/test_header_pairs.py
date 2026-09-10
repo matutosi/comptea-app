@@ -53,10 +53,12 @@ def test_境は昇順を保つ():
 
 
 def test_値の行は黒画素の連なりから作る():
+    # 字らしい短い塊で描く (べた塗りの帯は罫線として消される)
     dark = np.zeros((300, 400), dtype=bool)
     for y in (100, 140, 180, 220):                   # 4 行の値
-        dark[y:y + 20, 50:350] = True
-    dark[165, 50:350] = True                         # 1 px のかけら (句読点)
+        for x in range(50, 350, 30):
+            dark[y:y + 20, x:x + 12] = True
+    dark[165, 50:80] = True                          # 1 px のかけら (句読点)
     vs = hl.value_lines(dark, (0, 80, 400, 260), PITCH)
     assert len(vs) == 4
     assert [round(v[1]) for v in vs] == [100, 140, 180, 220]
