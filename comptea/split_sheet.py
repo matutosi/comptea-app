@@ -407,6 +407,31 @@ def find_tables(dark, min_gutter=MIN_GUTTER, min_gap=MIN_GAP,
     return sorted(result, key=lambda b: (b[0], b[1]))
 
 
+def check_rotation(image):
+    """紙面が 90 度回して組まれていれば警告を返す (対策 H の入口．2026-09-10)
+
+    折込の切り出しでは `cut_table` が向きを見て回すが，本のページ (s01114) は
+    そのまま検出にかけていた．kinki_014 は横倒しで，種名が下から上へ読む向き
+    (ユーザ指摘 22・42)．157 枚で回転と判定されるのはこの 1 枚だけ (横の帯 3 本・
+    縦の帯 39 本．他は比 0.32 以上)．**ここでは回さず，知らせるだけ**
+    (回して検出し直す段は，この検査で対象が 1 枚と分かってから入れる)．
+
+    Args:
+        image: PIL の画像か，そのパス
+    Returns:
+        警告のリスト (回っていなければ空)
+    """
+    im = image if isinstance(image, Image.Image) else Image.open(image)
+    dark = ink.binarize(im)
+    if not looks_rotated(dark):
+        return []
+    hb = _line_bands((~dark).mean(axis=1))
+    vb = _line_bands((~dark).mean(axis=0))
+    return [f'**この紙面は 90 度回して組まれている**(字の行の帯が横 {hb} 本・縦 {vb} 本)．'
+            '種名が下から上へ読む向きで，このままでは行と列が入れ替わった格子になる．'
+            '画像を時計回りに 90 度回してからかけ直す(対策 H)．']
+
+
 def cut_table(im, box):
     """紙面から表を 1 つ切り出す(**横倒しなら 90 度回して正す**)
 

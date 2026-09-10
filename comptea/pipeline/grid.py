@@ -797,8 +797,12 @@ def main(argv=None):
             '画像を Read して確かめ，表があるなら conf を下げるか weights を疑う')
 
     image, df_det, skew_warn = deskew_page(image, df_det, args, by_class)
+    # **90 度回して組まれた紙面を知らせる**(対策 H の入口．2026-09-10)．kinki_014 は
+    # 横倒しのまま格子になっていた．157 枚でこの検査に掛かるのはその 1 枚だけ
+    from comptea import split_sheet as _ss
+    rot_warn = _ss.check_rotation(image)
     tables, n_orig, sub_done, warn = split_page(image, df_det, args, base)
-    table_warnings = skew_warn + warn
+    table_warnings = rot_warn + skew_warn + warn
 
     tables, warn = widen_tables(image, tables, n_orig, sub_done, args, by_class)
     table_warnings += warn
