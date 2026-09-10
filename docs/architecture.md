@@ -387,6 +387,19 @@ shift.
   threshold (boxes can span two lines and merge neighbours) nor the box spacing to
   estimate the pitch (German and Japanese on the same line sit 8 px apart and halve
   it). Fewer than 3 lines falls back to the projection bands.
+  `bands_from_pairs()` then re-places a band edge using the **value side** (2026-09-10,
+  user's rule: build tentative cuts on the value side too, keep only those that
+  correspond to an item cut). Value lines come from the ink projection, not the
+  detector — value cells are digits in 25 columns, and clustering their boxes collapses
+  rows (20 → 13 on 22_p3, one 182 px lump for four lines) while the projection gives
+  twenty clean 24–27 px rows; the opposite of the item names. Each value row is
+  assigned to the nearest item line and an edge is moved into the gap between the
+  last value row of one item and the first of the next, but only when the edge cuts a
+  value row, the item spans two or more value rows, and neither neighbouring item line
+  is taller than 2 row pitches (a merged OCR line, 92 px on 05_p2, has a meaningless
+  centre and moving its edges fused 調査面積 and 海抜高 into one band). This fixes the
+  "date band should end below the date" tables (22_p3, 23_p1_t1_s2, 23_p1_t2) without
+  changing the row counts.
   When no `header_col` box is detected at all, `locate._guess_header_col()` builds the
   item-name region from the `header` box's left edge to the first value column
   (2026-09-10): item names are on the sheet but undetected on 11 typed tables
