@@ -319,6 +319,20 @@ def bands_from_pairs(item_spans, value_spans, edges, pitch=None):
     return np.maximum.accumulate(np.array(out, dtype=float))
 
 
+def bands_from_value_lines(value_spans, top, bottom):
+    """値の側の行 (黒画素の連なり) の**あいだ**を境にして帯を作る (1 行 1 帯)
+
+    2026-09-10 の方針転換: 表頭も組成部と同じく，正確に区切れるなら区切りすぎる側に
+    倒す．値の行と行のあいだは字を割らないので正確．項目が複数行にわたるぶんは
+    帯が増えるが，項目名の無い帯として段階 3 が合成する．
+    """
+    if len(value_spans) < 2:
+        return None
+    cuts = [(a[2] + b[1]) / 2.0 for a, b in zip(value_spans[:-1], value_spans[1:])]
+    edges = [float(top)] + [float(c) for c in cuts] + [float(bottom)]
+    return np.maximum.accumulate(np.array(edges, dtype=float))
+
+
 def snap_to_value_lines(edges, spans, pitch, reach=VALUE_SNAP):
     """境を，**値の側の行と行のあいだ**へ寄せる (対応する区切りがあるときだけ)
 
@@ -383,11 +397,17 @@ def header_bands(img, box, value_x, pitch=None, reader=None, dark=None):
     if dark is None:
         dark = ink.binarize(img)
     if edges is not None and pitch:
-        # **値の側にも区切りを仮に作り，項目名の行と対応付ける** (2026-09-10 ユーザ指示)．
-        # 項目名の区切りだけでは値の行を割る
+        # **値の側の行ごとに区切る** (2026-09-10 ユーザ指示の方針転換: 表頭も組成部と
+        # 同じく，正確に区切れるなら区切りすぎる側に倒し，段階 3 で合成する)．
+        # 項目名の行から作った帯は，値が 2〜3 行にわたる項目や項目名の印字が値と
+        # ずれた表で境が値の行を割る．値の行 (黒画素の連なり) の間なら字を割らない．
+        # 項目名の無い帯は段階 3 (`plot_table`) が前の項目の続きとして合成する
         vs = value_lines(dark, (value_x[0], box[1], value_x[1], box[3]), float(pitch))
-        edges = bands_from_pairs(spans, vs, edges, pitch=float(pitch))
-        edges = snap_to_gap(edges, dark, value_x, float(pitch))
+        if len(vs) >= MIN_LINES:
+            edges = bands_from_value_lines(vs, float(edges[0]), float(edges[-1]))
+        else:
+            edges = bands_from_pairs(spans, vs, edges, pitch=float(pitch))
+            edges = snap_to_gap(edges, dark, value_x, float(pitch))
     edges = drop_unvalued(edges, dark, value_x)
     if edges is None or len(edges) < MIN_LINES + 1:
         return None
