@@ -69,6 +69,10 @@ HALF_MIN_ROWS = 30      # 半分の刻みの判定に要る最小の行数(少�
 
 
 HALF_RUNS_MAX = 0.6     # 字の区間の数が行数のこの倍以下なら半分の刻み(正しい表は 0.75 以上)
+HALF_RUNS2_LO = 0.75    # 相関が曖昧なとき: 2 倍の刻みで 字の区間/行 がこの範囲なら半分 (23_p2 は 1.07)
+HALF_RUNS2_HI = 1.5
+HALF_AC_RATIO = 0.7     # 同上: 2 倍の刻みの自己相関が元の刻みのこの倍を下回れば触らない
+HALF_AC_SOFT = 0.35     # 同上: 元の刻みの自己相関がこれ以上なら本物の刻み (17_p1 の副行は 0.566)
 
 
 RUN_THR = 0.3           # 字の区間とみなす黒画素(正の値の中央値に対する比)
@@ -124,10 +128,21 @@ def is_half_pitch(prof, y1, y2, med, ac_max=HALF_AC_MAX, ac2_min=HALF_AC2_MIN,
     seg = np.asarray(prof[int(y1):int(y2)], dtype=float)
     if med <= 0 or len(seg) < med * min_rows:
         return False
-    if autocorr(seg, med) >= ac_max or autocorr(seg, 2 * med) < ac2_min:
-        return False
     n_rows = len(seg) / med
-    return text_runs(seg) <= n_rows * runs_max
+    runs = text_runs(seg)
+    if runs > n_rows * runs_max:
+        return False
+    ac1, ac2 = autocorr(seg, med), autocorr(seg, 2 * med)
+    if ac1 < ac_max and ac2 >= ac2_min:
+        return True
+    # **相関が曖昧でも，字の区間で決められる** (2026-09-10)．切り出しの範囲が変わった
+    # 23_p2 は 20 px で 0.205・40 px で 0.191 と相関が両方とも中途半端で，上の判定を
+    # 通らなかった (前の切り出しでは 0.04 対 0.41)．字の区間は 2 倍の刻みで 1 行 1 区間
+    # (1.07) なので，そちらで半分と分かる．相関が 2 倍の刻みで極端に落ちるときは触らない
+    # 元の刻みで強く相関する表は本物 (17_p1 は階層の副行が 22 px で 0.566)．触らない
+    return (ac1 < HALF_AC_SOFT
+            and HALF_RUNS2_LO <= runs / (n_rows / 2) <= HALF_RUNS2_HI
+            and ac2 >= ac1 * HALF_AC_RATIO)
 
 
 def lattice_edges(edges, prof, pitch):
