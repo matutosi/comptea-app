@@ -9,8 +9,8 @@ import pandas as pd
 from PIL import Image
 
 
-from . import ink
-from .blocks import split_blocks
+from . import col_reach, ink
+from .blocks import drop_stray_anchors, split_blocks
 from .axes import _shift_edges_for_header, _snap_axis, axis_notes, coord_item, ink_profile, locate_edges, locate_x_range, locate_y_range
 from .filters import drop_rows_outside_body, drop_unsupported_headers, filter_results, remove_dup_ranges
 
@@ -88,6 +88,13 @@ def locate_items(df: pd.DataFrame, source_image: str = "", item: str = "all", th
             warnings.append(
                 '画像を読めなかったため，文字に重なった境界の調整を行わなかった．'
                 'locate_items(image=...) で画像を渡すと調整できる．')
+    # 段の目印のうち，本物の段と縦に重ならないものは捨てる (04_p2 の表の下の偽の sname は
+    # 段を 1 つ増やし，右端の列を足す限界になっていた．2026-09-10)
+    df, n_stray = drop_stray_anchors(df)
+    if n_stray:
+        warnings.append(
+            f"段の目印 ('sname' か 'species_col') のうち {n_stray} 本は，いちばん高い段と"
+            '縦に重ならないので捨てた(表の下の注記などの誤検出)．')
     # 1ページに段が複数あるときは，段ごとに格子を作る(混ぜると壊れる)
     blocks = split_blocks(df)
     if len(blocks) > 1:
@@ -95,10 +102,21 @@ def locate_items(df: pd.DataFrame, source_image: str = "", item: str = "all", th
             f'このページには段が {len(blocks)} つある(種名のリストを折り返した組み方)．'
             '段ごとに格子を作り，行は左の段から続けて番号を振る．'
             '地点は段をまたいで同じものとして扱う．')
+    # 段ごとの右の限界: 次の段の種名の左端 (右端の外の列を足すとき，隣の段へ入らないため)
+    lefts = []
+    for block in blocks:
+        anc = block[block['obj_name'].isin(('sname', 'species_col'))]
+        lefts.append(float(anc['x1'].min()) if not anc.empty else None)
     items = []
     for i, block in enumerate(blocks):
+        x_max = None
+        if i + 1 < len(blocks) and lefts[i + 1] is not None:
+            x_max = lefts[i + 1] - REACH_MARGIN
+        elif img is not None:
+            x_max = float(img.width)
         res, block_warnings = _locate_block(
-            block, source_image, img, max_shift_ratio, threth_col, threth_row)
+            block, source_image, img, max_shift_ratio, threth_col, threth_row,
+            x_max=x_max)
         prefix = f'段{i + 1}: ' if len(blocks) > 1 else ''
         warnings.extend(prefix + w for w in block_warnings)
         if res is not None:
@@ -440,14 +458,45 @@ def check_body_reach(df, source_image, y_edges):
     return out
 
 
+REACH_MARGIN = 10         # 右端の外の列を足すとき，次の段の種名の左端からこれだけ手前で止める
+
+
+HEAD_COL_MIN_W = 3.0      # 項目名の領域の幅の下限 (行の高さの倍数)
+
+
+HEAD_COL_MIN_BANDS = 3    # 字のある帯の数の下限
+
+
+HEAD_COL_INK = 0.002      # 帯に字があるとみなす黒画素の割合 (細い縦罫線は除く)
+
+
+def _guess_header_col(dark, left, value_x, bands, pitch):
+    """`header_col` が無いとき，表頭の枠の左端〜値の左端を項目名の列とみなしてよいか
+
+    項目名 (独文・和文) が紙面にあるのに枠が検出されない表がある (s01115_14_p5・15_p1・
+    15_p2・15_p4・21_p3．2026-09-10 ユーザ指摘)．領域が 3 行幅以上あり，項目行の帯の
+    3 つ以上に字があれば (left, value_x) を返す．細い縦罫線は字に数えない．
+    """
+    if value_x - left < HEAD_COL_MIN_W * pitch:
+        return None
+    n = sum(1 for a, b in bands
+            if ink.thick_ratio(dark, a, b, left + 5, value_x - 5) > HEAD_COL_INK)
+    if n < HEAD_COL_MIN_BANDS:
+        return None
+    return float(left), float(value_x)
+
+
 def _locate_block(df: pd.DataFrame, source_image: str, img, max_shift_ratio: float,
-                  threth_col: float = 0.8, threth_row: float = 0.8):
+                  threth_col: float = 0.8, threth_row: float = 0.8, x_max=None):
     """
     1つの段について格子を作る(locate_itemsから段ごとに呼ぶ)
 
     重複の除去は**段に分けたあと**に行う．
     行の重複判定はyの重なりだけを見てxを見ないため，
     段をまたいで一括でかけると，右の段の行が左の段の行の重複として消える．
+
+    Args:
+        x_max: 右端の外の列を足すときの限界 (次の段の左端・画像の右端)
 
     Returns:
         (DataFrame または None, warningsのリスト)
@@ -529,6 +578,22 @@ def _locate_block(df: pd.DataFrame, source_image: str, img, max_shift_ratio: flo
                 x_edges, img, (x_edges[0], y_edges[0], x_edges[-1], y_edges[-1]),
                 axis='x', label='列', max_shift_ratio=max_shift_ratio)
             warnings.extend(x_warns)
+            # **右端の外の列を足す** (2026-09-10 ユーザ指摘: 006・08_p2・04_p2・15_p3)．
+            # `locate_edges` は検出のあいだしか内挿しないので，端の列は丸ごと落ちる．
+            # 本体にも表頭にも字のある帯だけ (常在度の字のはみ出しは表頭が空)
+            head_rows = filter_results(df, source_image, 'plot_row')
+            y_head = ((float(head_rows['y1'].min()), float(head_rows['y2'].max()))
+                      if not head_rows.empty else None)
+            x_edges, n_reach = col_reach.reach_right(
+                ink.binarize(img), x_edges, y_edges, y_head=y_head, x_max=x_max)
+            if n_reach:
+                x_interp = np.r_[x_interp, np.ones(n_reach, dtype=bool)]
+                x_snapped = np.r_[x_snapped, np.zeros(n_reach, dtype=bool)]
+                x_unresolved = np.r_[x_unresolved, np.zeros(n_reach, dtype=bool)]
+                warnings.append(
+                    f'組成部の右端の外に，本体にも表頭にも字のある列が {n_reach} 列あったので'
+                    "足した(検出の箱が届いていない)．内挿した列として note に 'interpolated' を"
+                    '付けてある．段階1で右端の列を目で確かめる．')
     if y_interp.any():
         warnings.append(
             f'行のうち {int(y_interp.sum())} 行は検出されず，前後の間隔から内挿した'
@@ -716,6 +781,21 @@ def _locate_header(df: pd.DataFrame, source_image: str, x_edges, warnings: list,
             f'表頭の項目行のあいだに，1行ぶん以上あいた箇所が {n_wide} つある．'
             '拾えていない項目があるかもしれない．')
     hc = locate_x_range(df, source_image, obj_name=class_hdr_col)
+    hc_guessed = False
+    if hc is None and img is not None and not head.empty:
+        # **枠が無くても項目名の字があれば補う** (2026-09-10 ユーザ指摘: 14_p5・15_p1・
+        # 15_p2・15_p4・21_p3 は項目名が紙面にあるのに `header_col` が検出されず，
+        # 値だけになっていた)．領域は表頭の枠の左端から値の左端まで．
+        # 独文と和文の境は対策 B が黒画素で決める
+        guess = _guess_header_col(ink.binarize(img), float(head['x1'].min()),
+                                  float(x_edges[0]), bands, median_h)
+        if guess is not None:
+            hc = pd.DataFrame({'x1': [guess[0]], 'x2': [guess[1]]})
+            hc_guessed = True
+            warnings.append(
+                f"'{class_hdr_col}' は検出されなかったが，表頭の枠の左端 {guess[0]:.0f} px から"
+                f'値の左端 {guess[1]:.0f} px までに項目名の字があるので，そこを項目名の列として'
+                '補った．段階1で項目名の列を目で確かめる．')
     # **項目名の行から帯を作り直す**(できるとき)．
     # `plot_row` の箱は項目行と1対1に対応しておらず，2項目を1つの箱に
     # まとめたり，値の2行目だけを1つの箱にしたりする．
@@ -791,7 +871,7 @@ def _locate_header(df: pd.DataFrame, source_image: str, x_edges, warnings: list,
         ink.binarize(img), (left, float(x_edges[0])),
         [(float(a), float(b)) for a, b in zip(h_edges[:-1], h_edges[1:])])
     if split is not None and left + 20 < split < float(x_edges[0]) - 20:
-        if abs(split - right) > 5:
+        if abs(split - right) > 5 and not hc_guessed:
             warnings.append(
                 f'表頭の独文と和文の境を，検出枠の右端 {right:.0f} px から'
                 f'黒画素の谷 {split:.0f} px へ移した．'

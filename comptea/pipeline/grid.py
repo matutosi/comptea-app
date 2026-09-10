@@ -309,6 +309,15 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
     df_loc, height_warn = row_heights.fix_row_heights(Image.open(image), df_loc,
                                                       df_det=df_det)
     warnings += height_warn
+    # **右の段の下端を左の段にそろえる** (2026-09-10 ユーザ指示)．kinki_060 は右の段の
+    # 最後の行が右の段の箱に入っておらず丸ごと落ちていた．空振り (OCR が全部空白) でもよい．
+    # 行の高さの後処理の**後**に置く (前に足すと，下端の詰めが空の行として落とす)
+    df_loc, n_align = blocks.align_block_bottoms(df_loc)
+    if n_align:
+        warnings.append(
+            f'右の段の下端が左の段より短かったので，左の段の行を写して {n_align} 行を足した'
+            '(折り返した組み方では左右の行が同じ高さに並ぶ)．'
+            '字の無い行は空のまま読まれる．段階1で右の段の下端を目で確かめる．')
     # 行が決まったあとに，列の境だけを印字の隙間から組み直す(良いときだけ)
     df_loc, edge_warn = col_edges.fix_column_edges(Image.open(image), df_loc)
     warnings += edge_warn
