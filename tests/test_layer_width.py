@@ -145,3 +145,22 @@ def test_階層が無ければ何もしない():
                     _grid(EDGES, X_COMP, 'comp')], ignore_index=True)
     out, warns = layer_col.refit_layer_width(img, df)
     assert out is df and warns == []
+
+
+def test_和名と共有した左端は動かさない():
+    """和名の右端と階層の左端は 1 本 (2026-09-09 ユーザ提案)．幅を決め直しても破らない
+
+    kinki_045-1 は「B, S」の B が票の山 (S・K の列) の外にあり，左端を寄せて B を
+    落とした (2026-09-10 ユーザ指摘 45)．直すのは右端だけ．
+    """
+    # 記号の芯は 430〜445 だが，一部の行に 305〜320 の記号 (B,) がある．枠は 300〜460
+    img = _sheet(sym=(430, 445))
+    px = img.load()
+    for ya, yb in list(zip(EDGES[:-1], EDGES[1:]))[1:3]:
+        c = int((ya + yb) // 2)
+        _fill(px, 305, 320, c - 8, c + 8)
+    _fill(px, 458, 470, EDGES[3] + 5, EDGES[3] + 20)        # 右へはみ出す記号 (直す口実)
+    df = _df(layer_x=(300, 460))
+    out, warns = layer_col.refit_layer_width(img, df)
+    x1, x2 = _layer_x(out)
+    assert x1 == 300.0                                       # 和名の右端のまま

@@ -435,6 +435,11 @@ def refit_layer_width(img, df_loc):
             na = max(lo_stop, int(mid - cap / 2))
             nb = min(hi_stop, int(mid + cap / 2))
         nx1, nx2 = left + na, left + nb
+        # **和名と共有している左端は動かさない** (2026-09-10 ユーザ指摘 45: kinki_045-1 は
+        # 「B, S」の B が票の山 (S・K の列) の外にあり，左端を 1663 → 1758 px に寄せて
+        # B を落とした)．「和名の右端と階層の左端は 1 本」の規則を破らない．直すのは右端
+        if not names.empty and abs(x1 - left) <= 2:
+            nx1 = x1
         if nx2 - nx1 < min_w or (abs(nx1 - x1) < 2 and abs(nx2 - x2) < 2):
             continue
         after = _clip_rows(dark, nx1, nx2, rows, pitch)
