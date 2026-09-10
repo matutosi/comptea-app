@@ -77,3 +77,87 @@ def test_粗い列は隙間で切る():
     cols = noyolo.rough_cols(dark, rows, PITCH)
     assert len(cols) >= 2
     assert all(b > a for a, b in cols)
+
+
+# --- 辞書で確かめる (案 10・11・12) ---------------------------------------
+
+def test_表頭の語彙の割合():
+    assert noyolo.item_score(['通し番号', '調査年月日', 'Quercus']) == 2 / 3
+    assert noyolo.item_score([]) == 0.0
+
+
+def test_被度の形の割合():
+    # 「・」だけ (非出現) も通る．種名は通らない
+    assert noyolo.comp_score(['1.2', '+', '・', '']) == 1.0
+    assert noyolo.comp_score(['アカマツ', 'Pinus']) == 0.0
+
+
+def test_種名の辞書の割合():
+    assert noyolo.name_score(['アカマツ', 'スダジイ', 'ズイナ群集']) >= 2 / 3
+
+
+def test_行の役割():
+    assert noyolo.row_kind('通し番号') == 'item'
+    assert noyolo.row_kind('調査年月日') == 'item'
+    assert noyolo.row_kind('アカマツ') == 'species'
+    assert noyolo.row_kind('ア カ マ ツ') == 'species'      # 空白入りも詰めて引く
+    assert noyolo.row_kind('Quercus glauca') == 'other'
+    assert noyolo.row_kind('') == 'other'
+
+
+def test_表頭と本体を分ける():
+    kinds = [(100, 'item', '通し番号'), (130, 'item', '調査番号'),
+             (160, 'other', '群集標徴種'), (190, 'species', 'アカマツ'),
+             (220, 'item', '調査地')]           # 本体の下の項目名は表頭に入れない
+    head, top = noyolo.split_header(kinds, 30)
+    assert head == [100, 130]
+    assert top == 190
+
+
+def test_種名の行が無ければ最後の項目名の次が本体():
+    kinds = [(100, 'item', '通し番号'), (130, 'item', '調査番号')]
+    head, top = noyolo.split_header(kinds, 30)
+    assert head == [100, 130] and top == 160
+    assert noyolo.split_header([], 30) == ([], None)
+
+
+def test_表題のカナ行は本体の上端にしない():
+    kinds = [(70, 'species', 'ネザサーススキ群集'),      # 表題．項目名より前
+             (490, 'item', '群落記号'), (560, 'item', '通し番号'),
+             (840, 'item', '海抜高度'),
+             (1200, 'species', 'コナラ'), (1235, 'species', 'アカマツ')]
+    head, top = noyolo.split_header(kinds, 35)
+    assert head == [490, 560, 840]
+    assert top == 1200
+
+
+def test_名前らしい読みの数():
+    assert noyolo._n_name_like(['', '1.2', 'ズイナ群集', '']) == 1
+    assert noyolo._n_name_like(['Quercus', 'アカマツ']) == 2
+
+
+def test_種の行はカナの連なりで見る():
+    # 学名・和名・階層・値が 1 行に並ぶ
+    assert noyolo.row_kind("Caesalpinia japonica シャケツイバラ S 3・4") == 'species'
+    assert noyolo.row_kind('Praf ): H 島ッ 1 s 8 8') == 'other'
+
+
+def test_黒画素の密度で本体の上端():
+    from comptea import ink
+    img = Image.new('L', (400, 700), 255)
+    px = img.load()
+    for i in range(20):                       # 上 6 行は数字 (濃い)，下は「・」
+        y = 100 + i * PITCH
+        for x in range(100, 380, 40):
+            if i < 6:
+                for xx in range(x, x + 20):
+                    for yy in range(y + 5, y + 20):
+                        px[xx, yy] = 0
+            else:
+                for xx in range(x + 8, x + 11):
+                    for yy in range(y + 12, y + 15):
+                        px[xx, yy] = 0
+    dark = ink.binarize(img)
+    rows = list(range(100, 100 + 20 * PITCH, PITCH))
+    top = noyolo.body_top_from_ink(dark, (100, 380), rows, PITCH, max_frac=1.0)
+    assert top == 100 + 6 * PITCH
