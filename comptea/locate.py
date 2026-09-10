@@ -888,6 +888,13 @@ def _locate_header(df: pd.DataFrame, source_image: str, x_edges, warnings: list,
                 '段階1で和名の列に字がそろって入っているかを目で確かめる')
         right = split
     n_edges = np.asarray(h_edges, dtype=float) + name_dy
+    # ずらしたあと，境を**項目名の列の字の間の空白**へ寄せる (組成部の
+    # `fit_edges` と同じ考え．中央値のずらしだけでは行ごとの差が残り，003 では
+    # 境が項目名の下端の 1〜16 px 内側を通っていた．2026-09-10)
+    if img is not None and len(n_edges) >= 3:
+        from . import header_lines as _hl
+        n_edges = _hl.snap_to_gap(n_edges, ink.binarize(img), (left, float(x_edges[0])),
+                                  float(median_h))
     out.append(coord_item(np.array([left, right]), n_edges,
                           obj_name='header_item', y_notes=h_notes))
     # 項目名は2言語で入っていることが多い(header_col はドイツ語で，
