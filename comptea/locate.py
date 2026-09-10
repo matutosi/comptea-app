@@ -603,8 +603,9 @@ def _locate_block(df: pd.DataFrame, source_image: str, img, max_shift_ratio: flo
             head_rows = filter_results(df, source_image, 'plot_row')
             y_head = ((float(head_rows['y1'].min()), float(head_rows['y2'].max()))
                       if not head_rows.empty else None)
+            dark_x = ink.binarize(img)
             x_edges, n_reach = col_reach.reach_right(
-                ink.binarize(img), x_edges, y_edges, y_head=y_head, x_max=x_max)
+                dark_x, x_edges, y_edges, y_head=y_head, x_max=x_max)
             if n_reach:
                 x_interp = np.r_[x_interp, np.ones(n_reach, dtype=bool)]
                 x_snapped = np.r_[x_snapped, np.zeros(n_reach, dtype=bool)]
@@ -613,6 +614,22 @@ def _locate_block(df: pd.DataFrame, source_image: str, img, max_shift_ratio: flo
                     f'組成部の右端の外に，本体にも表頭にも字のある列が {n_reach} 列あったので'
                     "足した(検出の箱が届いていない)．内挿した列として note に 'interpolated' を"
                     '付けてある．段階1で右端の列を目で確かめる．')
+            # **左端の外の列も同じように足す** (2026-09-10 ユーザ指摘: 09_p5)．
+            # 種名の列の右端より左へは出ない．階層の列は表頭が空なので巻き込まない
+            name_x2 = [float(r['x2'].iloc[0])
+                       for r in (spec_x_range, sname_x_range, layer_x_range)
+                       if r is not None]   # 検出済みの階層があればその右端まで
+            x_edges, n_left = col_reach.reach_left(
+                dark_x, x_edges, y_edges, y_head=y_head,
+                x_min=max(name_x2) if name_x2 else None)
+            if n_left:
+                x_interp = np.r_[np.ones(n_left, dtype=bool), x_interp]
+                x_snapped = np.r_[np.zeros(n_left, dtype=bool), x_snapped]
+                x_unresolved = np.r_[np.zeros(n_left, dtype=bool), x_unresolved]
+                warnings.append(
+                    f'組成部の左端の外に，本体にも表頭にも字のある列が {n_left} 列あったので'
+                    "足した(検出の箱が届いていない)．内挿した列として note に 'interpolated' を"
+                    '付けてある．段階1で左端の列を目で確かめる．')
     if y_interp.any():
         warnings.append(
             f'行のうち {int(y_interp.sum())} 行は検出されず，前後の間隔から内挿した'
@@ -750,6 +767,7 @@ def _locate_header(df: pd.DataFrame, source_image: str, x_edges, warnings: list,
     Returns:
         coord_item() の戻り値のリスト(作れないときは空)
     """
+    hinfo = {}          # 表頭で測ったもの (行の位置・OCR の箱・傾き) の置き場
     class_plot_row = 'plot_row'
     class_hdr_col = 'header_col'
     class_hdr = 'header'
@@ -848,7 +866,6 @@ def _locate_header(df: pd.DataFrame, source_image: str, x_edges, warnings: list,
             body_top = float(body_rows['y1'].min())
             if ocr_bottom < body_top <= ocr_bottom + 1.5 * pitch:
                 ocr_bottom = body_top
-        hinfo = {}
         ocr_edges = header_lines.header_bands(
             img, (name_x1, ocr_top, name_x2, ocr_bottom),
             value_x=(float(x_edges[0]), float(x_edges[-1])), pitch=pitch, info=hinfo)
@@ -890,6 +907,9 @@ def _locate_header(df: pd.DataFrame, source_image: str, x_edges, warnings: list,
             '表頭の列の境だけずらした．段階1で表頭の値の切れ目を目で確かめる')
     out = [coord_item(hx_edges, h_edges, obj_name='header_value',
                       y_notes=h_notes)]
+    # 値の帯の傾きは，工程の最後に `header_lines.shear_header_values` が
+    # 表頭の領域で測って掛ける (ここで掛けると，後段の `align_header_columns`
+    # が列ごとに違う y を別の帯と数え，セルが 6 倍に膨れた．2026-09-10)
     if hc is None:
         warnings.append(
             f"'{class_hdr_col}' が検出されず，表頭の項目名を出力できない．"

@@ -75,6 +75,16 @@ HALF_AC_RATIO = 0.7     # 同上: 2 倍の刻みの自己相関が元の刻み�
 HALF_AC_SOFT = 0.35     # 同上: 元の刻みの自己相関がこれ以上なら本物の刻み (17_p1 の副行は 0.566)
 
 
+# **刻みの選び直し** (2026-09-10)．行の高さは検出した行の中央値から取るが，
+# 誤検出の細い行が混じると中央値が低く出る (13_p2 は 29 px．印字は 35 px)．
+# 低い刻みで並べ直すとずれが積もり，上の 18 行で字を割り，値が 1 行下へ落ちた．
+# 黒画素の自己相関が**はっきり**強い刻みがあれば，そちらを採る．範囲を狭く
+# 絞るのは，1.6〜1.8 倍に弱い山が立つ表が 9 つあるため (相関 0.08〜0.33)
+PITCH_LO, PITCH_HI = 0.85, 1.35   # 探す刻みの範囲 (中央値の倍数)
+PITCH_MIN_R = 0.35                # これ未満の相関では動かさない
+PITCH_GAIN = 0.10                 # 中央値の刻みよりこれだけ強くないと動かさない
+
+
 RUN_THR = 0.3           # 字の区間とみなす黒画素(正の値の中央値に対する比)
 
 
@@ -143,6 +153,33 @@ def is_half_pitch(prof, y1, y2, med, ac_max=HALF_AC_MAX, ac2_min=HALF_AC2_MIN,
     return (ac1 < HALF_AC_SOFT
             and HALF_RUNS2_LO <= runs / (n_rows / 2) <= HALF_RUNS2_HI
             and ac2 >= ac1 * HALF_AC_RATIO)
+
+
+def refine_pitch(prof, y1, y2, med, lo=PITCH_LO, hi=PITCH_HI,
+                 min_r=PITCH_MIN_R, gain=PITCH_GAIN):
+    """行の高さを，黒画素の自己相関がはっきり強い刻みへ選び直す
+
+    検出した行の中央値は，誤検出の細い行が混じると低く出ます．低い刻みで
+    並べ直すと，`lattice_rows` が谷へ寄せながら進むあいだにずれが積もり，
+    表の上の方で字を割ります (13_p2 は 29 px で組み，印字の 35 px に対して
+    18 行で 2 行ぶんずれた)．
+
+    動かすのは，(1) 範囲が中央値の 0.85〜1.35 倍，(2) 相関が `min_r` 以上，
+    (3) 中央値の刻みより `gain` 以上強い，の 3 つがそろうときだけです．
+    `is_half_pitch` (2 倍の刻み) とは別の話なので，そちらを先に見ます．
+    """
+    seg = np.asarray(prof[int(y1):int(y2)], dtype=float)
+    if len(seg) < 10 or med <= 0:
+        return float(med)
+    lags = range(max(3, int(med * lo)), int(med * hi) + 1)
+    rs = {L: autocorr(seg, L, slack=0) for L in lags}
+    if not rs:
+        return float(med)
+    best = max(rs, key=rs.get)
+    r0 = autocorr(seg, int(round(med)), slack=0)
+    if rs[best] < min_r or rs[best] < r0 + gain or abs(best - med) < 2:
+        return float(med)
+    return float(best)
 
 
 def lattice_edges(edges, prof, pitch):
@@ -451,7 +488,16 @@ def fix_row_heights(img, df_loc, df_det=None, tol=ROW_TOL):
         elif bad:
             # 行の高さが一定なら，外れた行は検出漏れか誤検出の内挿．
             # 行ごとに直すと ±2 割の中でずれが累積して字を割る(07_p1)ので，
-            # 中央値の刻みで並べ直す
+            # 中央値の刻みで並べ直す．**刻み自体が低く出ていることがある**ので，
+            # 黒画素の自己相関がはっきり強い刻みがあればそちらへ選び直す
+            fine = refine_pitch(prof, edges[0], edges[-1], med)
+            if fine != med:
+                warnings.append(
+                    f'段{block}: **行の高さを {med:.0f} px → {fine:.0f} px に選び直した**'
+                    '(検出した行の中央値より，組成部の黒画素の自己相関がはっきり強い'
+                    '刻み)．細い誤検出が混じると中央値が低く出て，並べ直すときに'
+                    'ずれが積もる．段階1で行の対応を目で確かめる')
+                med = fine
             new = lattice_edges(edges, prof, med)
             relaid = True
             warnings.append(

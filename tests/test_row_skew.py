@@ -85,3 +85,29 @@ def test_列が少ない表は測らない():
     df = _grid(edges, x_edges, 'comp')
     out, warns = row_skew.fix_skew(img, df)
     assert out is df and warns == []
+
+
+def test_header_item_not_sheared():
+    """表頭の項目名の帯には傾きを掛けない (2026-09-10)
+
+    帯はその列自身の黒画素から作るので，位置には傾きがすでに入っている．
+    もう一度掛けると，列の中心が組成部の中心から離れているぶんだけ字の上へずれる．
+    """
+    df = pd.DataFrame([
+        dict(x1=100, x2=200, y1=10.0, y2=40.0, obj_name='header_item'),
+        dict(x1=100, x2=200, y1=10.0, y2=40.0, obj_name='header_item_ja'),
+        dict(x1=100, x2=200, y1=10.0, y2=40.0, obj_name='header_value'),
+        dict(x1=100, x2=200, y1=10.0, y2=40.0, obj_name='comp'),
+    ])
+    out = row_skew.shear_cells(df, slope=0.01, x0=1000.0)
+    dy = out['y1'] - df['y1']
+    # 表頭は 3 つとも動かない (帯は表頭の黒画素から作ってある)
+    assert list(dy[:3]) == [0.0, 0.0, 0.0]
+    assert dy.iloc[3] != 0.0                   # 組成は動く
+
+
+def test_shear_without_obj_name():
+    """obj_name の列が無い格子でも落ちない"""
+    df = pd.DataFrame([dict(x1=100, x2=200, y1=10.0, y2=40.0)])
+    out = row_skew.shear_cells(df, slope=0.01, x0=1000.0)
+    assert out['y1'].iloc[0] == 10.0 + round(0.01 * (150 - 1000))

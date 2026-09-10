@@ -90,3 +90,48 @@ def test_表頭が無い表では字のある行の割合で見る():
 def test_列が2本未満なら間隔が出ないので触らない():
     xs, n = col_reach.reach_right(_dark(n_cols=8), X_EDGES[:2], Y_EDGES, y_head=Y_HEAD)
     assert n == 0 and len(xs) == 2
+
+
+def test_左端の外の列を足す():
+    """`reach_left`: 本体にも表頭にも字のある帯を左へ足す"""
+    dark = np.zeros((300, 400), dtype=bool)
+    y_edges = np.array([100.0, 140.0, 180.0, 220.0])
+    y_head = (40.0, 80.0)
+    x_edges = np.array([200.0, 250.0, 300.0, 350.0])
+    for x1, x2 in ((160, 190), (210, 240), (260, 290), (310, 340)):
+        dark[45:75, x1:x2] = True          # 表頭
+        for a in (105, 145, 185):
+            dark[a:a + 30, x1:x2] = True   # 本体
+    out, n = col_reach.reach_left(dark, x_edges, y_edges, y_head=y_head, x_min=120.0)
+    assert n == 1
+    assert out[0] < 200.0 and len(out) == len(x_edges) + 1
+
+
+def test_表頭が空の左の列は足さない():
+    """階層の列 (本体に字・表頭は空) は巻き込まない"""
+    dark = np.zeros((300, 400), dtype=bool)
+    y_edges = np.array([100.0, 140.0, 180.0, 220.0])
+    y_head = (40.0, 80.0)
+    x_edges = np.array([200.0, 250.0, 300.0, 350.0])
+    for x1, x2 in ((210, 240), (260, 290), (310, 340)):
+        dark[45:75, x1:x2] = True
+        for a in (105, 145, 185):
+            dark[a:a + 30, x1:x2] = True
+    for a in (105, 145, 185):              # 左の帯は本体だけ
+        dark[a:a + 30, 160:190] = True
+    out, n = col_reach.reach_left(dark, x_edges, y_edges, y_head=y_head, x_min=120.0)
+    assert n == 0
+    assert len(out) == len(x_edges)
+
+
+def test_表頭が分からなければ左へ伸ばさない():
+    """階層の列と地点の列を見分ける手掛かりが無いので，何もしない (10_p2 型)"""
+    dark = np.zeros((300, 400), dtype=bool)
+    y_edges = np.array([100.0, 140.0, 180.0, 220.0])
+    x_edges = np.array([200.0, 250.0, 300.0, 350.0])
+    for x1, x2 in ((160, 190), (210, 240), (260, 290), (310, 340)):
+        for a in (105, 145, 185):
+            dark[a:a + 30, x1:x2] = True
+    out, n = col_reach.reach_left(dark, x_edges, y_edges, y_head=None, x_min=120.0)
+    assert n == 0
+    assert len(out) == len(x_edges)

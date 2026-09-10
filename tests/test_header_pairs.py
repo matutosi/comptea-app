@@ -66,3 +66,37 @@ def test_値の行は黒画素の連なりから作る():
 
 def test_黒が無ければ空():
     assert hl.value_lines(np.zeros((100, 100), dtype=bool), (0, 0, 100, 100), PITCH) == []
+
+
+def test_表頭の値の帯を表頭の傾きで列ごとにずらす():
+    """`shear_header_values`: 右下がりの値の行なら，右の列ほど下がる"""
+    import pandas as pd
+    from PIL import Image
+    from comptea import header_lines as hl
+    w, h = 1200, 300
+    img = Image.new('L', (w, h), 255)
+    px = img.load()
+    slope = 12 / 1000                            # 1000 px で 12 px 下がる
+    for r in range(6):                           # 6 行の値
+        for x in range(100, 1100, 50):
+            y = 40 + r * 30 + int(slope * (x - 600))
+            for xx in range(x, x + 12):
+                for yy in range(y, y + 14):
+                    px[xx, yy] = 0
+    cells = []
+    for c, xa in enumerate(range(100, 1100, 100), 1):
+        for r in range(6):
+            cells.append(dict(obj_name='header_value', block=1, row=r + 1, col=c,
+                              x1=xa, x2=xa + 100, y1=30.0 + r * 30, y2=60.0 + r * 30))
+    for c, xa in enumerate(range(100, 1100, 100), 1):
+        for r in range(4):
+            cells.append(dict(obj_name='comp', block=1, row=r + 1, col=c,
+                              x1=xa, x2=xa + 100, y1=220.0 + r * 30, y2=250.0 + r * 30))
+    df = pd.DataFrame(cells)
+    out, warns = hl.shear_header_values(img, df)
+    assert warns
+    hv = out[out.obj_name == 'header_value']
+    left = hv[hv.col == 1].y1.iloc[0]
+    right = hv[hv.col == 10].y1.iloc[0]
+    assert right - left >= 6                     # 右の列が下がる
+    assert (out[out.obj_name == 'comp'].y1.values == df[df.obj_name == 'comp'].y1.values).all()

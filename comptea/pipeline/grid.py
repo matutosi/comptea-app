@@ -361,9 +361,16 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
 
     # 行の種類 (見出し・学名だけの行・凡例) を見分けて note に付ける (案 e の段階 3)．
     # **行は落とさない**．落とすと真値との一致 (行の recall 1.000) が下がる
-    from comptea import row_kinds
+    from comptea import header_lines, row_kinds
     df_loc, kind_warn = row_kinds.mark_rows(Image.open(image), df_loc)
     warnings += kind_warn
+
+    # **表頭の値の帯を，表頭で測った傾きで列ごとに上下させる** (2026-09-10)．
+    # 帯は表頭の領域の中央の座標で作ってあり，`row_skew` は表頭の帯には掛けない
+    # (組成部の傾きとは 2〜12 px 違う)．座標を変える処理の最後に置く
+    # (途中に置くと `align_header_columns` が列ごとの y を別の帯と数える)
+    df_loc, hs_warn = header_lines.shear_header_values(Image.open(image), df_loc)
+    warnings += hs_warn
 
     # 段階2で「このセルを読み直す」と指せるように通し番号を振る
     df_loc.insert(0, 'cell_id', range(1, len(df_loc) + 1))
