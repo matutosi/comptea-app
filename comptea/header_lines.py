@@ -250,23 +250,67 @@ def value_lines(dark, box, pitch, thr=VALUE_INK_THR, min_h=VALUE_MIN_H):
     """
     x1, x2 = int(box[0]), int(box[2])
     y1, y2 = int(box[1]), int(box[3])
-    prof = dark[y1:y2, x1:x2].sum(axis=1).astype(float)
+    if x2 - x1 < 3 or y2 - y1 < 3:
+        return []
+    # **罫線を消してから投影する** (2026-09-10 ユーザ指摘: kinki_088・063-1 は値の列の
+    # 左端に縦罫線があり，投影が途切れずに 9 行が 1 つの帯になった)．組成部と同じ道具
+    from . import row_track
+    clean = row_track.clean_rules(dark, x1, x2, y1, y2, float(pitch))
+    if clean.size == 0:
+        return []
+    prof = clean.sum(axis=1).astype(float)
     if not (prof > 0).any():
         return []
     lo = max(1.0, float(np.median(prof[prof > 0])) * thr)
     floor = max(2.0, float(pitch) * min_h)
-    out, start = [], None
+    runs = _runs_above(prof, lo, floor)
+    # **行の高さの 1.4 倍より高い連なりは，その中で閾値を上げて切り直す** (2026-09-10)．
+    # 行間の狭いタイプ打ちでは 25 列の字の上下が重なり，投影が行のあいだで 1 割まで
+    # 落ちない (14_p4 は 8 行が 1 帯，03_p2 は 8 行)．連なりの中の山の 2〜5 割まで
+    # 閾値を上げ，行の高さに収まる片に分かれたところで採る．分かれなければそのまま
+    # **切り直しは使わない** (2026-09-10 に測って取り下げた)．帯は増える (14_p4 は 5 → 13)
+    # が，切り直した境の一部が字に乗り，字を割る境が 5.4% → 9.3% と増えた．ユーザの
+    # 基準は「正確に区切れるなら区切りすぎる側」で，正確さが先．つながった行は
+    # つながったまま 1 帯にし，段階 3 で複数行の値として扱う (`_resplit_tall` は控え)
+    out = []
+    for a, b in runs:
+        out.append((y1 + (a + b) / 2.0, float(y1 + a), float(y1 + b)))
+    return out
+
+
+def _runs_above(prof, lo, floor):
+    """`prof` が `lo` を超える区間 [a, b) のうち，長さ `floor` 以上のもの"""
+    runs, start = [], None
     for i, v in enumerate(prof):
         if v > lo:
             if start is None:
                 start = i
         elif start is not None:
             if i - start >= floor:
-                out.append((y1 + (start + i) / 2.0, float(y1 + start), float(y1 + i)))
+                runs.append((start, i))
             start = None
     if start is not None and len(prof) - start >= floor:
-        out.append((y1 + (start + len(prof)) / 2.0, float(y1 + start), float(y2)))
-    return out
+        runs.append((start, len(prof)))
+    return runs
+
+
+RESPLIT_FRACS = (0.2, 0.35, 0.5)   # つながった連なりを切り直すときの閾値 (連なりの山に対する比)
+
+
+def _resplit_tall(prof, a, b, pitch, floor, fracs=RESPLIT_FRACS):
+    """連なり [a, b) を，中の閾値を上げて行の高さに収まる片に分ける．分かれなければそのまま"""
+    seg = np.asarray(prof[a:b], dtype=float)
+    peak = float(seg.max())
+    if peak <= 0:
+        return [(a, b)]
+    for f in fracs:
+        sub = _runs_above(seg, peak * f, floor)
+        if len(sub) >= 2 and all(e - s <= pitch * TALL_BOX for s, e in sub):
+            # 片と片のあいだ (谷) の中央を境にし，両端は元の連なりの端まで
+            cuts = [(sub[i][1] + sub[i + 1][0]) // 2 for i in range(len(sub) - 1)]
+            bounds = [0] + cuts + [len(seg)]
+            return [(a + s, a + e) for s, e in zip(bounds[:-1], bounds[1:])]
+    return [(a, b)]
 
 
 TALL_ITEM = 2.0         # 項目名の行がこの倍 (行の高さ) より高ければ，2 行がつながったもので
@@ -432,6 +476,9 @@ def header_bands(img, box, value_x, pitch=None, reader=None, dark=None, info=Non
             info['values'] = vs
         if len(vs) >= MIN_LINES:
             edges = bands_from_value_lines(vs, float(edges[0]), float(edges[-1]))
+            # 境を値の側の黒画素が最少の y へ寄せる (つながった行を切り直した境は
+            # 字に乗ることがある．2026-09-10)
+            edges = snap_to_gap(edges, dark, value_x, float(pitch))
         else:
             edges = bands_from_pairs(spans, vs, edges, pitch=float(pitch))
             edges = snap_to_gap(edges, dark, value_x, float(pitch))

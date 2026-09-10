@@ -820,9 +820,18 @@ def _locate_header(df: pd.DataFrame, source_image: str, x_edges, warnings: list,
         body_rows = filter_results(df, source_image, 'row')
         pitch = (float((body_rows['y2'] - body_rows['y1']).median())
                  if len(body_rows) >= 3 else float(median_h))
+        # **下端は組成部の最初の行の上まで** (2026-09-10 目視: 05_p1・06_p1・07_p3・
+        # 09_p5・14_p4 は最後の項目 (出現種数) が帯の外に落ち，種の行に入っていた)．
+        # `plot_row` の箱は最後の項目まで届かないことがある．行の検出の上端より上で，
+        # 帯の下端から 1.5 行以内なら，そこまで値の行を探す
+        ocr_bottom = float(h_edges[-1])
+        if len(body_rows):
+            body_top = float(body_rows['y1'].min())
+            if ocr_bottom < body_top <= ocr_bottom + 1.5 * pitch:
+                ocr_bottom = body_top
         hinfo = {}
         ocr_edges = header_lines.header_bands(
-            img, (name_x1, ocr_top, name_x2, float(h_edges[-1])),
+            img, (name_x1, ocr_top, name_x2, ocr_bottom),
             value_x=(float(x_edges[0]), float(x_edges[-1])), pitch=pitch, info=hinfo)
         if ocr_edges is not None:
             # **項目名の側の帯は，値との印字のずれだけ上下にずらす** (2026-09-10)．
