@@ -381,7 +381,31 @@ def drop_unvalued(edges, dark, value_x, min_ratio=VALUE_INK_MIN):
     return edges[lo:hi + 1]
 
 
-def header_bands(img, box, value_x, pitch=None, reader=None, dark=None):
+NAME_OFFSET_REACH = 1.0     # 項目名の行と値の行を組にする距離の上限 (行の高さの倍数)
+
+
+def name_offset(item_spans, value_spans, pitch):
+    """項目名の行が値の行からどれだけ上下にずれて印字されているか (中央値，px)
+
+    組成部の「行番号は共有し，y は列ごとに持つ」と同じ考え (2026-09-10)．値の行の
+    あいだで切った帯をそのまま項目名に当てると，項目名を割る (項目名は値より
+    1 行の半分ほど下に組まれる紙面が多い: 22_p3 は 1 行半)．項目名の行ごとに
+    いちばん近い値の行との差を取り，その中央値だけ項目名の側の帯をずらす．
+    組が 3 つ未満なら 0．
+    """
+    if not item_spans or not value_spans or not pitch:
+        return 0.0
+    vc = np.array([v[0] for v in value_spans], dtype=float)
+    ds = []
+    for s in item_spans:
+        j = int(np.abs(vc - s[0]).argmin())
+        d = s[0] - vc[j]
+        if abs(d) <= NAME_OFFSET_REACH * float(pitch):
+            ds.append(d)
+    return float(np.median(ds)) if len(ds) >= 3 else 0.0
+
+
+def header_bands(img, box, value_x, pitch=None, reader=None, dark=None, info=None):
     """表頭の項目名の領域 `box` から帯の境を作る．作れなければ None
 
     Args:
@@ -403,6 +427,9 @@ def header_bands(img, box, value_x, pitch=None, reader=None, dark=None):
         # ずれた表で境が値の行を割る．値の行 (黒画素の連なり) の間なら字を割らない．
         # 項目名の無い帯は段階 3 (`plot_table`) が前の項目の続きとして合成する
         vs = value_lines(dark, (value_x[0], box[1], value_x[1], box[3]), float(pitch))
+        if info is not None:
+            info['spans'] = spans
+            info['values'] = vs
         if len(vs) >= MIN_LINES:
             edges = bands_from_value_lines(vs, float(edges[0]), float(edges[-1]))
         else:

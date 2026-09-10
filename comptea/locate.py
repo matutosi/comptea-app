@@ -774,6 +774,7 @@ def _locate_header(df: pd.DataFrame, source_image: str, x_edges, warnings: list,
     # できる(s01115_18_p2 の表頭の 1 行)．そのまま渡すと切り出しで落ちる
     h_edges = np.maximum.accumulate(h_edges)
     n_items = len(h_edges) - 1
+    name_dy = 0.0        # 項目名の側の帯を値の帯からずらす量 (px)
     gaps = [bands[i + 1][0] - bands[i][1] for i in range(len(bands) - 1)]
     n_wide = sum(1 for g in gaps if g > median_h * 0.8)
     if n_wide:
@@ -819,10 +820,19 @@ def _locate_header(df: pd.DataFrame, source_image: str, x_edges, warnings: list,
         body_rows = filter_results(df, source_image, 'row')
         pitch = (float((body_rows['y2'] - body_rows['y1']).median())
                  if len(body_rows) >= 3 else float(median_h))
+        hinfo = {}
         ocr_edges = header_lines.header_bands(
             img, (name_x1, ocr_top, name_x2, float(h_edges[-1])),
-            value_x=(float(x_edges[0]), float(x_edges[-1])), pitch=pitch)
+            value_x=(float(x_edges[0]), float(x_edges[-1])), pitch=pitch, info=hinfo)
         if ocr_edges is not None:
+            # **項目名の側の帯は，値との印字のずれだけ上下にずらす** (2026-09-10)．
+            # 組成部の「行番号は共有し，y は列ごとに持つ」と同じ
+            name_dy = header_lines.name_offset(
+                hinfo.get('spans', []), hinfo.get('values', []), pitch)
+            if abs(name_dy) >= 3:
+                warnings.append(
+                    f'表頭の項目名は値より {name_dy:+.0f} px ずれて組まれているので，'
+                    '項目名の帯だけそのぶんずらした(帯の対応は同じ)．')
             if len(ocr_edges) != len(h_edges):
                 warnings.append(
                     f'表頭の項目行は，検出({len(h_edges) - 1} 行)と'
@@ -877,14 +887,15 @@ def _locate_header(df: pd.DataFrame, source_image: str, x_edges, warnings: list,
                 f'黒画素の谷 {split:.0f} px へ移した．'
                 '段階1で和名の列に字がそろって入っているかを目で確かめる')
         right = split
-    out.append(coord_item(np.array([left, right]), h_edges,
+    n_edges = np.asarray(h_edges, dtype=float) + name_dy
+    out.append(coord_item(np.array([left, right]), n_edges,
                           obj_name='header_item', y_notes=h_notes))
     # 項目名は2言語で入っていることが多い(header_col はドイツ語で，
     # その右に和名の列がある)．和名の方がOCRも突き合わせも確実なので，
     # 独文と和文の境から値の左端までを別に切り出す
     gap = float(x_edges[0]) - right
     if gap > (right - left) * 0.2:
-        out.append(coord_item(np.array([right, float(x_edges[0])]), h_edges,
+        out.append(coord_item(np.array([right, float(x_edges[0])]), n_edges,
                               obj_name='header_item_ja', y_notes=h_notes))
     return out
 

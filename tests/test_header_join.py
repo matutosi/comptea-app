@@ -49,3 +49,12 @@ def test_項目名が読めない帯は続きにしない():
     res = pt.plot_table(df)
     assert 'altitude' in res.columns and 'plot_no' in res.columns
     assert any('判別できない' in w for w in res.attrs['warnings'])
+
+
+def test_項目名の行と値の行のずれの中央値():
+    # 項目名が値より 15 px 下に組まれている (22_p3 の型)
+    values = [(100, 90, 110), (140, 130, 150), (180, 170, 190), (220, 210, 230)]
+    items = [(115, 105, 125), (156, 146, 166), (194, 184, 204)]
+    assert 14 <= hl.name_offset(items, values, 40.0) <= 16
+    assert hl.name_offset(items[:2], values, 40.0) == 0.0        # 組が 3 つ未満
+    assert hl.name_offset([], values, 40.0) == 0.0
