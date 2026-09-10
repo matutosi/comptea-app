@@ -14,6 +14,7 @@
 import re
 import unicodedata
 
+import numpy as np
 import pandas as pd
 
 import Levenshtein
@@ -158,26 +159,55 @@ def plot_table(df: pd.DataFrame, text_col: str = 'corrected') -> pd.DataFrame:
     names_ja = df[df['obj_name'] == 'header_item_ja']
     names_de = df[df['obj_name'] == 'header_item']
 
-    # 項目行は y1 で決まる．和名を優先し，無ければドイツ語で補う
+    # 項目行は y1 で決まる．和名を優先し，無ければドイツ語で補う．
+    # **項目名の無い帯は，前の項目の続き** (2026-09-10 ユーザ指示: 表頭は組成部と同じく
+    # 値の行ごとに区切り，あとで合成する)．値が 2〜3 行にわたる項目 (調査年月日の
+    # '83 / 6 / 8) は帯が 3 つになり，2 つ目以降は項目名が空なので前の項目へつなぐ
     item_of = {}
     unknown = []
+    n_joined = 0
+    current = None
+    # 値の帯と項目名の帯は**別々に切る**ので，y が一致するとは限らない
+    # (項目名は値と上下にずれて印字され，行の数も違う．2026-09-10)．
+    # 帯どうしの縦の重なりがいちばん大きいものを組にする
+    band_of = dict(zip(values['y1'], values['y2'])) if 'y2' in values else {}
+
+    def pick(src, y1):
+        if src.empty:
+            return None
+        if 'y2' not in src.columns or y1 not in band_of:
+            hit = src[src['y1'] == y1]
+            return hit.iloc[0] if not hit.empty else None
+        a, b = float(y1), float(band_of[y1])
+        ov = (np.minimum(src['y2'].astype(float), b)
+              - np.maximum(src['y1'].astype(float), a))
+        if not len(ov) or ov.max() <= 0:
+            return None
+        return src.loc[ov.idxmax()]
+
     for y1 in sorted(values['y1'].unique()):
         label = None
+        raw = ''
         for src in (names_ja, names_de):
-            hit = src[src['y1'] == y1]
-            if not hit.empty:
-                label = match_item(hit.iloc[0][text_col])
-                if label:
-                    break
-        if label is None:
-            raw = ''
-            for src in (names_ja, names_de):
-                hit = src[src['y1'] == y1]
-                if not hit.empty and isinstance(hit.iloc[0][text_col], str):
-                    raw = hit.iloc[0][text_col]
-                    break
+            hit = pick(src, y1)
+            if hit is not None:
+                t = hit[text_col]
+                if isinstance(t, str) and t.strip():
+                    raw = raw or t
+                    label = match_item(t)
+                    if label:
+                        break
+        if label is None and not raw.strip():
+            label = current               # 項目名が空 → 前の項目の続き
+            if current is not None:
+                n_joined += 1
+        elif label is None:
             unknown.append(raw)
+        if label is not None and label != current:
+            current = label
         item_of[y1] = label
+    if n_joined:
+        warnings.append(f'項目名の無い帯 {n_joined} つを，前の項目の値の続きとして合成した．')
     if unknown:
         warnings.append(
             f'項目名を判別できない行が {len(unknown)} つある: '
@@ -194,9 +224,16 @@ def plot_table(df: pd.DataFrame, text_col: str = 'corrected') -> pd.DataFrame:
             continue
         plot = plots[r.x1]
         raw = getattr(r, text_col, None)
+        # 同じ項目の続きの帯は，値を「/」でつなぐ ('83 / 6 / 8)
+        prev = rows.get(plot, {}).get(('raw', key))
+        if prev is not None and isinstance(raw, str) and raw.strip():
+            raw = f'{prev}/{raw.strip()}'
+        elif prev is not None:
+            raw = prev
         # 項目ごとに取りうる形が決まっているので，そこで直して検証する
         fixed = correct_text.correct_header_value(key, raw)
         rows.setdefault(plot, {})[key] = fixed['corrected']
+        rows[plot][('raw', key)] = raw
         if fixed['status'] == 'Need Check':
             need_check.append(f'地点{plot} {key}={raw!r}')
     if need_check:
@@ -207,7 +244,8 @@ def plot_table(df: pd.DataFrame, text_col: str = 'corrected') -> pd.DataFrame:
     if not rows:
         return _empty(warnings + ['項目名を1つも判別できず，表頭を組み立てられない．'])
 
-    res = pd.DataFrame([{'plot': p, **v} for p, v in sorted(rows.items())])
+    res = pd.DataFrame([{'plot': p, **{k: v for k, v in d.items() if isinstance(k, str)}}
+                        for p, d in sorted(rows.items())])
     if 'source_image' in df.columns and len(df):
         res.insert(0, 'source_image', df['source_image'].iloc[0])
     n_empty = int(res.drop(columns=['plot']).isna().all(axis=1).sum())

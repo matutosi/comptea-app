@@ -21,6 +21,7 @@ import argparse
 import os
 import sys
 
+import cv2
 import numpy as np
 from PIL import Image
 
@@ -221,8 +222,137 @@ def _split_box(dark, box, gutter, gap):
     return out or [box]
 
 
+# ---- 縮小した塊で切り分ける (2026-09-10 ユーザ提案) ----------------------------
+#
+# 空白の帯は**シート全体を貫く**必要があるので，表が階段状に置かれた紙面
+# (s01115_09 の 5 表) では通らず，注記が右へ伸びているだけで切れなくなる．
+# **縮めてしまえば，表 1 つが 1 つの塊になる**．
+#
+# 要は縮め方．**ブロックの中に黒が 1 画素でもあれば黒**として縮める
+# (平均で縮めると「・」だけの組成部が薄まって消え，塊が表題や種名だけになる)．
+# **膨張はしない**．「1 画素でもあれば黒」の縮小そのものが膨張として働くので，
+# そのうえ膨らませると紙面がぜんぶ 1 つの塊になる (23 枚で測ると，膨張 2 で
+# 塊は 74 → 144 と暴れる)．23 枚の掃引で最も真値に近いのは 1/8・黒 4・膨張なし．
+#
+#   縮小  黒  膨張   塊の合計 (真値 68)   枚の一致 (23 枚)
+#   1/8    4   なし          74               18   ← これ
+#   1/8    1   なし          79               14
+#   1/16   4    3           107                8
+#   1/32   4    3            71               14
+#
+# ただし**塊だけでは帯に勝てません** (帯は 64/68・17 枚)．塊は「1 つの表が 2 つに
+# 割れる」紙面 (05・01) を作ってしまうので，**帯で切った箱の中だけ**に当てる．
+BLOB_SCALE = 8          # 縮小の率 (300 dpi のスキャンで，字 1 つが 1 画素ほどになる)
+BLOB_INK = 4            # ブロックの中に黒がこれだけあれば黒とみなす (点状の汚れを落とす)
+BLOB_DILATE = 1         # 縮小後の膨張 (1 = 膨張しない)
+BLOB_MIN_AREA = 0.01    # 塊の面積 / 見ている範囲．これ未満は札や折り目の汚れ
+BLOB_MAX = 4            # 塊がこれより多ければ使わない (字の段落ごとに割れている)
+BLOB_MIN_PART = 0.05    # 塊 1 つが範囲のこの割合を占めること (小さい断片では切らない)．
+                        # 0.10 だと s01115_09 の Tab.51 (紙面の 5.5%) が切り離せない
+BLOB_MAX_FILL = 0.85    # 塊の合計が範囲のこの割合を超えたら切らない (すでに 1 つの表)
+BLOB_STOP_AREA = 0.001  # 下へ伸ばすとき，止まる目印にする塊の面積の下限 (注記の段落も拾う)
+BLOB_REACH_GAP = 0.03   # 下へ伸ばすとき，塊の高さのこの割合より離れた塊で止める
+                        # (注記は表のすぐ下に続くが，次の表は離れて置かれる)
+
+
+def shrink_ink(dark, scale=None, min_ink=None):
+    """`scale` 角のブロックに黒が `min_ink` 個以上あれば黒，として縮める"""
+    scale = BLOB_SCALE if scale is None else scale
+    min_ink = BLOB_INK if min_ink is None else min_ink
+    h, w = dark.shape
+    hh, ww = (h // scale) * scale, (w // scale) * scale
+    if hh < scale or ww < scale:
+        return np.zeros((0, 0), dtype=np.uint8)
+    blk = dark[:hh, :ww].reshape(hh // scale, scale, ww // scale, scale)
+    return (blk.sum(axis=(1, 3)) >= min_ink).astype(np.uint8)
+
+
+def blob_boxes(dark, scale=None, min_ink=None, dilate=None, min_area=None):
+    """縮小した紙面の黒画素の塊 (連結成分) の外接矩形を，元の座標で返す"""
+    scale = BLOB_SCALE if scale is None else scale
+    dilate = BLOB_DILATE if dilate is None else dilate
+    min_area = BLOB_MIN_AREA if min_area is None else min_area
+    small = shrink_ink(dark, scale, min_ink)
+    if small.size == 0:
+        return []
+    if dilate >= 2:
+        small = cv2.dilate(small, np.ones((dilate, dilate), np.uint8))
+    n, _, stats, _ = cv2.connectedComponentsWithStats(small, connectivity=8)
+    area = small.shape[0] * small.shape[1]
+    out = []
+    for i in range(1, n):
+        x, y, w, h, _ = stats[i]
+        if w * h < area * min_area:
+            continue
+        out.append((int(x * scale), int(y * scale),
+                    int((x + w) * scale), int((y + h) * scale)))
+    return sorted(out, key=lambda b: (b[0], b[1]))
+
+
+def split_by_blobs(dark, box, max_blobs=None, min_part=None, max_fill=None, **kw):
+    """1 つの箱を，中の塊で切り直す (切れなければ元の箱 1 つを返す)
+
+    空白の帯は**紙面を貫く**必要があるので，表が階段状に置かれた紙面では通りません
+    (s01115_09 は Tab.50 の注記が右へ伸びているだけで縦の帯が消え，5 表が 3 つに
+    しか切れませんでした)．塊は伸びた注記ごと 1 つの表にまとめるので，そこで切れます．
+
+    **切るのは，はっきり分かれているときだけ**にします．
+      - 塊が 2〜4 個 (5 個以上は字の段落ごとに割れている)
+      - どの塊も範囲の 1 割以上 (小さい断片は切り離さない)
+      - 塊の合計が範囲の 85% 以下 (覆っていれば，もともと 1 つの表)
+    """
+    max_blobs = BLOB_MAX if max_blobs is None else max_blobs
+    min_part = BLOB_MIN_PART if min_part is None else min_part
+    max_fill = BLOB_MAX_FILL if max_fill is None else max_fill
+    x1, y1, x2, y2 = box
+    sub = dark[y1:y2, x1:x2]
+    if sub.size == 0:
+        return [box]
+    blobs = blob_boxes(sub, **kw)
+    if not 2 <= len(blobs) <= max_blobs:
+        return [box]
+    area = (x2 - x1) * (y2 - y1)
+    sizes = [(b[2] - b[0]) * (b[3] - b[1]) for b in blobs]
+    if min(sizes) < area * min_part or sum(sizes) > area * max_fill:
+        return [box]
+    stops = blob_boxes(sub, min_area=BLOB_STOP_AREA, **kw)
+    blobs = _reach_down(blobs, y2 - y1, stops)
+    return [(x1 + a, y1 + c, x1 + b, y1 + d) for a, c, b, d in blobs]
+
+
+def _reach_down(blobs, height, stops=None, gap=BLOB_REACH_GAP):
+    """塊の下端を，**すぐ下に続く小さい塊のあいだ**だけ伸ばす
+
+    **表の下の注記を切り落とさないため**です．注記は表と離れると別の塊になりますが
+    (段落ごとに分かれるので，表の塊としては小さすぎて数に入りません)，そこには
+    調査地・調査年月日・出典が書いてあり，表頭に無い地点の情報をここから採ります．
+
+    **範囲の下端まで伸ばしてはいけません**．次の表の表題を巻き込みます
+    (s01115_23_p2 が Tab.149 の表題を取り込み，字を割る割合が 74% になった)．
+    真下の塊を 1 つずつ辿り，**間隔が塊の高さの 3% を超えたら止めます**．
+    注記は表のすぐ下に続きますが，次の表は離れて置かれます．
+    横に広げないのは，隣の表を巻き込むためです．
+    """
+    cand = list(stops if stops is not None else blobs)
+    out = []
+    for x1, y1, x2, y2 in blobs:
+        bottom = y2
+        limit = max(10, (y2 - y1) * gap)
+        for _ in range(MAX_SPLIT_ROUNDS):
+            below = [b for b in cand
+                     if b[3] > bottom and min(x2, b[2]) - max(x1, b[0]) > 0]
+            if not below:
+                break
+            nb = min(below, key=lambda b: b[1])
+            if nb[1] - bottom > limit:
+                break
+            bottom = nb[3]
+        out.append((x1, y1, x2, int(min(bottom, height))))
+    return out
+
+
 def find_tables(dark, min_gutter=MIN_GUTTER, min_gap=MIN_GAP,
-                min_area=MIN_AREA, margin=MARGIN):
+                min_area=MIN_AREA, margin=MARGIN, use_blob=True):
     """表ごとの箱を返す
 
     並びは**左の段から，段の中は上から**(縦組みのシートに合わせた列優先)．
@@ -252,6 +382,17 @@ def find_tables(dark, min_gutter=MIN_GUTTER, min_gap=MIN_GAP,
             break
         boxes = out
 
+    # **帯で切れなかった箱を，縮小した塊で切る** (2026-09-10 ユーザ提案)．
+    # 帯のあとに置くのが要で，先に当てると 1 つの表が 2 つに割れます (05・01)．
+    if use_blob:
+        for _ in range(MAX_SPLIT_ROUNDS):
+            out = []
+            for box in boxes:
+                out.extend(split_by_blobs(dark, box))
+            if len(out) == len(boxes):
+                break
+            boxes = out
+
     result = []
     for x1, y1, x2, y2 in boxes:
         bb = _bbox(dark[y1:y2, x1:x2])
@@ -264,6 +405,31 @@ def find_tables(dark, min_gutter=MIN_GUTTER, min_gap=MIN_GAP,
             continue                            # 見出しの札や折り目の汚れ
         result.append(box)
     return sorted(result, key=lambda b: (b[0], b[1]))
+
+
+def check_rotation(image):
+    """紙面が 90 度回して組まれていれば警告を返す (対策 H の入口．2026-09-10)
+
+    折込の切り出しでは `cut_table` が向きを見て回すが，本のページ (s01114) は
+    そのまま検出にかけていた．kinki_014 は横倒しで，種名が下から上へ読む向き
+    (ユーザ指摘 22・42)．157 枚で回転と判定されるのはこの 1 枚だけ (横の帯 3 本・
+    縦の帯 39 本．他は比 0.32 以上)．**ここでは回さず，知らせるだけ**
+    (回して検出し直す段は，この検査で対象が 1 枚と分かってから入れる)．
+
+    Args:
+        image: PIL の画像か，そのパス
+    Returns:
+        警告のリスト (回っていなければ空)
+    """
+    im = image if isinstance(image, Image.Image) else Image.open(image)
+    dark = ink.binarize(im)
+    if not looks_rotated(dark):
+        return []
+    hb = _line_bands((~dark).mean(axis=1))
+    vb = _line_bands((~dark).mean(axis=0))
+    return [f'**この紙面は 90 度回して組まれている**(字の行の帯が横 {hb} 本・縦 {vb} 本)．'
+            '種名が下から上へ読む向きで，このままでは行と列が入れ替わった格子になる．'
+            '画像を時計回りに 90 度回してからかけ直す(対策 H)．']
 
 
 def cut_table(im, box):

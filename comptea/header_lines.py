@@ -231,6 +231,197 @@ def snap_to_gap(edges, dark, value_x, pitch, reach=SNAP_REACH):
     return np.maximum.accumulate(np.array(out, dtype=float))
 
 
+VALUE_SNAP = 0.5        # 値の区切りへ寄せる範囲 (行の高さの倍数)
+
+
+VALUE_INK_THR = 0.1     # 値の側で「字がある」とみなす黒画素 (行の中央値に対する比)
+
+
+VALUE_MIN_H = 0.2       # 値の行の高さの下限 (行の高さの倍数)．句読点のかけらを落とす
+
+
+def value_lines(dark, box, pitch, thr=VALUE_INK_THR, min_h=VALUE_MIN_H):
+    """値の側の行 (中心, 上端, 下端) を**黒画素の連なり**から作る
+
+    **OCR の箱では駄目でした** (2026-09-10 に測った)．値は列ごとに数字が並ぶので，
+    箱を y で束ねると崩れます (22_p3 では 20 行が 13 行になり，4 行ぶんが 1 つの
+    182 px の塊になった)．項目名と違って値は整然と並ぶので，黒画素の投影が
+    そのまま行になります (同じ表で高さ 24〜27 px の 20 行が出た)．
+    """
+    x1, x2 = int(box[0]), int(box[2])
+    y1, y2 = int(box[1]), int(box[3])
+    if x2 - x1 < 3 or y2 - y1 < 3:
+        return []
+    # **罫線を消してから投影する** (2026-09-10 ユーザ指摘: kinki_088・063-1 は値の列の
+    # 左端に縦罫線があり，投影が途切れずに 9 行が 1 つの帯になった)．組成部と同じ道具
+    from . import row_track
+    clean = row_track.clean_rules(dark, x1, x2, y1, y2, float(pitch))
+    if clean.size == 0:
+        return []
+    prof = clean.sum(axis=1).astype(float)
+    if not (prof > 0).any():
+        return []
+    lo = max(1.0, float(np.median(prof[prof > 0])) * thr)
+    floor = max(2.0, float(pitch) * min_h)
+    runs = _runs_above(prof, lo, floor)
+    # **行の高さの 1.4 倍より高い連なりは，その中で閾値を上げて切り直す** (2026-09-10)．
+    # 行間の狭いタイプ打ちでは 25 列の字の上下が重なり，投影が行のあいだで 1 割まで
+    # 落ちない (14_p4 は 8 行が 1 帯，03_p2 は 8 行)．連なりの中の山の 2〜5 割まで
+    # 閾値を上げ，行の高さに収まる片に分かれたところで採る．分かれなければそのまま
+    # **切り直しは使わない** (2026-09-10 に測って取り下げた)．帯は増える (14_p4 は 5 → 13)
+    # が，切り直した境の一部が字に乗り，字を割る境が 5.4% → 9.3% と増えた．ユーザの
+    # 基準は「正確に区切れるなら区切りすぎる側」で，正確さが先．つながった行は
+    # つながったまま 1 帯にし，段階 3 で複数行の値として扱う (`_resplit_tall` は控え)
+    out = []
+    for a, b in runs:
+        out.append((y1 + (a + b) / 2.0, float(y1 + a), float(y1 + b)))
+    return out
+
+
+def _runs_above(prof, lo, floor):
+    """`prof` が `lo` を超える区間 [a, b) のうち，長さ `floor` 以上のもの"""
+    runs, start = [], None
+    for i, v in enumerate(prof):
+        if v > lo:
+            if start is None:
+                start = i
+        elif start is not None:
+            if i - start >= floor:
+                runs.append((start, i))
+            start = None
+    if start is not None and len(prof) - start >= floor:
+        runs.append((start, len(prof)))
+    return runs
+
+
+RESPLIT_FRACS = (0.2, 0.35, 0.5)   # つながった連なりを切り直すときの閾値 (連なりの山に対する比)
+
+
+def _resplit_tall(prof, a, b, pitch, floor, fracs=RESPLIT_FRACS):
+    """連なり [a, b) を，中の閾値を上げて行の高さに収まる片に分ける．分かれなければそのまま"""
+    seg = np.asarray(prof[a:b], dtype=float)
+    peak = float(seg.max())
+    if peak <= 0:
+        return [(a, b)]
+    for f in fracs:
+        sub = _runs_above(seg, peak * f, floor)
+        if len(sub) >= 2 and all(e - s <= pitch * TALL_BOX for s, e in sub):
+            # 片と片のあいだ (谷) の中央を境にし，両端は元の連なりの端まで
+            cuts = [(sub[i][1] + sub[i + 1][0]) // 2 for i in range(len(sub) - 1)]
+            bounds = [0] + cuts + [len(seg)]
+            return [(a + s, a + e) for s, e in zip(bounds[:-1], bounds[1:])]
+    return [(a, b)]
+
+
+TALL_ITEM = 2.0         # 項目名の行がこの倍 (行の高さ) より高ければ，2 行がつながったもので
+                        # 中心が当てにならない．隣り合う境は動かさない (05_p2 の 92 px の行)
+
+
+def bands_from_pairs(item_spans, value_spans, edges, pitch=None):
+    """項目名の行と値の行を**対応付け**て，値の行を割らない境に置き直す
+
+    項目名の区切りをそのまま使うと，値が 2〜3 行にわたる項目で値の行を割ります．
+    寄せるだけでは足りませんでした (05_p2 は 21 本中 14 本が値の行の内側で，
+    ±0.5 行の範囲に逃げ場が無い)．
+
+    **値の行を，いちばん近い項目名の行に割り当てます** (2026-09-10 ユーザ指示の
+    「項目名の区切りに対応しない値の区切りは落とす」に当たります)．
+    境は「前の項目の最後の値の行」と「次の項目の最初の値の行」のあいだに置きます．
+    値の行が無い項目 (表題・凡例) では，元の境をそのまま使います．
+
+    Args:
+        item_spans: 項目名の行 (中心, 上端, 下端)
+        value_spans: 値の側の行 (同じ形)
+        edges: いまの境 (長さ len(item_spans)+1)
+    """
+    n = len(item_spans)
+    if n < 2 or len(value_spans) < 2 or len(edges) != n + 1:
+        return np.asarray(edges, dtype=float)
+    ac = np.array([s[0] for s in item_spans], dtype=float)
+    owner = [int(np.abs(ac - v[0]).argmin()) for v in value_spans]
+    tall = [pitch is not None and (s[2] - s[1]) > TALL_ITEM * float(pitch)
+            for s in item_spans]
+    out = [float(edges[0])]
+    for i in range(1, n):
+        e = float(edges[i])
+        if tall[i - 1] or tall[i]:
+            out.append(max(e, out[-1]))
+            continue
+        # **動かすのは，境が値の行の内側にあるときだけ**．外にある境まで置き直すと，
+        # 値が 1 行ずつの項目が 1 つの帯にまとまる (05_p2 の調査面積と海抜高．2026-09-10)
+        if not any(v[1] < e < v[2] for v in value_spans):
+            out.append(max(e, out[-1]))
+            continue
+        prev = [v for v, o in zip(value_spans, owner) if o == i - 1]
+        cur = [v for v, o in zip(value_spans, owner) if o == i]
+        # **値が複数行にわたる項目の境だけ**動かす．1 行ずつの項目まで置き直すと，
+        # 隣り合う 2 項目が 1 つの帯にまとまる (05_p2 の調査面積と海抜高)
+        if (len(prev) > 1 or len(cur) > 1) and prev and cur and prev[-1][2] <= cur[0][1]:
+            e = (prev[-1][2] + cur[0][1]) / 2.0
+        out.append(max(e, out[-1]))
+    out.append(max(float(edges[-1]), out[-1]))
+    return np.maximum.accumulate(np.array(out, dtype=float))
+
+
+def bands_from_own_lines(dark, box, pitch, fallback):
+    """項目名の領域 `box` の**自分の行**から帯を作る (2026-09-10 ユーザ指摘 2)
+
+    値の帯をずらして寄せるだけでは，項目名の字を横切る境が残ります．項目名の行の
+    数は値と違い (09_p1 は独文 9 行に対し値 12 行)，どう動かしても余る境が字に乗る
+    ためです．項目名の側も黒画素の連なりで行を切り，その間を境にします．
+    段階 3 (`plot_table`) は帯どうしの縦の重なりで組にするので，数が違ってよい．
+
+    行が 3 つ未満なら `fallback` (値の帯をずらしたもの) をそのまま返します．
+    """
+    lines = value_lines(dark, box, pitch)
+    if len(lines) < MIN_LINES:
+        return np.asarray(fallback, dtype=float)
+    return bands_from_value_lines(lines, float(box[1]), float(box[3]))
+
+
+def bands_from_value_lines(value_spans, top, bottom):
+    """値の側の行 (黒画素の連なり) の**あいだ**を境にして帯を作る (1 行 1 帯)
+
+    2026-09-10 の方針転換: 表頭も組成部と同じく，正確に区切れるなら区切りすぎる側に
+    倒す．値の行と行のあいだは字を割らないので正確．項目が複数行にわたるぶんは
+    帯が増えるが，項目名の無い帯として段階 3 が合成する．
+    """
+    if len(value_spans) < 2:
+        return None
+    cuts = [(a[2] + b[1]) / 2.0 for a, b in zip(value_spans[:-1], value_spans[1:])]
+    edges = [float(top)] + [float(c) for c in cuts] + [float(bottom)]
+    return np.maximum.accumulate(np.array(edges, dtype=float))
+
+
+def snap_to_value_lines(edges, spans, pitch, reach=VALUE_SNAP):
+    """境を，**値の側の行と行のあいだ**へ寄せる (対応する区切りがあるときだけ)
+
+    項目名の区切りをそのまま使うと，値が 2〜3 行にわたる項目で値の行を割ります
+    (22_p3 の「調査年月日」は '83 / 6 / 8 の 3 行で，2 行目と 3 行目のあいだに
+    項目名の区切りが落ちていました)．
+
+    **値の側にも同じやり方で区切りを仮に作り，項目名の区切りに対応するものだけを
+    使います** (2026-09-10 ユーザ指示)．値の行は項目より多いので，対応しない値の
+    区切りは落とします．寄せるのは行の高さの半分まで，順序は保ちます．
+    """
+    e = [float(v) for v in edges]
+    if len(e) < 3 or len(spans) < 2:
+        return np.asarray(e, dtype=float)
+    cuts = np.array([(a[2] + b[1]) / 2.0 for a, b in zip(spans[:-1], spans[1:])],
+                    dtype=float)
+    if not len(cuts):
+        return np.asarray(e, dtype=float)
+    r = float(reach) * float(pitch)
+    out = [e[0]]
+    for i in range(1, len(e) - 1):
+        d = np.abs(cuts - e[i])
+        j = int(d.argmin())
+        v = float(cuts[j]) if d[j] <= r else e[i]
+        out.append(max(v, out[-1]))
+    out.append(max(e[-1], out[-1]))
+    return np.maximum.accumulate(np.array(out, dtype=float))
+
+
 def drop_unvalued(edges, dark, value_x, min_ratio=VALUE_INK_MIN):
     """先頭・末尾の帯のうち，値側に字の無いもの (表題・凡例) を落とす"""
     if edges is None or len(edges) < 3:
@@ -250,7 +441,31 @@ def drop_unvalued(edges, dark, value_x, min_ratio=VALUE_INK_MIN):
     return edges[lo:hi + 1]
 
 
-def header_bands(img, box, value_x, pitch=None, reader=None, dark=None):
+NAME_OFFSET_REACH = 1.0     # 項目名の行と値の行を組にする距離の上限 (行の高さの倍数)
+
+
+def name_offset(item_spans, value_spans, pitch):
+    """項目名の行が値の行からどれだけ上下にずれて印字されているか (中央値，px)
+
+    組成部の「行番号は共有し，y は列ごとに持つ」と同じ考え (2026-09-10)．値の行の
+    あいだで切った帯をそのまま項目名に当てると，項目名を割る (項目名は値より
+    1 行の半分ほど下に組まれる紙面が多い: 22_p3 は 1 行半)．項目名の行ごとに
+    いちばん近い値の行との差を取り，その中央値だけ項目名の側の帯をずらす．
+    組が 3 つ未満なら 0．
+    """
+    if not item_spans or not value_spans or not pitch:
+        return 0.0
+    vc = np.array([v[0] for v in value_spans], dtype=float)
+    ds = []
+    for s in item_spans:
+        j = int(np.abs(vc - s[0]).argmin())
+        d = s[0] - vc[j]
+        if abs(d) <= NAME_OFFSET_REACH * float(pitch):
+            ds.append(d)
+    return float(np.median(ds)) if len(ds) >= 3 else 0.0
+
+
+def header_bands(img, box, value_x, pitch=None, reader=None, dark=None, info=None):
     """表頭の項目名の領域 `box` から帯の境を作る．作れなければ None
 
     Args:
@@ -266,7 +481,24 @@ def header_bands(img, box, value_x, pitch=None, reader=None, dark=None):
     if dark is None:
         dark = ink.binarize(img)
     if edges is not None and pitch:
-        edges = snap_to_gap(edges, dark, value_x, float(pitch))
+        # **値の側の行ごとに区切る** (2026-09-10 ユーザ指示の方針転換: 表頭も組成部と
+        # 同じく，正確に区切れるなら区切りすぎる側に倒し，段階 3 で合成する)．
+        # 項目名の行から作った帯は，値が 2〜3 行にわたる項目や項目名の印字が値と
+        # ずれた表で境が値の行を割る．値の行 (黒画素の連なり) の間なら字を割らない．
+        # 項目名の無い帯は段階 3 (`plot_table`) が前の項目の続きとして合成する
+        vs = value_lines(dark, (value_x[0], box[1], value_x[1], box[3]), float(pitch))
+        if info is not None:
+            info['spans'] = spans
+            info['values'] = vs
+            info['boxes'] = boxes        # 独文と和文を x で分けてずれを取るため
+        if len(vs) >= MIN_LINES:
+            edges = bands_from_value_lines(vs, float(edges[0]), float(edges[-1]))
+            # 境を値の側の黒画素が最少の y へ寄せる (つながった行を切り直した境は
+            # 字に乗ることがある．2026-09-10)
+            edges = snap_to_gap(edges, dark, value_x, float(pitch))
+        else:
+            edges = bands_from_pairs(spans, vs, edges, pitch=float(pitch))
+            edges = snap_to_gap(edges, dark, value_x, float(pitch))
     edges = drop_unvalued(edges, dark, value_x)
     if edges is None or len(edges) < MIN_LINES + 1:
         return None

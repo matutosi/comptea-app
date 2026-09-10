@@ -309,6 +309,15 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
     df_loc, height_warn = row_heights.fix_row_heights(Image.open(image), df_loc,
                                                       df_det=df_det)
     warnings += height_warn
+    # **右の段の下端を左の段にそろえる** (2026-09-10 ユーザ指示)．kinki_060 は右の段の
+    # 最後の行が右の段の箱に入っておらず丸ごと落ちていた．空振り (OCR が全部空白) でもよい．
+    # 行の高さの後処理の**後**に置く (前に足すと，下端の詰めが空の行として落とす)
+    df_loc, n_align = blocks.align_block_bottoms(df_loc)
+    if n_align:
+        warnings.append(
+            f'右の段の下端が左の段より短かったので，左の段の行を写して {n_align} 行を足した'
+            '(折り返した組み方では左右の行が同じ高さに並ぶ)．'
+            '字の無い行は空のまま読まれる．段階1で右の段の下端を目で確かめる．')
     # 行が決まったあとに，列の境だけを印字の隙間から組み直す(良いときだけ)
     df_loc, edge_warn = col_edges.fix_column_edges(Image.open(image), df_loc)
     warnings += edge_warn
@@ -491,6 +500,20 @@ def resplit_parts(image, tables, base, args):
                 if line.startswith('書いた: '):
                     done.append(line[len('書いた: '):].strip())
     return keep, warnings, done
+
+
+def rotate_page(image, base, how='ROTATE_270', tag='rot'):
+    """横倒しの紙面を 90 度回して保存し，その置き場を返す (対策 H)
+
+    `ROTATE_270` が時計回り (折込の `split_sheet.cut_table` と同じ．種名が下から上へ
+    読む紙面を正す)，`ROTATE_90` が反時計回り (kinki_014 はこちら)．
+    """
+    from PIL import Image as _Image
+    out = base.parent / (base.name + f'_{tag}.png')
+    out.parent.mkdir(parents=True, exist_ok=True)
+    _Image.MAX_IMAGE_PIXELS = None
+    _Image.open(image).transpose(getattr(_Image, how)).save(out)
+    return str(out)
 
 
 def deskew_page(image, df_det, args, by_class):
@@ -777,8 +800,29 @@ def main(argv=None):
     from pathlib import Path as _Path
     src_name = _Path(args.image).stem
 
+    # **90 度回して組まれた紙面は，検出の前に回す** (対策 H．2026-09-10)．kinki_014 は
+    # 横倒しのまま格子になっていた．157 枚で回すのはこの 1 枚だけ (検査は
+    # `split_sheet.check_rotation`)．回した画像は作業ディレクトリの隣に置き，
+    # 以後はそれを元画像として扱う (座標はすべて回した画像のもの)
+    from comptea import split_sheet as _ss
     by_class = {'col': args.conf_col / 100}
-    df_det = detect(image, args.weights, args.conf / 100, by_class, args.imgsz)
+    rot_warn = _ss.check_rotation(image)
+    if rot_warn:
+        # 向きは 2 通りある (折込の横倒しは種名が下から上，kinki_014 は上から下)．
+        # 両方回して検出し，`row` が多く出た方を採る (回す紙面は 157 枚中 1 枚なので
+        # 検出 1 回ぶんの手間は許す)
+        best = None
+        for tag, how in (('cw', 'ROTATE_270'), ('ccw', 'ROTATE_90')):
+            img_r = rotate_page(image, base, how, tag)
+            df_r = detect(img_r, args.weights, args.conf / 100, by_class, args.imgsz)
+            n_row = int((df_r['obj_name'] == 'row').sum()) if len(df_r) else 0
+            if best is None or n_row > best[0]:
+                best = (n_row, img_r, df_r, tag)
+        image, df_det = best[1], best[2]
+        rot_warn = [rot_warn[0] + f' → {"時計回り" if best[3] == "cw" else "反時計回り"}に回した'
+                    f'画像 {image} で検出した(row {best[0]} 本)．']
+    else:
+        df_det = detect(image, args.weights, args.conf / 100, by_class, args.imgsz)
     if df_det.empty:
         if save_continuation(image, base, src_name):
             return
@@ -789,7 +833,7 @@ def main(argv=None):
 
     image, df_det, skew_warn = deskew_page(image, df_det, args, by_class)
     tables, n_orig, sub_done, warn = split_page(image, df_det, args, base)
-    table_warnings = skew_warn + warn
+    table_warnings = rot_warn + skew_warn + warn
 
     tables, warn = widen_tables(image, tables, n_orig, sub_done, args, by_class)
     table_warnings += warn
