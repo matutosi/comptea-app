@@ -437,7 +437,11 @@ def _edge_ink(edges, dark, y1, y2):
     if not (prof > 0).any():
         return None
     med = float(np.median(prof[prof > 0]))
-    vals = [prof[int(e) - x1] for e in edges[1:-1] if x1 < e < x2]
+    # **境が画像の外にあることがある**．`x2` が画像の幅を超えると `dark[..., x1:x2]` は
+    # そこで切られるので，`x2 - x1` でなく**並びの長さ**で判定しないと落ちる
+    # (s01115_23_p1 で `IndexError: index 2315 is out of bounds`．2026-09-10)
+    n = len(prof)
+    vals = [prof[i] for i in (int(e) - x1 for e in edges[1:-1]) if 0 <= i < n]
     return (float(np.mean(vals)) / med) if vals and med else None
 
 

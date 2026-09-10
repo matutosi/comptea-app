@@ -250,6 +250,9 @@ BLOB_MAX = 4            # 塊がこれより多ければ使わない (字の段�
 BLOB_MIN_PART = 0.05    # 塊 1 つが範囲のこの割合を占めること (小さい断片では切らない)．
                         # 0.10 だと s01115_09 の Tab.51 (紙面の 5.5%) が切り離せない
 BLOB_MAX_FILL = 0.85    # 塊の合計が範囲のこの割合を超えたら切らない (すでに 1 つの表)
+BLOB_STOP_AREA = 0.001  # 下へ伸ばすとき，止まる目印にする塊の面積の下限 (注記の段落も拾う)
+BLOB_REACH_GAP = 0.03   # 下へ伸ばすとき，塊の高さのこの割合より離れた塊で止める
+                        # (注記は表のすぐ下に続くが，次の表は離れて置かれる)
 
 
 def shrink_ink(dark, scale=None, min_ink=None):
@@ -312,24 +315,39 @@ def split_by_blobs(dark, box, max_blobs=None, min_part=None, max_fill=None, **kw
     sizes = [(b[2] - b[0]) * (b[3] - b[1]) for b in blobs]
     if min(sizes) < area * min_part or sum(sizes) > area * max_fill:
         return [box]
-    blobs = _reach_down(blobs, y2 - y1)
+    stops = blob_boxes(sub, min_area=BLOB_STOP_AREA, **kw)
+    blobs = _reach_down(blobs, y2 - y1, stops)
     return [(x1 + a, y1 + c, x1 + b, y1 + d) for a, c, b, d in blobs]
 
 
-def _reach_down(blobs, height):
-    """塊の下端を，真下の塊の手前 (無ければ範囲の下端) まで伸ばす
+def _reach_down(blobs, height, stops=None, gap=BLOB_REACH_GAP):
+    """塊の下端を，**すぐ下に続く小さい塊のあいだ**だけ伸ばす
 
-    **表の下の注記を切り落とさないため**です．注記は表と 32 px 以上あくと別の塊に
-    なりますが，そこには調査地・調査年月日・出典が書いてあり，表頭に無い地点の
-    情報をここから採ります (「表の下の地点情報」)．塊の外接矩形をそのまま箱にすると
-    落ちるので，真下に別の表が無ければ範囲の下端まで伸ばします．
+    **表の下の注記を切り落とさないため**です．注記は表と離れると別の塊になりますが
+    (段落ごとに分かれるので，表の塊としては小さすぎて数に入りません)，そこには
+    調査地・調査年月日・出典が書いてあり，表頭に無い地点の情報をここから採ります．
+
+    **範囲の下端まで伸ばしてはいけません**．次の表の表題を巻き込みます
+    (s01115_23_p2 が Tab.149 の表題を取り込み，字を割る割合が 74% になった)．
+    真下の塊を 1 つずつ辿り，**間隔が塊の高さの 3% を超えたら止めます**．
+    注記は表のすぐ下に続きますが，次の表は離れて置かれます．
     横に広げないのは，隣の表を巻き込むためです．
     """
+    cand = list(stops if stops is not None else blobs)
     out = []
     for x1, y1, x2, y2 in blobs:
-        below = [b[1] for b in blobs
-                 if b[1] >= y2 and min(x2, b[2]) - max(x1, b[0]) > 0]
-        out.append((x1, y1, x2, int(min(below)) if below else int(height)))
+        bottom = y2
+        limit = max(10, (y2 - y1) * gap)
+        for _ in range(MAX_SPLIT_ROUNDS):
+            below = [b for b in cand
+                     if b[3] > bottom and min(x2, b[2]) - max(x1, b[0]) > 0]
+            if not below:
+                break
+            nb = min(below, key=lambda b: b[1])
+            if nb[1] - bottom > limit:
+                break
+            bottom = nb[3]
+        out.append((x1, y1, x2, int(min(bottom, height))))
     return out
 
 

@@ -73,7 +73,27 @@ def test_表の下の注記は箱に残す():
     left = min(out, key=lambda b: b[0])
     assert left[3] >= 1180                     # 注記まで含む
     right = max(out, key=lambda b: b[0])
-    assert right[3] == H                       # 真下に表が無ければ範囲の下端まで
+    assert right[3] < 800                      # 下に何も無ければ塊のまま (範囲の下端まで伸ばさない)
+
+
+def test_離れた次の表の表題は取り込まない():
+    """範囲の下端まで伸ばすと，次の表の表題を巻き込む (23_p2 が Tab.149 を取り込んだ)"""
+    table = (60, 60, 1540, 700)
+    note = (60, 715, 1540, 760)                # 表のすぐ下の注記
+    title = (60, 1050, 900, 1100)              # 離れた次の表の表題
+    out = ss._reach_down([table], 1200, [table, note, title])
+    assert out[0][3] == 760                    # 注記は含み，表題は含まない
+
+
+def test_下に何も無ければ塊のまま():
+    table = (60, 60, 1540, 700)
+    assert ss._reach_down([table], 1200, [table])[0][3] == 700
+
+
+def test_横に重ならない塊では止まらない():
+    table = (60, 60, 700, 700)
+    other = (900, 715, 1540, 760)              # 右にずれた別の表
+    assert ss._reach_down([table], 1200, [table, other])[0][3] == 700
 
 
 def test_真下に表があればその手前で止める():
