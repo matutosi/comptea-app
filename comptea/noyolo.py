@@ -74,6 +74,28 @@
 - **14_p1 の組成の左端**は，段 1 の列の切り方の問題．種名の領域と組成の左の
   列が 1 つの列 (28〜2111 px) にまとまり，その中は読んでいない．
 
+## 使える案だけを組み合わせた `guess_parts_v2` (2026-09-11)
+
+実測で当たった 5 つ (別案の一覧の 6・7・9・12・14) だけを組み合わせたものです．
+**無理な深掘りはしていません** (ユーザ指示)．
+
+| 表 | 組成部の左端 (推定 − 検出器) | 本体の上端 (推定 − 検出器) |
+|:--|--:|--:|
+| 20_p3 | +72 px (1 列以内) | +39 px (1 行) |
+| 17_p1 | −120 px (1 列以内) | +12 px (1 行以内) |
+| 05_p2 | −181 px (2 列) | +22 px (1 行以内) |
+| kinki_017 | 決まらず | +80 px (2 行) |
+| 14_p1 | +1,393 px (外れ) | +32 px (1 行) |
+
+- **本体の上端は 5 表とも 1〜2 行以内**．黒画素の密度 (案 14) で決め，
+  **横罫線 (案 7) が 4 表で 11〜34 px の差で裏づけ**ます．OCR は要りません．
+- **組成部の左端は 3/5 で 1〜2 列以内**．読みの型 (案 9・12) が第一で，
+  出なければ列の等間隔性 (案 6)．外れる 14_p1 は段 1 の列の切り方の問題
+  (種名の領域と組成の左の列が 1 列 2,000 px にまとまる) で，これは残します．
+- 入れなかったもの: 4 (行の高さの一定性．8 表中 1 表)・5 (左端の集中．種名の
+  左端しか得られない)・8 (縮小した塊．2 段組が分かれない)・10 (表頭の語彙．
+  OCR の質に負ける)．
+
 ## 残る課題
 
 - **段 1 の列の切り方**．`col_edges.plot_gaps` (95% 白の帯が 20 px 以上) は組成部の
@@ -263,29 +285,9 @@ def name_score(texts, dict_path='j_name.txt'):
 
 
 def row_kind(text):
-    """1 行の読みから，その行の役割を決める
-
-    Returns:
-        'item' (表頭の項目名) / 'species' (種名) / 'other'
-    """
-    from .correct_text import known_names
-    from .plot_table import match_item
-    t = (text or '').strip()
-    if not t:
-        return 'other'
-    if match_item(t) is not None:
-        return 'item'
-    # 和名は空白で区切られていることがある (「ア カ マ ツ」)．詰めて引く
-    packed = t.replace(' ', '')
-    for cand in (t, packed):
-        if known_names([cand])[0]:
-            return 'species'
-    # 種の行は「学名 和名 階層 値」が 1 行に並ぶので，カナの**割合**では見ない．
-    # カナが 3 字以上**続く**なら和名がある (辞書に無い古い表記・誤読も含む)．
-    # 表頭の項目名の行は先に `match_item` で拾っているので，ここへは来ない
-    if re.search('[' + ''.join(sorted(KANA)) + ']{%d,}' % MIN_KANA, packed):
-        return 'species'
-    return 'other'
+    """1 行の読みから役割を決める (本体の `row_kinds.kind_of_text` を使う)"""
+    from .row_kinds import kind_of_text
+    return kind_of_text(text)
 
 
 def classify_rows(img, dark, rows, pitch, box, reader, max_frac=HEADER_MAX_FRAC,
@@ -483,4 +485,120 @@ def guess_layout(img, reader=None):
         parts['body_top_ink'] = body_top_from_ink(dark, (comp_left, right), rows, pitch)
         if parts['body_top'] is None:
             parts['body_top'] = parts['body_top_ink']
+    return parts
+
+# ---------------------------------------------------------------------------
+# 使える案だけを組み合わせたもの (2026-09-11 ユーザ指示: 無理な深掘りはしない)
+# ---------------------------------------------------------------------------
+
+# 実測で当たったのは次の 5 つだけ (別案の一覧の 6・7・9・12・14)．
+# 4 (行の高さの一定性)・5 (左端の集中)・8 (縮小した塊の形)・10 (表頭の語彙) は
+# 実データで外れたので入れない．
+#   6  列の等間隔性 …… 組成部の左端 (8 表中 5 表で 1 列以内)
+#   7  罫線       …… 表頭と本体の境 (罫線のある表で 0〜26 px)
+#   9  文字の型    …… 列の役割 (ラテン → 学名，カナ → 和名，短い値 → 組成)
+#   12 被度の値の型 …… 組成の列 (`correct_text.correct_comp`)
+#   14 黒画素の密度 …… 本体の上端 (3 表とも 1 行以内)．OCR が要らない
+COL_PERIOD_MIN = 0.3    # 列の等間隔性: 自己相関がこれ以上なら組成部らしい
+COL_PERIOD_WIN = 600    # 同上: 窓の幅 (px)
+COL_PERIOD_STEP = 100   # 同上: 窓をずらす幅 (px)
+RULE_LONG = 0.3         # 横罫線: 幅のこの割合より長く続く黒
+RULE_NEAR = 3.0         # 罫線を本体の上端の目安に使う範囲 (行の高さの倍数)
+
+
+def comp_left_by_period(dark, y1, y2, pitch, thr=COL_PERIOD_MIN,
+                        win=COL_PERIOD_WIN, step=COL_PERIOD_STEP):
+    """列の等間隔性から組成部の左端を推す (案 6)．決まらなければ None
+
+    組成部は同じ幅の列が並ぶので，x 方向の投影に強い周期が出ます．種名の側は
+    不規則です．**右から続く範囲の左端**を返します (2 段組とタイプ打ちでは外れる)．
+    """
+    prof = dark[int(y1):int(y2)].sum(axis=0).astype(float)
+    w = len(prof)
+    if w < win * 2 or pitch <= 0:
+        return None
+    lags = range(max(8, int(pitch)), max(12, int(pitch * 5)), 2)
+    xs, sc = [], []
+    for x in range(0, w - win, step):
+        seg = prof[x:x + win] - prof[x:x + win].mean()
+        d = float(np.dot(seg, seg))
+        if d <= 0:
+            xs.append(x); sc.append(0.0); continue
+        best = max(float(np.dot(seg[:-L], seg[L:])) / d for L in lags if L < win)
+        xs.append(x)
+        sc.append(best)
+    if not sc:
+        return None
+    sc = np.asarray(sc)
+    if sc[-1] < thr:
+        return None
+    k = len(sc) - 1
+    while k > 0 and sc[k - 1] >= thr:
+        k -= 1
+    return float(xs[k])
+
+
+def body_top_by_rule(dark, x1, x2, pitch, y_max=None, long=RULE_LONG):
+    """表頭と本体の境にある横罫線の y を返す (案 7)．無ければ None
+
+    折込には表頭を囲む枠や下線がある紙面が多く，あれば境そのものです．
+    `y_max` より下は見ません (本体の中の罫線を拾わないため)．
+    """
+    x1, x2 = int(x1), int(x2)
+    if x2 - x1 < 4:
+        return None
+    sub = dark[:int(y_max) if y_max else dark.shape[0], x1:x2]
+    if sub.size == 0 or not sub.any():
+        return None
+    need = (x2 - x1) * long
+    ys = np.flatnonzero(sub.sum(axis=1) >= need)
+    if not len(ys):
+        return None
+    return float(ys[-1])            # いちばん下の長い罫線 = 表頭の下線
+
+
+def guess_parts_v2(img, reader=None):
+    """使える案だけを組み合わせて，組成部の左端と本体の上端を推す
+
+    **いまの工程では使っていません**．検出器が落ちた紙面の補いです．
+
+    Returns:
+        {'pitch', 'rows', 'columns', 'comp_left', 'body_top', 'notes'}
+        `comp_left`・`body_top` は決まらなければ None．`notes` にどの案で
+        決めたかを残します
+    """
+    parts = guess_layout(img, reader)
+    dark = ink.binarize(img)
+    pitch, rows = parts['pitch'], parts['rows']
+    notes = []
+
+    # 組成部の左端: OCR の型と被度の型 (案 9・12) を第一に，出なければ等間隔性 (案 6)
+    left = parts.get('comp_left')
+    if left is not None:
+        notes.append(f'組成部の左端は読みの型から {int(left)} px (案 9・12)')
+    else:
+        y1 = min(rows) if rows else 0
+        y2 = (max(rows) + pitch) if rows else dark.shape[0]
+        left = comp_left_by_period(dark, y1, y2, pitch)
+        if left is not None:
+            notes.append(f'組成部の左端は列の等間隔性から {int(left)} px (案 6)')
+
+    # 本体の上端: 黒画素の密度 (案 14) を第一に，罫線 (案 7) で確かめる
+    top = parts.get('body_top_ink') or parts.get('body_top')
+    if top is not None:
+        notes.append(f'本体の上端は黒画素の密度から {int(top)} px (案 14)')
+    if left is not None:
+        right = max([c['x2'] for c in parts['columns'] if c['kind'] == 'comp'],
+                    default=dark.shape[1])
+        rule = body_top_by_rule(dark, left, right, pitch,
+                                y_max=(top + pitch * RULE_NEAR) if top else None)
+        if rule is not None:
+            if top is None:
+                top = rule
+                notes.append(f'本体の上端は罫線から {int(rule)} px (案 7)')
+            elif abs(rule - top) <= pitch * RULE_NEAR:
+                notes.append(f'罫線 {int(rule)} px とも合う (差 {abs(rule - top):.0f} px．案 7)')
+    parts['comp_left'] = left
+    parts['body_top'] = top
+    parts['notes'] = notes
     return parts

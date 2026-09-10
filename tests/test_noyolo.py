@@ -161,3 +161,48 @@ def test_黒画素の密度で本体の上端():
     rows = list(range(100, 100 + 20 * PITCH, PITCH))
     top = noyolo.body_top_from_ink(dark, (100, 380), rows, PITCH, max_frac=1.0)
     assert top == 100 + 6 * PITCH
+
+
+# --- 使える案だけを組み合わせたもの (guess_parts_v2) -----------------------
+
+def test_列の等間隔性で組成部の左端():
+    """案 6: 右から続く「周期の強い範囲」の左端を返す"""
+    from comptea import ink
+    img = Image.new('L', (1600, 600), 255)
+    px = img.load()
+    for r in range(15):                       # 左は種名 (不規則)，右は等間隔の値
+        y = 40 + r * 35
+        for x in range(30, 700, 23):
+            for xx in range(x, x + 13):
+                for yy in range(y, y + 16):
+                    px[xx, yy] = 0
+        for x in range(800, 1560, 80):        # 80 px の周期
+            for xx in range(x + 30, x + 44):
+                for yy in range(y + 4, y + 14):
+                    px[xx, yy] = 0
+    dark = ink.binarize(img)
+    left = noyolo.comp_left_by_period(dark, 40, 40 + 15 * 35, 35)
+    assert left is not None and 600 <= left <= 900
+
+
+def test_横罫線で本体の上端():
+    """案 7: いちばん下の長い横罫線を表頭の下線とみなす"""
+    from comptea import ink
+    img = Image.new('L', (900, 400), 255)
+    px = img.load()
+    for x in range(100, 800):                 # 表頭の下線
+        for y in (150, 151):
+            px[x, y] = 0
+    for x in range(200, 260):                 # 本体の短い下線 (罫線ではない)
+        px[x, 300] = 0
+    dark = ink.binarize(img)
+    assert noyolo.body_top_by_rule(dark, 100, 800, 30) in (150.0, 151.0)
+
+
+def test_罫線が無ければ決まらない():
+    from comptea import ink
+    img = Image.new('L', (900, 400), 255)
+    px = img.load()
+    for x in range(200, 260):          # 短い下線だけ (罫線ではない)
+        px[x, 300] = 0
+    assert noyolo.body_top_by_rule(ink.binarize(img), 100, 800, 30) is None
