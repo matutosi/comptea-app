@@ -404,7 +404,46 @@ def find_tables(dark, min_gutter=MIN_GUTTER, min_gap=MIN_GAP,
         if (box[2] - box[0]) * (box[3] - box[1]) < w * h * min_area:
             continue                            # 見出しの札や折り目の汚れ
         result.append(box)
+    result = reach_notes(dark, result)
     return sorted(result, key=lambda b: (b[0], b[1]))
+
+
+NOTE_BLANK = 0.002      # 行の黒画素が幅のこの割合未満なら空白の行
+
+
+def reach_notes(dark, boxes, gap=BLOB_REACH_GAP, blank=NOTE_BLANK):
+    """箱の下端を，**すぐ下に続く注記**まで伸ばす (2026-09-11 ユーザ指摘: 02_p1・02_p2)
+
+    `_reach_down` は塊で切った箱にしか掛かっていませんでした．**帯で切った箱**では
+    表の下の「出現 1 回の種」と調査地の注記が丸ごと落ちます (s01115_02 の 1 表目は
+    1,580 px ぶんが箱の外)．そこには種のデータと地点の情報があるので落とせません．
+
+    塊では拾えません (注記は 1 行ずつが小さく，`BLOB_STOP_AREA` に届かない)．
+    箱の x の幅で黒画素の並びを見て，**空白の行が箱の高さの `gap` ぶん続くまで**
+    下へ辿ります．**他の箱の上端は越えません** (帯で分けた隣の表を巻き込まない)．
+    """
+    if not boxes:
+        return boxes
+    h, w = dark.shape
+    out = []
+    for x1, y1, x2, y2 in boxes:
+        limit_y = min([b[1] for b in boxes
+                       if b[1] >= y2 and min(x2, b[2]) - max(x1, b[0]) > 0] + [h])
+        room = max(10, int((y2 - y1) * gap))
+        prof = dark[:, int(x1):int(x2)].sum(axis=1)
+        thr = max(1.0, (x2 - x1) * blank)
+        bottom, run, y = y2, 0, int(y2)
+        while y < int(limit_y):
+            if prof[y] < thr:
+                run += 1
+                if run > room:
+                    break
+            else:
+                run = 0
+                bottom = y + 1
+            y += 1
+        out.append((x1, y1, x2, int(min(max(bottom, y2), limit_y, h))))
+    return out
 
 
 def check_rotation(image):

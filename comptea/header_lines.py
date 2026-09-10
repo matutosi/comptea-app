@@ -247,6 +247,9 @@ VALUE_INK_THR = 0.1     # 値の側で「字がある」とみなす黒画素 (�
 VALUE_MIN_H = 0.2       # 値の行の高さの下限 (行の高さの倍数)．句読点のかけらを落とす
 
 
+VALUE_GAP_MIN = 0.15    # 連なりの隙間が行の高さのこの倍より近ければ，同じ行としてつなぐ
+
+
 SLANT_BIN = 16          # 傾きを測るときに列をまとめる幅 (px)
 SLANT_MAX = 0.03        # 試す勾配の上限 (約 1.7°)
 SLANT_MIN_W = 8.0       # 領域の幅が行の高さのこの倍未満なら傾きを測らない
@@ -339,6 +342,18 @@ def value_lines(dark, box, pitch, thr=VALUE_INK_THR, min_h=VALUE_MIN_H, info=Non
     lo = max(1.0, float(np.median(prof[prof > 0])) * thr)
     floor = max(2.0, float(pitch) * min_h)
     runs = _runs_above(prof, lo, floor)
+    # **近すぎる連なりはつなぐ** (2026-09-11 ユーザ目視: 07_p3 の「高木層の高さ」は
+    # 値が「−」ばかりで，横棒 (6 px) と数字 (11 px) が 2 px 空いただけで別の行に
+    # なっていた)．行と行の隙間は行の高さの 2 割ほどあるので，それより近いものは
+    # 同じ行．この表の本物の隙間は 7〜13 px，割れていた所は 2 px
+    gap_min = max(3.0, float(pitch) * VALUE_GAP_MIN)
+    merged = []
+    for a, b in runs:
+        if merged and a - merged[-1][1] < gap_min:
+            merged[-1] = (merged[-1][0], b)
+        else:
+            merged.append((a, b))
+    runs = merged
     # **行の高さの 1.4 倍より高い連なりは，その中で閾値を上げて切り直す** (2026-09-10)．
     # 行間の狭いタイプ打ちでは 25 列の字の上下が重なり，投影が行のあいだで 1 割まで
     # 落ちない (14_p4 は 8 行が 1 帯，03_p2 は 8 行)．連なりの中の山の 2〜5 割まで

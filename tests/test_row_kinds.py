@@ -143,3 +143,22 @@ def test_組成の枠線は字と数えない():
     _fill(px, X_COMP[0], X_COMP[0] + 2, ya, yb)             # 枠の左辺 (縦線)
     _fill(px, X_COMP[-1] - 2, X_COMP[-1], ya, yb)           # 枠の右辺 (縦線)
     assert 'heading' in _kinds(img, _df())[6]
+
+
+def test_出現1回の種の見出しを見分ける():
+    """2026-09-11 ユーザ指示: 見出しはそのまま書かれている．1 は漢数字とアラビア数字"""
+    from comptea.row_kinds import kind_of_text
+    for t in ('出現1回の種', '出現一回の種', '出現 1 回 の 種', '出現１回の種'):
+        assert kind_of_text(t) == 'once', t
+    # 独文だけの紙面もある (OCR は ss と読むことがある)
+    assert kind_of_text('Ausserdem je einmal in Lfd. Nr. 1') == 'once'
+    # **見出しの中には種名も並ぶので，見出しを先に見る**
+    assert kind_of_text('出現1回の種 in Lfd.Nr.1: Osmunda japonica ゼンマイ K-+') == 'once'
+
+
+def test_種の行と表頭の項目名():
+    from comptea.row_kinds import kind_of_text
+    assert kind_of_text('ヤマルリソウ') == 'species'
+    assert kind_of_text('Omphalodes japonica ヤマルリソウ K') == 'species'
+    assert kind_of_text('調査年月日') == 'item'
+    assert kind_of_text('') == 'other'

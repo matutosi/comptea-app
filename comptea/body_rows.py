@@ -372,6 +372,51 @@ FLOW_DENS = 0.6             # 下から数えて，またぐ帯がこの割合�
 FLOW_TOP_MIN = 0.6          # 切り始める行は，これ以上の境をまたいでいること
 
 
+FLOW_GUTTER_INK = 0.4       # 種名と組成のあいだの隙間の x のこの割合に字が来たら流し込みの行
+
+
+FLOW_GUTTER_NEAR = 2.0      # 隙間の右端が組成部から行の高さのこの倍より離れていたら使わない
+
+
+def _flow_top(flags, ys, y2, pitch, min_rows, dens):
+    """下から数えて，印の付いた帯の割合が `dens` 以上でいられるいちばん上の y"""
+    best, hit = None, 0
+    for j in range(len(flags) - 1, -1, -1):
+        hit += bool(flags[j])
+        n = len(flags) - j
+        if flags[j] and hit / n >= dens and n >= min_rows:
+            best = j
+    if best is None:
+        return float(y2)
+    top = float(ys[best])
+    if float(y2) - top < min_rows * float(pitch):
+        return float(y2)
+    return top
+
+
+def flow_top_by_gutter(dark, gutter, y1, y2, pitch, ink_min=FLOW_GUTTER_INK,
+                       min_rows=1, dens=FLOW_DENS):
+    """種名と組成のあいだの隙間が埋まる行が下に固まっている範囲の先頭 y (無ければ `y2`)
+
+    本体の行では，種名は種名の枠に，値はセルに収まるので隙間は空きます
+    (12_p1・03_p1 の本体は 0.00〜0.03)．流し込みは文章が幅いっぱいに流れるので
+    埋まります (同 0.41〜0.88)．`running_text_top` の「字と字の間隔」では
+    捕まらない紙面があるので，その控えに使います．
+
+    段落の行間で 1〜2 帯空くことがあるので，**下から数えて埋まった帯の割合が
+    `dens` 以上でいられるいちばん上**まで切ります．
+    """
+    step = max(4, int(pitch))
+    ys = list(range(int(y1), int(y2) - step + 1, step))
+    if not ys:
+        return float(y2)
+    flags = []
+    for y in ys:
+        g = dark[y:y + step, int(gutter[0]):int(gutter[1])]
+        flags.append(bool(g.size) and float(g.any(axis=0).mean()) >= ink_min)
+    return _flow_top(flags, ys, y2, pitch, min_rows, dens)
+
+
 def flow_top_by_edges(dark, edges, y1, y2, pitch, cross_min=FLOW_CROSS_MIN,
                       min_rows=FLOW_MIN_ROWS, dens=FLOW_DENS, top_min=FLOW_TOP_MIN,
                       half=3):
@@ -404,20 +449,8 @@ def flow_top_by_edges(dark, edges, y1, y2, pitch, cross_min=FLOW_CROSS_MIN,
                 k += 1
         fracs.append(k / len(xs))
     flags = [f >= cross_min for f in fracs]
-    best, hit = None, 0
-    for j in range(len(flags) - 1, -1, -1):
-        hit += bool(flags[j])
-        n = len(flags) - j
-        # **先頭の行は，はっきりまたいでいること** (`top_min`)．値の詰まった行が
-        # 弱くまたぐことがあり，そこで切ると本物の最終行を落とす (kinki_079-1)
-        if flags[j] and fracs[j] >= top_min and hit / n >= dens and n >= min_rows:
-            best = j
-    if best is None:
-        return float(y2)
-    top = float(ys[best])
-    if float(y2) - top < min_rows * float(pitch):
-        return float(y2)
-    return top
+    flags = [f and fr >= top_min or f for f, fr in zip(flags, fracs)]
+    return _flow_top(flags, ys, y2, pitch, min_rows, dens)
 
 
 def body_extent_ink(dark, df_loc, df_det=None, names=False):
@@ -457,12 +490,20 @@ def body_extent_ink(dark, df_loc, df_det=None, names=False):
     # **地点の少ない表では，隙間の埋まりでも流し込みを見る** (2026-09-10 ユーザ目視
     # 10 回目: 15_p5 は 4 列で，「字と字の間隔」では文章に見えない)．いまの手で
     # 見つからなかったときだけの控えにする
-    # **地点の少ない表では，組成部の列の境のまたぎでも流し込みを見る** (2026-09-10
-    # ユーザ目視 10 回目: 15_p5 は 4 列で「字と字の間隔」では文章に見えない)．
-    # いまの手で見つからなかったときだけの控え
-    if grow >= y2 and len(xs) - 1 < NARROW_COLS:
-        grow = min(grow, flow_top_by_edges(dark, [float(v) for v in xs[1:-1]],
-                                           y1, y2, pitch))
+    # **「字と字の間隔」で見つからなかったときの控え** (2026-09-10・11 のユーザ目視)．
+    # 種名と組成のあいだの隙間が埋まるかを見る (本体は 0.00〜0.03，流し込みは
+    # 0.41〜0.88)．隙間が取れない紙面 (15_p5) では，組成部の列の境のまたぎで見る
+    if grow >= y2:
+        # **隙間は組成部に接していること** (2026-09-11)．`find_gutter` は種名の領域の
+        # 中の空白を返すことがあり (kinki_079-1 は x 272-297，組成部は 1700)，
+        # そこは字下げの浅い学名で埋まるので，本物の行を流し込みと見てしまう
+        near = (gutter is not None
+                and x_hi - float(gutter[1]) <= FLOW_GUTTER_NEAR * pitch)
+        if near:
+            grow = min(grow, flow_top_by_gutter(dark, gutter, y1, y2, pitch))
+        elif len(xs) - 1 < NARROW_COLS:
+            grow = min(grow, flow_top_by_edges(dark, [float(v) for v in xs[1:-1]],
+                                               y1, y2, pitch))
     if len(edges) < 3 and gutter is None:
         # 境も隙間も測れない(1 地点の表で種名の箱が組成部に接している)．
         # 流し込みの始まりを確かめられないので，下端は検出の格子のまま

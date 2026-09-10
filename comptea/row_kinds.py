@@ -19,6 +19,8 @@
 枠線が見出しの帯に入り，「組成に字がある」と誤判定した (010・066 の各 2 見出し)．
 """
 
+import re
+
 import numpy as np
 import pandas as pd
 
@@ -86,6 +88,70 @@ class _Region:
     def has_ink(self, a, b):
         """`a`〜`b` (画像の y) に字があるか"""
         return self.ink(a, b) >= self.need
+
+
+KANA = set('アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモ'
+           'ヤユヨラリルレロワヲンガギグゲゴザジズゼゾダヂヅデドバビブベボパピプペポ'
+           'ァィゥェォッャュョーヴヵヶ')
+
+MIN_KANA = 3            # カナがこれだけ続けば和名がある
+
+
+# **「出現 1 回の種」の見出し** (2026-09-11 ユーザ指示: そのまま書かれている．
+# ただし 1 は漢数字とアラビア数字の両方がある)．独文は「Außerdem je einmal in
+# Lfd. Nr.」で，OCR は ß を B・s・β と読むことがあるので緩く当てる
+ONCE_JA = re.compile(r'出現\s*[1１一壱]\s*回\s*の?\s*種')
+ONCE_DE = re.compile(r'(?:Au[\u00dfBbs\u03b2]+erdem|je\s*einmal)', re.I)
+
+
+def kind_of_text(text):
+    """1 行の読みから，その行の役割を決める
+
+    Returns:
+        'once' (出現 1 回の種の見出し) / 'item' (表頭の項目名) /
+        'species' (種名) / 'other'
+    """
+    from .correct_text import known_names
+    from .plot_table import match_item
+    t = (text or '').strip()
+    if not t:
+        return 'other'
+    packed0 = t.replace(' ', '')
+    if ONCE_JA.search(t) or ONCE_JA.search(packed0) or ONCE_DE.search(t):
+        return 'once'
+    if match_item(t) is not None:
+        return 'item'
+    # 和名は空白で区切られていることがある (「ア カ マ ツ」)．詰めて引く
+    packed = t.replace(' ', '')
+    for cand in (t, packed):
+        if known_names([cand])[0]:
+            return 'species'
+    # 種の行は「学名 和名 階層 値」が 1 行に並ぶので，カナの**割合**では見ない．
+    # カナが 3 字以上**続く**なら和名がある (辞書に無い古い表記・誤読も含む)．
+    # 表頭の項目名の行は先に `match_item` で拾っているので，ここへは来ない
+    if re.search('[' + ''.join(sorted(KANA)) + ']{%d,}' % MIN_KANA, packed):
+        return 'species'
+    return 'other'
+
+
+def read_kind(img, box, reader=None):
+    """帯 `box` (x1, y1, x2, y2) を読んで，その行の役割を返す
+
+    **行としても文章としても取れるときの決め手**に使います (2026-09-11 ユーザ指示)．
+    黒画素の形だけでは，表の最終行と直下の流し込みの 1 行目が重なると分けられません
+    (kinki_079-1 の「ヤマルリソウ」)．読んで，種名の辞書に当たれば表の行です．
+    """
+    from . import ocr
+    x1, y1, x2, y2 = (int(v) for v in box)
+    if x2 - x1 < 4 or y2 - y1 < 4:
+        return 'other'
+    reader = ocr.READER if reader is None else reader
+    try:
+        cell = np.asarray(img.crop((x1, y1, x2, y2)).convert('RGB'))
+        text = ' '.join(reader.readtext(cell, detail=0, paragraph=True))
+    except Exception:                           # noqa: BLE001  読めなくても進む
+        return 'other'
+    return kind_of_text(text)
 
 
 def _runs(row, gap=2):

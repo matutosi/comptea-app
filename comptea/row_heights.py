@@ -305,7 +305,8 @@ def text_like(dark, xs, a, b, rule):
     return blank / len(xs) < TEXT_BLANK_MIN
 
 
-def extend_edges(edges, prof_comp, prof_all, med, ext, is_text=None, prof_names=None):
+def extend_edges(edges, prof_comp, prof_all, med, ext, is_text=None, prof_names=None,
+                 judge=None):
     """格子の上下端を，組成部の本当の範囲 `ext` まで行の高さで埋める
 
     格子の縦の範囲は `row` の検出で決まり，`_extend_rows_to_block()` は片側 2 行
@@ -323,8 +324,16 @@ def extend_edges(edges, prof_comp, prof_all, med, ext, is_text=None, prof_names=
     流し込み(列の境が埋まる行)は `is_text` で止める．
     **上端は全幅で判断する**．最初の行は種群の見出し(組成部は空)のことが多い．
 
+    **行としても文章としても取れるときは，読んだ内容で決めます** (2026-09-11
+    ユーザ指示)．表の最終行の真下に流し込みの 1 行目があると，帯の下端に文章の字が
+    食い込んで境が埋まり，`is_text` が立ちます (kinki_079-1 の「ヤマルリソウ」は
+    組成の黒画素 695 でしきい値 252 を超えているのに，文章として止まっていた)．
+    `judge(a, b)` が 'species' を返せば表の行とみなします．
+
     Args:
         prof_names: {obj_name: 黒画素の並び}(sname・species_col・layer のうち有るもの)
+        judge: 帯 (a, b) を読んで役割を返す関数．`is_row` と `is_text` が両方
+            立ったときだけ呼ぶ (読むのは表の端の 1〜2 帯だけ)
 
     Returns:
         (境, 下に足した行数, 上に足した行数, 下から落とした行数)
@@ -364,6 +373,17 @@ def extend_edges(edges, prof_comp, prof_all, med, ext, is_text=None, prof_names=
                    if mid(prof_names[k], a, b) >= v * END_MIN_INK)
         return hits >= need
 
+    def is_flow(a, b):
+        """文章の行か (行としても取れるときは，読んだ内容で決める)"""
+        if is_text is None or not is_text(a, b):
+            return False
+        if judge is None or not is_row(a, b):
+            return True
+        # **「出現 1 回の種」の見出しが読めたら流し込み**．そこには種名も並ぶので，
+        # 見出しを先に見る (2026-09-11 ユーザ指示: 見出しはそのまま書かれている．
+        # ただし 1 は漢数字とアラビア数字の両方がある)
+        return judge(a, b) != 'species'
+
     trimmed = 0
     # 行の高さは一定なので，**中央値の 3/4 に満たない末尾の行は無条件に落とす**．
     # 並べ直し(`lattice_rows`)は最後に 0.5〜1.5 行の余りを残し，20 px の余りが
@@ -372,7 +392,7 @@ def extend_edges(edges, prof_comp, prof_all, med, ext, is_text=None, prof_names=
         out.pop()
         trimmed += 1
     while len(out) > 2 and (not is_row(out[-2], out[-1])
-                            or (is_text is not None and is_text(out[-2], out[-1]))):
+                            or is_flow(out[-2], out[-1])):
         out.pop()
         trimmed += 1
     # 足す行は**行の高さのまま**足す(範囲の端で切り詰めると短い行ができ，
@@ -380,7 +400,7 @@ def extend_edges(edges, prof_comp, prof_all, med, ext, is_text=None, prof_names=
     below = 0
     while hi - out[-1] > med * END_MIN_GAP:
         new = out[-1] + med
-        if is_text is not None and is_text(out[-1], new):
+        if is_flow(out[-1], new):
             break                                   # 流し込みに入った
         if not is_row(out[-1], new):
             break
@@ -527,9 +547,25 @@ def fix_row_heights(img, df_loc, df_det=None, tol=ROW_TOL):
                 nc = body[body['obj_name'] == cls]
                 if len(nc):
                     prof_names[cls] = _profile(dark, nc['x1'].min(), nc['x2'].max())
+            # **行としても文章としても取れる帯は，種名の領域を読んで決める**
+            # (2026-09-11 ユーザ指示)．範囲は学名の左端から組成部の手前まで．
+            # 「出現 1 回の種」の見出しはこの幅に書かれており，流し込みの中にも
+            # 種名が並ぶので，**見出しを先に見る**必要がある．読むのは表の端の
+            # 1〜2 帯だけなので速度には響かない
+            nm = body[body['obj_name'].isin(('sname', 'species_col'))]
+            name_box = ((float(nm['x1'].min()), float(cb['x1'].min()))
+                        if len(nm) else None)
+
+            def judge(a, b, box=name_box):
+                if box is None:
+                    return 'other'
+                from . import row_kinds
+                return row_kinds.read_kind(img, (box[0], a, box[1], b))
+
             new, n_below, n_above, n_trim = extend_edges(new, prof, prof_all, med, ext,
                                                          is_text=is_text,
-                                                         prof_names=prof_names)
+                                                         prof_names=prof_names,
+                                                         judge=judge)
             if n_below or n_above or n_trim:
                 grew = True
                 warnings.append(

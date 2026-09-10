@@ -778,6 +778,25 @@ def _locate_header(df: pd.DataFrame, source_image: str, x_edges, warnings: list,
     rows = filter_results(df, source_image, class_plot_row).sort_values(by='y1')
     if rows.empty:
         return []
+    # **表頭は組成部より上にしかない** (2026-09-11 ユーザ指摘: 11_p1 は常在度の総合表で，
+    # 本体の途中の行が `plot_row` として検出され，表頭の帯が y 4085-5744 (本体は
+    # 971-6199) に出ていた)．行の検出の上端より下の `plot_row` は誤検出として捨てる
+    det_rows = filter_results(df, source_image, 'row')
+    if len(det_rows) >= 3:
+        body_top = float(det_rows['y1'].min())
+        keep = rows['y1'] < body_top + float((rows['y2'] - rows['y1']).median())
+        if not keep.all():
+            n_drop = int((~keep).sum())
+            rows = rows[keep]
+            warnings.append(
+                f"組成部の中にあった '{class_plot_row}' の検出 {n_drop} 本を捨てた"
+                '(表頭は組成部より上にしかない)．表頭が本体の途中に出ていたら，'
+                '段階1で確かめる')
+        if rows.empty:
+            warnings.append(
+                f"'{class_plot_row}' の検出がすべて組成部の中にあったため，"
+                '表頭のセルを出力しない．')
+            return []
     if x_edges is None:
         warnings.append(
             f"'{class_plot_row}' はあるが列の位置が決まらないため，"
