@@ -299,6 +299,9 @@ LAYER_GAP_P = 0.8       # 行の高さのこの倍までの隙間は，同じか
 LAYER_MIN_W = 0.25      # かたまりの幅の下限 (行の高さの倍数．5 px 未満は縦罫線の spike)
 LAYER_MAX_W_P = 2.0     # 幅の上限 (行の高さの倍数)
 LAYER_MAX_W_C = 1.5     # 幅の上限 (地点の列の幅の倍数．大きいほうを使う)
+
+
+LAYER_COMP_MIN_W = 0.4  # 境を寄せたあと，組成の 1 列目に残す幅 (列の幅の割合)
 LAYER_THICK_P = 1.5     # 幅がこの倍 (行の高さ) を超えるかたまりは種名とみなし，越えない
 LAYER_CLIP_MIN = 0.05   # はみ出す行がこの割合を超える段だけ直す
 LAYER_PAD = 2           # 決めた範囲の外側に足す余白 (px)
@@ -451,6 +454,22 @@ def refit_layer_width(img, df_loc):
         out = out.copy() if out is df_loc else out
         out.loc[mask, 'x1'] = float(nx1)
         out.loc[mask, 'x2'] = float(nx2)
+        # **階層の右端と組成部の左端は 1 本にする** (2026-09-10．和名と階層の境と
+        # 同じ規則)．記号が組成部の左端より右へ出ている紙面があり (09_p5 は
+        # 「B1」「B2」の末尾が 20 px 食い込む)，どちらかが必ず字を割る．
+        # 組成の 1 列目の左端をこちらへ寄せる (列の数は変えない)
+        c_left = float(comp['x1'].min())
+        c_w = float(np.median(comp.groupby('col')['x2'].max()
+                              - comp.groupby('col')['x1'].min()))
+        # 1 列目が細くなりすぎるなら動かさない (値が入らなくなる)
+        if nx2 > c_left and (c_w <= 0 or c_left + c_w - nx2 >= c_w * LAYER_COMP_MIN_W):
+            first = ((out['block'] == block) & (out['obj_name'] == 'comp')
+                     & (out['x1'].astype(float) <= c_left + 0.5))
+            out.loc[first, 'x1'] = float(nx2)
+            warnings.append(
+                f'段{block}: 階層の記号が組成部の左端より右へ出ていたので，'
+                f'**組成の 1 列目の左端を階層の右端に合わせた** '
+                f'({c_left:.0f} → {nx2:.0f} px)．階層と組成の境は 1 本')
         changed = True
         warnings.append(
             f'段{block}: **階層の列の幅を黒画素で決め直した** '

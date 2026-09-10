@@ -50,3 +50,27 @@ def test_行が少なければ判定しない():
     # 20 px の刻みで 30 行に満たない並び (行の少ない表では相関が当てにならない)
     prof = _profile(12, 40)
     assert not rh.is_half_pitch(prof, 0, len(prof), 20.0)
+
+
+def test_刻みを選び直す():
+    """中央値が低く出ていたら，自己相関の強い刻みへ選び直す (13_p2 型)"""
+    pitch = 35
+    prof = np.zeros(35 * 40, dtype=float)
+    for i in range(40):
+        prof[i * pitch + 12:i * pitch + 24] = 100.0
+    out = rh.refine_pitch(prof, 0, len(prof), 29.0)
+    assert abs(out - pitch) <= 1
+
+
+def test_刻みが合っていれば動かさない():
+    pitch = 35
+    prof = np.zeros(35 * 40, dtype=float)
+    for i in range(40):
+        prof[i * pitch + 12:i * pitch + 24] = 100.0
+    assert rh.refine_pitch(prof, 0, len(prof), 35.0) == 35.0
+
+
+def test_相関が弱ければ動かさない():
+    rng = np.random.default_rng(0)
+    prof = rng.random(35 * 40) * 10
+    assert rh.refine_pitch(prof, 0, len(prof), 29.0) == 29.0

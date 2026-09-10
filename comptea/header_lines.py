@@ -201,18 +201,25 @@ SNAP_MIN_BAND = 0.6     # 寄せた結果でも，帯の高さは行の高さの
                         # 01_p2 で 2 本，03_p2 で 4 本．2026-09-09)
 
 
-def snap_to_gap(edges, dark, value_x, pitch, reach=SNAP_REACH):
+def snap_to_gap(edges, dark, value_x, pitch, reach=SNAP_REACH, slope=0.0):
     """境を，値の側の黒画素が**いちばん少ない** y へ寄せる (順序は保つ)
 
     項目名の直前に置くだけでは，次の項目の値の 1 行目に乗る (値と項目名はほぼ同じ
     高さに組まれる)．本体と違って「黒画素ゼロ」は使えない: 地点が 25 列もあると，
     どの y にもどれかの列の字がある．いちばん少ない所へ寄せる．
+
+    `slope` を渡すと，**その傾きに沿って**数えた投影で寄せる (2026-09-10)．
+    帯は傾きに沿って作ってあるのに，寄せる先を水平な投影で測ると，左右の
+    谷の中間へ引き戻され，端の列で字を割った (03_p2 の右端)．
     """
     e = [float(v) for v in edges]
     if len(e) < 3:
         return np.array(e)
     x1, x2 = int(value_x[0]), int(value_x[1])
-    prof = dark[:, x1:x2].sum(axis=1).astype(float)
+    if slope:
+        prof = slanted_profile(dark, x1, x2, slope)
+    else:
+        prof = dark[:, x1:x2].sum(axis=1).astype(float)
     h = len(prof)
     r = max(1, int(reach * pitch))
     band = max(2, int(SNAP_MIN_BAND * pitch))
@@ -240,7 +247,72 @@ VALUE_INK_THR = 0.1     # 値の側で「字がある」とみなす黒画素 (�
 VALUE_MIN_H = 0.2       # 値の行の高さの下限 (行の高さの倍数)．句読点のかけらを落とす
 
 
-def value_lines(dark, box, pitch, thr=VALUE_INK_THR, min_h=VALUE_MIN_H):
+SLANT_BIN = 16          # 傾きを測るときに列をまとめる幅 (px)
+SLANT_MAX = 0.03        # 試す勾配の上限 (約 1.7°)
+SLANT_MIN_W = 8.0       # 領域の幅が行の高さのこの倍未満なら傾きを測らない
+
+
+def slant_profile(clean, pitch, bin_w=SLANT_BIN, max_slope=SLANT_MAX):
+    """**傾きに沿って**黒画素を数えた投影と，採った勾配を返す (2026-09-10)
+
+    紙面が 0.5° 傾いているだけで，幅 2000 px では行が 19 px ずれ，行と行の谷が
+    埋まります (03_p2 の値の側は 17 行が 2 つの連なりになり，5% 分位でも 39 と
+    しきい値 15 を下回らなかった)．「行間の狭いタイプ打ちで行がつながる」と
+    見ていたものの正体はこれで，紙面の傾きでした．
+
+    列をまとめた小さな投影を作り，勾配を変えながらずらして足し合わせ，山が
+    いちばん鋭くなる (二乗和が最大の) 勾配を採ります．返す投影は領域の**中央**の
+    座標系のもので，列ごとの上下は `row_skew` があとで付けます．
+    """
+    h, w = clean.shape
+    if w < max(bin_w * 2.0, float(pitch) * SLANT_MIN_W):
+        return clean.sum(axis=1).astype(float), 0.0
+    n = max(2, int(np.ceil(w / float(bin_w))))
+    xs = np.linspace(0, w, n + 1).astype(int)
+    bins = [clean[:, a:b].sum(axis=1).astype(float)
+            for a, b in zip(xs[:-1], xs[1:])]
+    xc = (xs[:-1] + xs[1:]) / 2.0 - w / 2.0
+    drift = int(min(max_slope * w, float(pitch) * 4.0))
+    if drift < 1:
+        return clean.sum(axis=1).astype(float), 0.0
+    best, best_s, best_v = None, 0.0, -1.0
+    for d in range(-drift, drift + 1):
+        s = d / float(w)
+        prof = _shift_sum(bins, xc, h, s)
+        v = float((prof ** 2).sum())
+        if v > best_v:
+            best, best_s, best_v = prof, s, v
+    return best, best_s
+
+
+def _shift_sum(bins, xc, h, s):
+    """短冊の投影 `bins` を，勾配 `s` に沿ってずらして足す (領域の中央の座標系)"""
+    prof = np.zeros(h, dtype=float)
+    for k in range(len(bins)):
+        sh = int(round(-s * xc[k]))
+        if sh == 0:
+            prof += bins[k]
+        elif sh > 0:
+            prof[sh:] += bins[k][:h - sh]
+        else:
+            prof[:h + sh] += bins[k][-sh:]
+    return prof
+
+
+def slanted_profile(dark, x1, x2, slope, bin_w=SLANT_BIN):
+    """`dark[:, x1:x2]` を，決まった勾配 `slope` に沿って数えた投影 (全高)"""
+    sub = dark[:, int(x1):int(x2)]
+    h, w = sub.shape
+    if w < 1:
+        return np.zeros(h, dtype=float)
+    n = max(1, int(np.ceil(w / float(bin_w))))
+    xs = np.linspace(0, w, n + 1).astype(int)
+    bins = [sub[:, a:b].sum(axis=1).astype(float) for a, b in zip(xs[:-1], xs[1:])]
+    xc = (xs[:-1] + xs[1:]) / 2.0 - w / 2.0
+    return _shift_sum(bins, xc, h, float(slope))
+
+
+def value_lines(dark, box, pitch, thr=VALUE_INK_THR, min_h=VALUE_MIN_H, info=None):
     """値の側の行 (中心, 上端, 下端) を**黒画素の連なり**から作る
 
     **OCR の箱では駄目でした** (2026-09-10 に測った)．値は列ごとに数字が並ぶので，
@@ -258,7 +330,10 @@ def value_lines(dark, box, pitch, thr=VALUE_INK_THR, min_h=VALUE_MIN_H):
     clean = row_track.clean_rules(dark, x1, x2, y1, y2, float(pitch))
     if clean.size == 0:
         return []
-    prof = clean.sum(axis=1).astype(float)
+    # **傾きに沿って数える**．全幅で真横に数えると，0.5° の傾きでも行が重なる
+    prof, slope = slant_profile(clean, float(pitch))
+    if info is not None:
+        info['slope'] = float(slope)
     if not (prof > 0).any():
         return []
     lo = max(1.0, float(np.median(prof[prof > 0])) * thr)
@@ -486,7 +561,10 @@ def header_bands(img, box, value_x, pitch=None, reader=None, dark=None, info=Non
         # 項目名の行から作った帯は，値が 2〜3 行にわたる項目や項目名の印字が値と
         # ずれた表で境が値の行を割る．値の行 (黒画素の連なり) の間なら字を割らない．
         # 項目名の無い帯は段階 3 (`plot_table`) が前の項目の続きとして合成する
-        vs = value_lines(dark, (value_x[0], box[1], value_x[1], box[3]), float(pitch))
+        _vinfo = {} if info is None else info
+        vs = value_lines(dark, (value_x[0], box[1], value_x[1], box[3]),
+                         float(pitch), info=_vinfo)
+        slope = float(_vinfo.get('slope', 0.0) or 0.0)
         if info is not None:
             info['spans'] = spans
             info['values'] = vs
@@ -494,12 +572,70 @@ def header_bands(img, box, value_x, pitch=None, reader=None, dark=None, info=Non
         if len(vs) >= MIN_LINES:
             edges = bands_from_value_lines(vs, float(edges[0]), float(edges[-1]))
             # 境を値の側の黒画素が最少の y へ寄せる (つながった行を切り直した境は
-            # 字に乗ることがある．2026-09-10)
-            edges = snap_to_gap(edges, dark, value_x, float(pitch))
+            # 字に乗ることがある．2026-09-10)．傾きに沿って数えた投影で
+            edges = snap_to_gap(edges, dark, value_x, float(pitch), slope=slope)
         else:
             edges = bands_from_pairs(spans, vs, edges, pitch=float(pitch))
-            edges = snap_to_gap(edges, dark, value_x, float(pitch))
+            edges = snap_to_gap(edges, dark, value_x, float(pitch), slope=slope)
     edges = drop_unvalued(edges, dark, value_x)
     if edges is None or len(edges) < MIN_LINES + 1:
         return None
     return edges
+
+
+SHEAR_MIN = 2.0         # 端の列のずれがこの px 未満なら傾けない
+
+
+def shear_header_values(img, df_loc, dark=None):
+    """表頭の値のセルを，**表頭の領域で測った傾き**で列ごとに上下させる (2026-09-10)
+
+    値の帯は `value_lines` が領域の中央の座標で作るので，端の列では傾きのぶん
+    ずれる．組成部の傾き (`row_skew`) を掛けると 2〜12 px 合わず，02_p2・05_p1
+    では組成部の傾きが「小さい」と判定されて補正が働かない．ここでは表頭の値の
+    領域そのもので勾配を測る (`slant_profile`)．
+
+    工程の**最後**に掛けます．途中で掛けると `col_edges.align_header_columns` が
+    列ごとに違う y を別の帯と数え，セルが 6 倍に膨れた．
+
+    Returns:
+        (直した格子, 警告のリスト)．直す所が無ければ元の格子をそのまま返す
+    """
+    if df_loc is None or len(df_loc) == 0 or 'obj_name' not in df_loc.columns:
+        return df_loc, []
+    hv = df_loc['obj_name'] == 'header_value'
+    if not hv.any() or 'block' not in df_loc.columns:
+        return df_loc, []
+    from . import row_track
+    comp = df_loc[df_loc['obj_name'] == 'comp']
+    if dark is None:
+        dark = ink.binarize(img)
+    out = df_loc
+    warnings = []
+    for block, g in df_loc[hv].groupby('block', sort=True):
+        x1, x2 = int(g['x1'].min()), int(g['x2'].max())
+        y1, y2 = int(g['y1'].min()), int(g['y2'].max())
+        cb = comp[comp['block'] == block] if 'block' in comp.columns else comp
+        pitch = float(np.median(cb['y2'] - cb['y1'])) if len(cb) else float(
+            np.median(g['y2'] - g['y1']))
+        if x2 - x1 < 4 or y2 - y1 < 4 or not pitch > 0:
+            continue
+        clean = row_track.clean_rules(dark, x1, x2, y1, y2, pitch)
+        if clean.size == 0:
+            continue
+        _prof, slope = slant_profile(clean, pitch)
+        edge = abs(slope) * (x2 - x1) / 2.0
+        if slope == 0.0 or edge < SHEAR_MIN:
+            continue
+        x0 = (x1 + x2) / 2.0
+        mask = hv & (df_loc['block'] == block)
+        xc = (df_loc.loc[mask, 'x1'].astype(float) + df_loc.loc[mask, 'x2'].astype(float)) / 2.0
+        dy = np.round(slope * (xc - x0))
+        out = out.copy() if out is df_loc else out
+        out.loc[mask, 'y1'] = out.loc[mask, 'y1'].astype(float) + dy
+        out.loc[mask, 'y2'] = out.loc[mask, 'y2'].astype(float) + dy
+        deg = float(np.degrees(np.arctan(slope)))
+        warnings.append(
+            f'段{block}: **表頭の値の帯を，表頭で測った傾き {deg:+.2f}° で列ごとに'
+            f'上下させた**(幅 {x2 - x1} px で左右のずれ {2 * edge:.0f} px)．'
+            '組成部の傾きとは別に測っている')
+    return out, warnings

@@ -38,6 +38,15 @@ MIN_INK = 4             # セルに字があるとみなす黒画素の数
 
 
 MIN_SHIFT = 2.0         # 端のセルのずれがこの px 未満なら直さない
+# **傾きを掛けない列** (2026-09-10)．表頭の項目名の帯は `header_lines.
+# bands_from_own_lines` が**その列自身の黒画素**から作るので，位置には紙面の
+# 傾きがすでに入っている．そこへ組成部の傾きをもう一度掛けると，列の中心が
+# 組成部の中心から離れているぶんだけ帯が字の上へずれる (03_p2 の和文は
+# -13 px ずれ，境 16 本のうち 13 本が字を割っていた)．
+# 値の帯 (`header_value`) も同じ理由で外す．こちらは表頭の領域で測った勾配で
+# `locate._locate_header` が傾けている．組成部の勾配とは 2〜12 px 違い，
+# 02_p2・05_p1 では組成部の傾きが「小さい」と判定されて補正が働かない．
+NO_SKEW = ('header_item', 'header_item_ja', 'header_value')
 
 
 MAX_DEG = 1.5           # これを超える推定は信じない(deskew.py と同じ)
@@ -104,6 +113,8 @@ def shear_cells(df, slope, x0):
     out = df.copy()
     xc = (out['x1'].astype(float) + out['x2'].astype(float)) / 2.0
     dy = np.round(slope * (xc - x0))
+    if 'obj_name' in out.columns:
+        dy = dy.where(~out['obj_name'].isin(NO_SKEW), 0.0)
     out['y1'] = out['y1'].astype(float) + dy
     out['y2'] = out['y2'].astype(float) + dy
     return out

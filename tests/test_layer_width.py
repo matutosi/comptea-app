@@ -133,10 +133,35 @@ def test_行番号と他の列は変わらない():
     out, _w = layer_col.refit_layer_width(img, df)
     assert len(out) == len(df)
     assert out.row.nunique() == df.row.nunique()
-    for cls in ('sname', 'comp'):
-        a = df[df.obj_name == cls].sort_index()[['x1', 'x2', 'y1', 'y2']].values
-        b = out[out.obj_name == cls].sort_index()[['x1', 'x2', 'y1', 'y2']].values
-        assert np.array_equal(a, b)
+    a = df[df.obj_name == 'sname'].sort_index()[['x1', 'x2', 'y1', 'y2']].values
+    b = out[out.obj_name == 'sname'].sort_index()[['x1', 'x2', 'y1', 'y2']].values
+    assert np.array_equal(a, b)
+    # 組成部で動くのは**1 列目の左端だけ** (階層と境を 1 本にするため)
+    a = df[df.obj_name == 'comp'].sort_index()
+    b = out[out.obj_name == 'comp'].sort_index()
+    assert np.array_equal(a[['x2', 'y1', 'y2']].values, b[['x2', 'y1', 'y2']].values)
+    moved = a['x1'].values != b['x1'].values
+    assert set(a.loc[moved, 'x1']) <= {400.0, 460.0}
+
+
+def test_階層と組成の境を1本にする():
+    """記号が組成部の左端より右へ出ていたら，組成の 1 列目の左端を寄せる"""
+    img = _sheet(sym=(395, 465))
+    df = _df(layer_x=(400, 460))
+    out, _w = layer_col.refit_layer_width(img, df)
+    _x1, x2 = _layer_x(out)
+    comp = out[out.obj_name == 'comp']
+    assert float(comp['x1'].min()) == x2        # 境が 1 本
+    assert x2 > 460                             # 記号のぶん右へ出ている
+
+
+def test_1列目が細くなりすぎるなら動かさない():
+    img = _sheet(sym=(395, 512))                # 帯の外へ大きくはみ出した塊
+    df = _df(layer_x=(400, 460))
+    out, _w = layer_col.refit_layer_width(img, df)
+    comp = out[out.obj_name == 'comp']
+    assert float(comp['x1'].min()) >= 460 - 0.5
+    assert float(comp['x1'].min()) <= 460 + 60 * (1 - layer_col.LAYER_COMP_MIN_W) + 1
 
 
 def test_階層が無ければ何もしない():
