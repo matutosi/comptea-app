@@ -176,6 +176,11 @@ pytest --runslow      # 検出と読み取りも実際に走らせる(30 秒ほ�
 | `tests/test_row_kinds.py` | 行の種類の見分け (見出し・学名だけの行・凡例・枠線・行を落とさないこと) |
 | `tests/test_row_track_rules.py` | 傾いた縦罫線の消し方と，単位を切るときの雑音の床 |
 | `tests/test_header_lines.py` | 表頭の項目行を OCR の検出器の箱から作る (束ね方・帯・表題の除外．`slow` は描いた表頭で検出器を走らせる) |
+| `tests/test_blob_split.py` | 縮小した塊での切り分け (細い隙間・注記を残す・覆う塊は切らない・段落に割れる紙面) |
+| `tests/test_col_reach.py` | 組成部の右端の外の列を足す (本体と表頭の両方に字・常在度のはみ出し・次の段・画像の端) |
+| `tests/test_block_bottom.py` | 折り返した右の段の下端を左の段にそろえる (左の行を写す・右が長ければ触らない) |
+| `tests/test_stray_anchor.py` | 段の目印の偽物を縦の重なりで捨てる (縦に分かれた検出は 1 つの段にまとめる) |
+| `tests/test_header_synth.py` | `header_col` が無くても項目名の字があれば項目名の列を補う (罫線だけ・狭い領域では補わない) |
 | `tests/test_apps.py` | Streamlit の 4 アプリを画面まで走らせる |
 | `tests/test_shared.py` | 工程のあいだの受け渡し (zip・見本・検出の返り) |
 | `tests/test_pipeline.py` | 見本 1 枚の通し (`slow` は 3 段を続けて回す) |

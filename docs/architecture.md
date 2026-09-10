@@ -82,7 +82,27 @@ shift.
   at all. The cut is made at blank bands — **vertically first, then horizontally inside
   each vertical part**, never the other way round, or the gap between the species-name
   column and the composition body would split a single table. Loads PDFs through
-  PyMuPDF, lifting the embedded scan rather than re-rendering it
+  PyMuPDF, lifting the embedded scan rather than re-rendering it.
+  A blank band has to cross the whole sheet, so a gap narrower than the 120 px floor
+  leaves tables joined (s01115_09's is 64 px, and its 5 tables came out as 3), which is
+  what `blob_boxes()` / `split_by_blobs()` fix (2026-09-10, user's idea): **shrink the
+  page and one table becomes one connected component**. The shrink is what matters —
+  a block of 8×8 counts as ink when **4 or more of its pixels** are dark; averaging
+  instead washes out a body of nothing but dots and leaves blobs made of titles and
+  names only. No dilation is applied: "ink if any" already acts as one, and dilating on
+  top of it merges the whole sheet (blob count across 23 sheets goes 74 → 144). Blobs
+  alone do not beat bands (bands 64/68 tables and 17/23 sheets exact, blobs 74/68 and
+  18/23), because they also split single tables, so they are applied **only inside a box
+  the bands already produced**, and only when the division is unambiguous: 2–4 blobs,
+  each ≥ 5 % of the box (10 % would lose Tab.51 on 09, which is 5.5 %), together
+  ≤ 85 % of it. Each blob is then stretched down to the next blob below it, or to the
+  bottom of the box — the note under a table (survey site, date, source: the only place
+  the plot information appears when the header lacks it) sits below the table with a gap
+  and would otherwise be cropped away; it is never stretched sideways, which would
+  swallow the neighbouring table. Against the truth (68 tables read off the sheets'
+  corner labels) this goes from 64/68 tables and 17/23 sheets to **70/68 and 21/23**;
+  the two that remain (16, 21) are bands over-cutting, and their extra piece is a sliver
+  that produces no grid
 - `strips.py`: Detects a table with far more plots than the detector was trained on
   by cutting the composition body into groups of plots, the species-name columns kept
   at the head of each strip, then mapping the boxes back to the original coordinates so
@@ -366,7 +386,36 @@ shift.
   dropped as title or legend lines. Do not use the box height as the clustering
   threshold (boxes can span two lines and merge neighbours) nor the box spacing to
   estimate the pitch (German and Japanese on the same line sit 8 px apart and halve
-  it). Fewer than 3 lines falls back to the projection bands
+  it). Fewer than 3 lines falls back to the projection bands.
+  When no `header_col` box is detected at all, `locate._guess_header_col()` builds the
+  item-name region from the `header` box's left edge to the first value column
+  (2026-09-10): item names are on the sheet but undetected on 11 typed tables
+  (s01115_14_p5, 15_p1, 15_p2, 15_p4, 21_p3, …), which left the header as values only.
+  The region is taken when it is at least 3 row pitches wide and 3 or more item bands
+  carry ink (thin vertical rules excluded); `header_cols.py` then places the
+  German/Japanese divider as usual
+- `col_reach.py`: Adds plot columns that lie **to the right of the last `col`
+  detection** (2026-09-10). `axes.locate_edges()` only interpolates between
+  detections, so an undetected edge column is lost outright (kinki_006 col 14, s01115_08_p2
+  col 24, 04_p2 cols 8–10, 15_p3 cols 25–28). Starting from the last boundary it steps
+  one column pitch at a time, ending each band at the nearest print gap
+  (`col_edges.plot_gaps`), and keeps the band only while it carries ink **both in the
+  body and in the header rows** (0.3 × the median of the existing columns); the three
+  tables with ink beyond the last column that is *not* a plot column are all constancy
+  text spilling over (10_p2's "II(+-2)", roman numerals on kinki_063-1 and 04_p1) and
+  have an empty header there. Without a header the test is the share of rows with ink
+  (≥ 0.3). A column cut by the page edge is added if 80 % of it fits (17_p1's col 120);
+  on a two-block sheet the next block's name column is the limit. Two companion rules
+  in `blocks.py`: `drop_stray_anchors()` removes a block anchor (`sname`/`species_col`)
+  that does not overlap the tallest anchor vertically — a note below the table detected
+  as `sname` on 04_p2 (149 px high at y 6447) was creating a second block whose left
+  edge blocked the reach; anchors of one column split into stacked boxes (01_p3, 12_p1)
+  overlap in x and are merged first, which a plain height ratio would have dropped —
+  and `align_block_bottoms()` extends the right block of a folded species list down to
+  the left block's bottom by copying the left block's row bands (user instruction,
+  2026-09-10: kinki_060's last right-hand row was outside its boxes and lost; blank
+  rows on genuinely shorter right blocks are accepted). It runs **after**
+  `row_heights.py`, because rows added before it were trimmed as ink-less trailing rows
 - `make_labels.py` / `build_dataset.py`: Turn a finished grid back into labelme and
   YOLO annotations, cut into page-sized tiles, so a new source can be trained on
   without labelling it by hand. Only tables whose checks pass are used, and the
