@@ -14,6 +14,7 @@
 import re
 import unicodedata
 
+import numpy as np
 import pandas as pd
 
 import Levenshtein
@@ -166,13 +167,31 @@ def plot_table(df: pd.DataFrame, text_col: str = 'corrected') -> pd.DataFrame:
     unknown = []
     n_joined = 0
     current = None
+    # 値の帯と項目名の帯は**別々に切る**ので，y が一致するとは限らない
+    # (項目名は値と上下にずれて印字され，行の数も違う．2026-09-10)．
+    # 帯どうしの縦の重なりがいちばん大きいものを組にする
+    band_of = dict(zip(values['y1'], values['y2'])) if 'y2' in values else {}
+
+    def pick(src, y1):
+        if src.empty:
+            return None
+        if 'y2' not in src.columns or y1 not in band_of:
+            hit = src[src['y1'] == y1]
+            return hit.iloc[0] if not hit.empty else None
+        a, b = float(y1), float(band_of[y1])
+        ov = (np.minimum(src['y2'].astype(float), b)
+              - np.maximum(src['y1'].astype(float), a))
+        if not len(ov) or ov.max() <= 0:
+            return None
+        return src.loc[ov.idxmax()]
+
     for y1 in sorted(values['y1'].unique()):
         label = None
         raw = ''
         for src in (names_ja, names_de):
-            hit = src[src['y1'] == y1]
-            if not hit.empty:
-                t = hit.iloc[0][text_col]
+            hit = pick(src, y1)
+            if hit is not None:
+                t = hit[text_col]
                 if isinstance(t, str) and t.strip():
                     raw = raw or t
                     label = match_item(t)

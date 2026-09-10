@@ -363,6 +363,22 @@ def bands_from_pairs(item_spans, value_spans, edges, pitch=None):
     return np.maximum.accumulate(np.array(out, dtype=float))
 
 
+def bands_from_own_lines(dark, box, pitch, fallback):
+    """項目名の領域 `box` の**自分の行**から帯を作る (2026-09-10 ユーザ指摘 2)
+
+    値の帯をずらして寄せるだけでは，項目名の字を横切る境が残ります．項目名の行の
+    数は値と違い (09_p1 は独文 9 行に対し値 12 行)，どう動かしても余る境が字に乗る
+    ためです．項目名の側も黒画素の連なりで行を切り，その間を境にします．
+    段階 3 (`plot_table`) は帯どうしの縦の重なりで組にするので，数が違ってよい．
+
+    行が 3 つ未満なら `fallback` (値の帯をずらしたもの) をそのまま返します．
+    """
+    lines = value_lines(dark, box, pitch)
+    if len(lines) < MIN_LINES:
+        return np.asarray(fallback, dtype=float)
+    return bands_from_value_lines(lines, float(box[1]), float(box[3]))
+
+
 def bands_from_value_lines(value_spans, top, bottom):
     """値の側の行 (黒画素の連なり) の**あいだ**を境にして帯を作る (1 行 1 帯)
 
@@ -474,6 +490,7 @@ def header_bands(img, box, value_x, pitch=None, reader=None, dark=None, info=Non
         if info is not None:
             info['spans'] = spans
             info['values'] = vs
+            info['boxes'] = boxes        # 独文と和文を x で分けてずれを取るため
         if len(vs) >= MIN_LINES:
             edges = bands_from_value_lines(vs, float(edges[0]), float(edges[-1]))
             # 境を値の側の黒画素が最少の y へ寄せる (つながった行を切り直した境は

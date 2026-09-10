@@ -168,11 +168,18 @@ LAYER_BLOB_MAX_W = 3.5    # 同上限 (これを超えるものは階層の列�
                           # ような 2 つ組の記号は 3.2 行ぶんある: 06_p2 は 111 px / 35 px)
 
 
-LAYER_BLOB_ROWS = 0.4     # 行のこの割合より少ない行にしか字が無いかたまりは，
+LAYER_BLOB_ROWS = 0.3     # 行のこの割合より少ない行にしか字が無いかたまりは，
                           # 種名のはみ出しとみなす．**距離では分けられない** (記号が
                           # 和名の枠に接している表がある: 079-1・06_p2・17_p1・20_p3 は
                           # 隙間の先頭からかたまりが始まる)．はみ出すのは長い和名だけ
-                          # なので行の割合が低く，記号はほとんどの行にある
+                          # なので行の割合が低く，記号はほとんどの行にある．
+                          # **0.4 では届かない表がある** (21_p3 は 0.37．見出しの行には
+                          # 記号が無いので，行の多い表ほど割合が下がる．2026-09-10)
+
+
+LAYER_BLOB_SPLIT = 1.2    # 上限より太いかたまりは，左からこの幅 (行の高さの倍数) を
+                          # 切り出して階層として試す (20_p3 は階層と未検出の組成 1 列が
+                          # つながって 4.9 行になり，丸ごと落ちていた)
 
 
 def _gap_text_blob(dark, gx1, gx2, gy1, gy2, pitch):
@@ -202,7 +209,15 @@ def _gap_text_blob(dark, gx1, gx2, gy1, gy2, pitch):
     hi_w = LAYER_BLOB_MAX_W * pitch
     n_row = max(1, int(round((gy2 - gy1) / pitch)))
     best, best_r = None, -1.0
+    # **上限より太いかたまりは，左から 1.2 行ぶんを切り出して試す** (2026-09-10)．
+    # 階層の記号と，検出されなかった組成の左 1 列がつながることがある
+    # (20_p3 は 4.9 行の 1 つのかたまりになり，丸ごと落ちていた)
+    spans = []
     for a, b in zip(starts.tolist(), ends.tolist()):
+        spans.append((a, b))
+        if b - a > hi_w:
+            spans.append((a, a + int(LAYER_BLOB_SPLIT * pitch)))
+    for a, b in spans:
         if b - a < lo_w or b - a > hi_w:
             continue
         # 行の何割に字があるか (種名のはみ出しは長い和名の行だけなので低い)
@@ -459,6 +474,10 @@ def check_body_reach(df, source_image, y_edges):
 
 
 REACH_MARGIN = 10         # 右端の外の列を足すとき，次の段の種名の左端からこれだけ手前で止める
+
+
+NAME_SNAP_REACH = 0.9     # 項目名の帯の境を寄せる範囲 (行の高さの倍数)．値の側の
+                          # 0.4 では，項目名の行の数が値と違う表で字に届かない
 
 
 HEAD_COL_MIN_W = 3.0      # 項目名の領域の幅の下限 (行の高さの倍数)
@@ -838,10 +857,6 @@ def _locate_header(df: pd.DataFrame, source_image: str, x_edges, warnings: list,
             # 組成部の「行番号は共有し，y は列ごとに持つ」と同じ
             name_dy = header_lines.name_offset(
                 hinfo.get('spans', []), hinfo.get('values', []), pitch)
-            if abs(name_dy) >= 3:
-                warnings.append(
-                    f'表頭の項目名は値より {name_dy:+.0f} px ずれて組まれているので，'
-                    '項目名の帯だけそのぶんずらした(帯の対応は同じ)．')
             if len(ocr_edges) != len(h_edges):
                 warnings.append(
                     f'表頭の項目行は，検出({len(h_edges) - 1} 行)と'
@@ -896,23 +911,58 @@ def _locate_header(df: pd.DataFrame, source_image: str, x_edges, warnings: list,
                 f'黒画素の谷 {split:.0f} px へ移した．'
                 '段階1で和名の列に字がそろって入っているかを目で確かめる')
         right = split
-    n_edges = np.asarray(h_edges, dtype=float) + name_dy
+    # **独文と和文は別々にずらす** (2026-09-10 ユーザ指摘: 08_p1・09_p1 などで独文だけ
+    # 帯が字を横切っていた)．両者は上下にずれて印字されるので，混ぜた中央値は
+    # どちらにも合わない．境 `right` が決まったここで，枠ごとにずれを取り直す
+    boxes = hinfo.get('boxes', []) if img is not None else []
+    vals = hinfo.get('values', [])
+    dy_de = dy_ja = name_dy
+    if boxes and vals:
+        de = [b for b in boxes if (b[0] + b[2]) / 2 < right]
+        ja = [b for b in boxes if (b[0] + b[2]) / 2 >= right]
+        if len(de) >= 3:
+            dy_de = header_lines.name_offset(
+                header_lines.line_spans(de, pitch=pitch), vals, pitch)
+        if len(ja) >= 3:
+            dy_ja = header_lines.name_offset(
+                header_lines.line_spans(ja, pitch=pitch), vals, pitch)
+    if abs(dy_de) >= 3 or abs(dy_ja) >= 3:
+        warnings.append(
+            f'表頭の項目名は値より独文 {dy_de:+.0f} px・和文 {dy_ja:+.0f} px ずれて'
+            '組まれているので，項目名の帯だけそのぶんずらした(帯の対応は同じ)．')
+    n_edges = np.asarray(h_edges, dtype=float) + dy_de
     # ずらしたあと，境を**項目名の列の字の間の空白**へ寄せる (組成部の
     # `fit_edges` と同じ考え．中央値のずらしだけでは行ごとの差が残り，003 では
     # 境が項目名の下端の 1〜16 px 内側を通っていた．2026-09-10)
-    if img is not None and len(n_edges) >= 3:
-        from . import header_lines as _hl
-        n_edges = _hl.snap_to_gap(n_edges, ink.binarize(img), (left, float(x_edges[0])),
-                                  float(median_h))
+    from . import header_lines as _hl
+    # **項目名の帯は，項目名自身の行から作る** (2026-09-10 ユーザ指摘 2)．
+    # 値の帯をずらして寄せるだけでは足りない．項目名の行の数は値と違い
+    # (09_p1 は独文 9 行に対し値 12 行)，どう動かしても字を横切る境が残る．
+    # 段階 3 は帯どうしの縦の重なりで組にするので，数が違ってよい
+    # **和文が正**．独文は重視しない (2026-09-10 ユーザ指示: 日本語部分が重要)．
+    # 独文の帯も自分の行から作るが，取れなければ値の帯をずらしたもので構わない
+    dark_img = ink.binarize(img) if img is not None else None
+    if dark_img is not None:
+        n_edges = _hl.bands_from_own_lines(
+            dark_img, (left, float(h_edges[0]), right, float(h_edges[-1])),
+            float(median_h), n_edges)
+    # 帯の数は値と違ってよいので，印もその数で作り直す
     out.append(coord_item(np.array([left, right]), n_edges,
-                          obj_name='header_item', y_notes=h_notes))
+                          obj_name='header_item',
+                          y_notes=axis_notes(n=len(n_edges) - 1)))
     # 項目名は2言語で入っていることが多い(header_col はドイツ語で，
     # その右に和名の列がある)．和名の方がOCRも突き合わせも確実なので，
     # 独文と和文の境から値の左端までを別に切り出す
     gap = float(x_edges[0]) - right
     if gap > (right - left) * 0.2:
-        out.append(coord_item(np.array([right, float(x_edges[0])]), n_edges,
-                              obj_name='header_item_ja', y_notes=h_notes))
+        ja_edges = np.asarray(h_edges, dtype=float) + dy_ja
+        if dark_img is not None:
+            ja_edges = _hl.bands_from_own_lines(
+                dark_img, (right, float(h_edges[0]), float(x_edges[0]), float(h_edges[-1])),
+                float(median_h), ja_edges)
+        out.append(coord_item(np.array([right, float(x_edges[0])]), ja_edges,
+                              obj_name='header_item_ja',
+                              y_notes=axis_notes(n=len(ja_edges) - 1)))
     return out
 
 
