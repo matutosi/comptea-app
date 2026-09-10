@@ -44,6 +44,12 @@ GAP_LO, GAP_HI = 0.5, 1.5    # 帯の右端の隙間を探す範囲 (列の間�
 GAP_LO_L, GAP_HI_L = 0.75, 1.25
 
 
+def _row_frac(dark, x1, x2, y_edges):
+    """帯の中で，字のある行の割合"""
+    rows = [ink.ratio(dark, a, b, x1, x2) > 0 for a, b in zip(y_edges[:-1], y_edges[1:])]
+    return float(np.mean(rows)) if rows else 0.0
+
+
 # **左側は本体のしきい値も上げる** (2026-09-10)．左端の外に本当に地点の列が
 # ある表 (040・067・03_p1・09_p5・17_p1・20_p3) では，帯の黒画素は隣の列の
 # 0.88〜2.03 倍ある．10_p2 が足そうとした帯は 0.51 倍で，これは列ではなく
@@ -51,10 +57,10 @@ GAP_LO_L, GAP_HI_L = 0.75, 1.25
 BODY_MIN_L = 0.7
 
 
-def _row_frac(dark, x1, x2, y_edges):
-    """帯の中で，字のある行の割合"""
-    rows = [ink.ratio(dark, a, b, x1, x2) > 0 for a, b in zip(y_edges[:-1], y_edges[1:])]
-    return float(np.mean(rows)) if rows else 0.0
+# **左端の外の列は，階層の列ごと足してよい** (2026-09-10 ユーザ目視 10 回目)．
+# 階層かどうかは `layer_col.fix_columns` が「表頭が空」で見分けて `layer` に変える．
+# ここで表頭の字の量や行の割合で止めると，その仕組みごと使えなくなる (12 表で
+# 階層が消えた)．左で見るのは「本体の黒画素が隣の列と同じくらいか」だけにする．
 
 
 def reach_right(dark, x_edges, y_edges, y_head=None, x_max=None):
@@ -137,6 +143,7 @@ def reach_left(dark, x_edges, y_edges, y_head=None, x_min=None):
     if not np.isfinite(pitch) or pitch <= 0:
         return np.asarray(xs, dtype=float), 0
     yb1, yb2 = float(y_edges[0]), float(y_edges[-1])
+    pitch_y = float(np.median(np.diff([float(v) for v in y_edges]))) or pitch
     limit = 0.0 if x_min is None else max(0.0, float(x_min))
     body = [ink.ratio(dark, yb1, yb2, a, b) for a, b in zip(xs[:-1], xs[1:])]
     base_body = float(np.median(body))

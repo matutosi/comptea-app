@@ -616,9 +616,13 @@ def _locate_block(df: pd.DataFrame, source_image: str, img, max_shift_ratio: flo
                     '付けてある．段階1で右端の列を目で確かめる．')
             # **左端の外の列も同じように足す** (2026-09-10 ユーザ指摘: 09_p5)．
             # 種名の列の右端より左へは出ない．階層の列は表頭が空なので巻き込まない
+            # 検出済みの階層の右端は**限界にしない** (2026-09-10 ユーザ目視 10 回目:
+            # 05_p2 は階層の検出枠 1423-1606 が組成の 1 列目 (1546-1637) を飲み込んで
+            # おり，枠を限界にすると 1 列目が足せない)．階層は「表頭が空」で止まる．
+            # 足したあと記号が食い込めば，階層の右端と組成の左端を 1 本にする
+            # (`layer_col.refit_layer_width`)
             name_x2 = [float(r['x2'].iloc[0])
-                       for r in (spec_x_range, sname_x_range, layer_x_range)
-                       if r is not None]   # 検出済みの階層があればその右端まで
+                       for r in (spec_x_range, sname_x_range) if r is not None]
             x_edges, n_left = col_reach.reach_left(
                 dark_x, x_edges, y_edges, y_head=y_head,
                 x_min=max(name_x2) if name_x2 else None)
@@ -852,6 +856,14 @@ def _locate_header(df: pd.DataFrame, source_image: str, x_edges, warnings: list,
         if not head.empty:
             ocr_top = min(ocr_top, float(head['y1'].min()))
         ocr_top = max(0.0, ocr_top - median_h)
+        # **上端は，値の行が続く限り上へ伸ばす** (2026-09-10 ユーザ目視 10 回目: 10_p1 は
+        # 群落記号・通し番号・調査番号・調査年月日の 4 項目 (値 6 行) が検出枠より上に
+        # あり，帯の外に落ちていた)．検出枠の上に，地点の列の半分以上に字のある行が
+        # 1.5 行以内の間隔で続いていれば，そこまで含める (表題や群落名は数列にしか
+        # かからないので含まれない)
+        ocr_top = header_lines.extend_top(
+            ink.binarize(img), (float(x_edges[0]), float(x_edges[-1])), x_edges,
+            ocr_top, float(median_h))
         # 行を束ねる閾値は**組成部の行の高さ**(検出の `row` の箱の高さの中央値)の半分．
         # 表頭の項目行は組成部と同じ行送りで組まれている
         body_rows = filter_results(df, source_image, 'row')

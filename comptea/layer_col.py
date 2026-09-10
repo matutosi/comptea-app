@@ -19,9 +19,10 @@
 黙って値が化けることはない(`locate._guess_layer_column()` と同じ考え方)．
 """
 import numpy as np
+import pandas as pd
 from PIL import Image
 
-from . import ink
+from . import ink, row_track
 
 Image.MAX_IMAGE_PIXELS = None       # 折り込みは1億画素を超える
 
@@ -90,6 +91,12 @@ NAME_OVERLAP = 0.5      # 種名などの箱と横にこれ以上重なる組成
 BODY_INK_MIN = 0.05     # 本体の黒画素が他の列の中央値のこれ未満なら，空の列
 MAX_LEADING = 3         # 先頭(と末尾)から見る列の数の上限
 WIDE_RATIO = 3.0        # 他の列の幅の中央値のこれ倍より広い先頭の列は，組成部ではない
+
+
+WIDE_SPLIT = 1.5        # 表頭が空の先頭の列が他の列のこれ倍より広ければ，階層と地点の 1 列目に分ける
+
+
+LAYER_KEEP_W = 0.3      # 階層の枠を縮めるとき，残す幅の下限 (地点の列の幅の割合)
 SLIVER_RATIO = 0.5      # 幅の中央値のこれ倍未満の列は切れ端(隣に併合するか捨てる)
 
 
@@ -188,18 +195,44 @@ def fix_columns(img, df_loc, ink_max=HEADER_INK_MAX, min_cols=MIN_COLS,
     comp = out[out['obj_name'] == 'comp']
     head = out[out['obj_name'] == 'header_value']
     cols = _col_table(comp)
-    names = out[out['obj_name'].isin(('sname', 'species_col', 'header_col', 'layer'))]
+    names = out[out['obj_name'].isin(('sname', 'species_col', 'header_col'))]
     spans = [(float(a), float(b)) for a, b in
              names.groupby('col').agg(x1=('x1', 'min'), x2=('x2', 'max')).itertuples(index=False)] \
         if len(names) else []
     name_right = max([b for _, b in spans], default=0.0)
+    # **階層の検出枠は別に持つ** (2026-09-10 ユーザ目視 10 回目: 05_p2 は枠 1423-1637 が
+    # 組成の 1 列目 (1546-1637) を飲み込んでおり，種名と同じ扱いで捨てると 1 列目が
+    # 消える)．枠に重なる列でも**表頭に字があれば地点の列**として残し，枠の右端を
+    # その列の左端まで縮める
+    lay_cells = out[out['obj_name'] == 'layer']
+    lay_span = ((float(lay_cells['x1'].min()), float(lay_cells['x2'].max()))
+                if len(lay_cells) else None)
     hy1, hy2 = (float(head['y1'].min()), float(head['y2'].max())) if len(head) else (0, 0)
+    # **表頭の黒画素は組成部より上だけで測る** (2026-09-10)．表頭の帯は組成部の
+    # 最初の行に食い込むことがあり (kinki_007 は 57 px)，そこに階層の記号が入ると
+    # 「表頭が空」の見分けが効かなくなる
+    if len(comp):
+        hy2 = min(hy2, float(comp['y1'].min()))
     have_head = len(head) > 0 and hy2 - hy1 >= 10
     widths = (cols['x2'] - cols['x1']).to_numpy(dtype=float)
     body = np.array([ink.text_ratio(dark, r.y1, r.y2, r.x1, r.x2) for r in cols.itertuples()])
-    hb = (np.array([ink.text_ratio(dark, hy1, hy2, r.x1, r.x2) for r in cols.itertuples()])
-          if have_head else None)
+    # **表頭は罫線を消してから測る** (2026-09-10)．群落記号の枠の横線が帯の中に
+    # 何本も入り，全部の列の黒画素を水増しする (22_p2 は表頭の上端を伸ばしたとき，
+    # 右端の常在度の列が「表頭が空でない」と見えて落ちた)
+    hb = None
+    if have_head:
+        pitch_h = float(np.median(comp['y2'] - comp['y1'])) if len(comp) else 0.0
+        hx1, hx2 = int(cols['x1'].min()), int(cols['x2'].max())
+        hc = (row_track.clean_rules(dark, hx1, hx2, hy1, hy2, pitch_h)
+              if pitch_h > 0 else None)
+        if hc is not None and hc.size:
+            hb = np.array([float(hc[:, max(0, int(r.x1) - hx1):int(r.x2) - hx1].mean())
+                           for r in cols.itertuples()])
+        else:
+            hb = np.array([ink.text_ratio(dark, hy1, hy2, r.x1, r.x2)
+                           for r in cols.itertuples()])
     dropped, layered, trimmed = [], [], []
+    split_col = None
     n = len(cols)
     for k, (c, r) in enumerate(cols.iterrows()):
         if k >= MAX_LEADING:
@@ -214,6 +247,19 @@ def fix_columns(img, df_loc, ink_max=HEADER_INK_MAX, min_cols=MIN_COLS,
         head_blank = hb is not None and rest_head > 0 and hb[k] / rest_head < ink_max
         body_blank = rest_body > 0 and body[k] / rest_body < body_min
         hit = (out['obj_name'] == 'comp') & (out['col'] == c)
+        if not on_name and lay_span is not None and \
+                min(r.x2, lay_span[1]) - max(r.x1, lay_span[0]) >= w * overlap:
+            # **縮めても階層の幅が残るときだけ**．残らないなら，その枠は階層そのもの
+            # ではなく地点の列に重なっているだけなので，従来どおり列を捨てる
+            keeps = float(r.x1) - lay_span[0] >= max(rest_w, w) * LAYER_KEEP_W
+            if head_blank or hb is None or not keeps:
+                on_name = True                  # 表頭が空なら階層の枠の中の列
+            else:
+                # 表頭に字がある = 地点の列．階層の枠をこの列の左端まで縮める
+                lay_hit = out['obj_name'] == 'layer'
+                out.loc[lay_hit & (out['x2'] > float(r.x1)), 'x2'] = float(r.x1)
+                trimmed.append(int(c))
+                break
         if on_name:
             # 右端 1 列ぶんが種名の箱の外にあれば，そこだけ地点の列として残す
             keep_x1 = float(r.x2) - rest_w
@@ -229,9 +275,28 @@ def fix_columns(img, df_loc, ink_max=HEADER_INK_MAX, min_cols=MIN_COLS,
             dropped.append(int(c))
             continue
         if head_blank:
+            # **幅が 2 列ぶんある「表頭が空」の列は，階層と地点の 1 列目がつながったもの**
+            # (2026-09-10 ユーザ目視 10 回目: 05_p2 は 1423-1637 px の 1 列で，右の 1 列ぶんの
+            # 表頭に値がある)．右端 1 列ぶんの表頭に字があれば，右を地点の列に残し，左を階層にする
+            if rest_w > 0 and w > rest_w * WIDE_SPLIT and have_head:
+                cut = float(r.x2) - rest_w
+                hb_right = (float(hc[:, max(0, int(cut) - hx1):int(r.x2) - hx1].mean())
+                            if hc is not None and hc.size
+                            else ink.text_ratio(dark, hy1, hy2, cut, float(r.x2)))
+                if rest_head > 0 and hb_right / rest_head >= ink_max:
+                    lay = out[hit].copy()
+                    lay['obj_name'] = 'layer'
+                    lay['x2'] = cut
+                    out.loc[hit, 'x1'] = cut
+                    out = pd.concat([out, lay], ignore_index=True)
+                    layered.append((int(c), float(body[k])))
+                    split_col = int(c)
+                    break
             layered.append((int(c), float(body[k])))
             continue
         break
+    if split_col is not None:
+        layered = [t for t in layered if t[0] != split_col]
     if layered:
         # **階層の列は 1 本だけ**．表頭が空で本体に字のある列が 2 本以上あるとき，
         # 字がいちばん多い 1 本が階層の列で，残りは字のこぼれた隙間

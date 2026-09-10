@@ -351,6 +351,75 @@ def find_gutter(dark, x_lo, x_hi, y1, y2, min_w=GUTTER_MIN_W, blank=GUTTER_BLANK
     return found
 
 
+NARROW_COLS = 8             # 地点の列がこれ未満の表では，列の境のまたぎでも流し込みを見る
+
+
+# **またぎの閾値** (2026-09-10．実データで測った)．15_p5 の流し込みは 0.33〜1.00，
+# kinki_079-1 の本体は 0〜0.20．組成の値はセルの中に収まるので境をまたがず，
+# 詰まっていても 1 本まで．文章は幅いっぱいに流れるので何本もまたぐ
+FLOW_CROSS_MIN = 0.3
+
+
+FLOW_MIN_EDGES = 2          # 内側の境がこれ未満の表では見ない (1 本では見分けられない)
+
+
+FLOW_MIN_ROWS = 2           # 下から続く流し込みの行がこの数未満なら切らない
+
+
+FLOW_DENS = 0.6             # 下から数えて，またぐ帯がこの割合以上でいられる所まで切る
+
+
+FLOW_TOP_MIN = 0.6          # 切り始める行は，これ以上の境をまたいでいること
+
+
+def flow_top_by_edges(dark, edges, y1, y2, pitch, cross_min=FLOW_CROSS_MIN,
+                      min_rows=FLOW_MIN_ROWS, dens=FLOW_DENS, top_min=FLOW_TOP_MIN,
+                      half=3):
+    """組成部の列の境を字がまたぐ行が下に固まっている範囲の先頭 y (無ければ `y2`)
+
+    `running_text_top` の「字と字の間隔」は地点の少ない表では文章に見えません
+    (15_p5 は 4 列)．その控えに使います．
+
+    段落の行間で 1〜2 帯またがないことがあるので，**下から数えてまたぐ帯の割合が
+    `dens` 以上でいられるいちばん上**まで切ります (続きが切れた所で止めると
+    途中までしか切れない)．
+    """
+    xs = [int(x) for x in edges]
+    if len(xs) < FLOW_MIN_EDGES:
+        return float(y2)
+    step = max(4, int(pitch))
+    ys = list(range(int(y1), int(y2) - step + 1, step))
+    if len(ys) < min_rows:
+        return float(y2)
+    fracs = []
+    for y in ys:
+        band = dark[y:y + step]
+        k = 0
+        for xi in xs:
+            left = band[:, max(0, xi - half):xi]
+            right = band[:, xi:xi + half]
+            # **同じ画素行で両側に字があること**．帯ぜんたいで見ると，隣り合う列の
+            # 値が別々の高さにあるだけで「またいだ」ことになる
+            if left.size and right.size and (left.any(axis=1) & right.any(axis=1)).any():
+                k += 1
+        fracs.append(k / len(xs))
+    flags = [f >= cross_min for f in fracs]
+    best, hit = None, 0
+    for j in range(len(flags) - 1, -1, -1):
+        hit += bool(flags[j])
+        n = len(flags) - j
+        # **先頭の行は，はっきりまたいでいること** (`top_min`)．値の詰まった行が
+        # 弱くまたぐことがあり，そこで切ると本物の最終行を落とす (kinki_079-1)
+        if flags[j] and fracs[j] >= top_min and hit / n >= dens and n >= min_rows:
+            best = j
+    if best is None:
+        return float(y2)
+    top = float(ys[best])
+    if float(y2) - top < min_rows * float(pitch):
+        return float(y2)
+    return top
+
+
 def body_extent_ink(dark, df_loc, df_det=None, names=False):
     """`body_extent()` の下端を，流し込みの始まる所でさらに詰める
 
@@ -377,6 +446,23 @@ def body_extent_ink(dark, df_loc, df_det=None, names=False):
     # 字と字の間隔から見た流し込みの先頭(境の埋まりでは足りない表がある)
     grow = running_text_top(dark, xs[0], xs[-1], y1, y2, pitch, cell_w,
                             gutter=gutter)
+    # **地点の少ない表では，列の箱の境のまたぎで流し込みを見る** (2026-09-10 ユーザ
+    # 目視 10 回目: 15_p5 は地点 4 列で，組成部の帯に流し込みの字の断片しか入らず，
+    # 「字と字の間隔」では文章に見えない．学名と和名のあいだの隙間は長い学名が
+    # はみ出して使えない (本体の行でも 0.5〜0.7 埋まる)．箱の境は本体では 0，
+    # 流し込みでは 1 本以上またぐ)．下から遡ってまたぐ行が続く範囲を切る
+    # **いまの手で流し込みが見つからなかったときだけ**の控えにする (2026-09-10)．
+    # 併用すると，本体の下端がわずかに動いて行の決め直しの条件が変わる表がある
+    # (kinki_007 は 8 px 縮んだだけで，黒画素からの決め直しが働かなくなった)
+    # **地点の少ない表では，隙間の埋まりでも流し込みを見る** (2026-09-10 ユーザ目視
+    # 10 回目: 15_p5 は 4 列で，「字と字の間隔」では文章に見えない)．いまの手で
+    # 見つからなかったときだけの控えにする
+    # **地点の少ない表では，組成部の列の境のまたぎでも流し込みを見る** (2026-09-10
+    # ユーザ目視 10 回目: 15_p5 は 4 列で「字と字の間隔」では文章に見えない)．
+    # いまの手で見つからなかったときだけの控え
+    if grow >= y2 and len(xs) - 1 < NARROW_COLS:
+        grow = min(grow, flow_top_by_edges(dark, [float(v) for v in xs[1:-1]],
+                                           y1, y2, pitch))
     if len(edges) < 3 and gutter is None:
         # 境も隙間も測れない(1 地点の表で種名の箱が組成部に接している)．
         # 流し込みの始まりを確かめられないので，下端は検出の格子のまま

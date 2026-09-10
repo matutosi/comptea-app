@@ -396,6 +396,17 @@ def align_header_columns(df_loc, img=None):
             cells.append(r)
     out = pd.concat([df_loc[df_loc['obj_name'] != 'header_value'],
                      pd.DataFrame(cells)], ignore_index=True)
+    # **項目名の列の右端は，値の左端まで届かせる** (2026-09-10)．左端の外の列を足す
+    # 処理が，あとで捨てられる列を一時的に作ることがあり (kinki_003 は 1420-1516 px の
+    # 余白)，そのとき項目名の右端がその列の左端で止まったままになる (96 px 短い)．
+    # 字は切れないが，区切りが変わったと数えられ，見直しの対象が 36 表増えた
+    ja = out['obj_name'] == 'header_item_ja'
+    if not ja.any():
+        ja = out['obj_name'] == 'header_item'
+    if ja.any():
+        x2 = float(out.loc[ja, 'x2'].max())
+        if x2 < float(edges[0]):
+            out.loc[ja & (out['x2'] >= x2 - 0.5), 'x2'] = float(edges[0])
     if 'cell_id' in out.columns:
         out['cell_id'] = range(1, len(out) + 1)
     return out, [f'表頭の列を本体の境から作り直した({n_head} 列 → {n_body} 列)．'

@@ -100,3 +100,44 @@ def test_表頭の値の帯を表頭の傾きで列ごとにずらす():
     right = hv[hv.col == 10].y1.iloc[0]
     assert right - left >= 6                     # 右の列が下がる
     assert (out[out.obj_name == 'comp'].y1.values == df[df.obj_name == 'comp'].y1.values).all()
+
+
+def test_表頭の上端を値の行が続く限り上へ伸ばす():
+    """`extend_top`: 検出枠の上に，地点の列の半分以上に字のある行が続けば含める (10_p1 型)"""
+    from PIL import Image
+    from comptea import header_lines as hl, ink
+    img = Image.new('L', (900, 400), 255)
+    px = img.load()
+    cols = [100 + i * 80 for i in range(9)]           # 8 列
+    for r in range(6):                                 # 6 行の値 (y 60〜)
+        y = 60 + r * 30
+        for xa in cols[:-1]:
+            for xx in range(xa + 20, xa + 40):
+                for yy in range(y + 6, y + 22):
+                    px[xx, yy] = 0
+    for xx in range(150, 260):                         # 表題 (2 列にしかかからない)
+        for yy in range(10, 26):
+            px[xx, yy] = 0
+    dark = ink.binarize(img)
+    top = hl.extend_top(dark, (100, 740), cols, 240.0, 30.0)
+    assert 40 <= top <= 60                              # 6 行ぶん上へ (表題は含まない)
+
+
+def test_つながった値の行を谷で切り直す():
+    """`value_lines`: 行の高さの 1.4 倍より高い連なりは谷で分ける (16_p2 型)"""
+    from PIL import Image
+    from comptea import header_lines as hl, ink
+    img = Image.new('L', (1200, 300), 255)
+    px = img.load()
+    for r in range(5):                                 # 5 行．行間の谷は浅い (列の 1 つが行間に字)
+        y = 40 + r * 30
+        for xa in range(50, 1150, 50):
+            for xx in range(xa, xa + 16):
+                for yy in range(y + 4, y + 22):
+                    px[xx, yy] = 0
+        for yy in range(y + 22, y + 34):               # 谷に薄い字 (1 列)
+            for xx in range(600, 606):
+                px[xx, yy] = 0
+    dark = ink.binarize(img)
+    lines = hl.value_lines(dark, (40, 30, 1160, 200), 30.0)
+    assert len(lines) == 5
