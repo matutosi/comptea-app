@@ -42,6 +42,23 @@ def test_1行だけ極端に高いと鳴る():
     assert len(warn) == 1 and '行の高さが極端に不揃い' in warn[0]
 
 
+def test_傾き補正で列ごとに_y_がずれても高さは変わらない():
+    """行の高さは**セルごと**に測る (2026-09-12)
+
+    傾き補正 (`row_skew`・`row_track.fix_offsets`) のあとは同じ行でも列ごとに
+    y が違う．行の全セルの min/max で測ると高さが水増しされ (14_p1 は 35 px の
+    行が 49 px)，物差しが紙面の傾きで動いてしまう．
+    """
+    df = grid(h=30)
+    for c in range(1, 7):
+        df.loc[df['col'] == c, ['y1', 'y2']] += (c - 1) * 3      # 最大 15 px ずれ
+    h = (df.assign(h=df['y2'] - df['y1']).groupby('row')['h'].median())
+    assert h.median() == 30                                     # セルごとなら 30 px
+    g = df.groupby('row').agg(a=('y1', 'min'), b=('y2', 'max'))
+    assert (g['b'] - g['a']).median() == 45                     # 帯なら 45 px
+    assert checks.check_row_heights(df) == []
+
+
 def test_行が少なすぎるときは判じない():
     """2 行の表で変動係数を出しても当てにならない"""
     assert checks.check_row_heights(grid(rows=2)) == []

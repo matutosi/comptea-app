@@ -113,8 +113,11 @@ def check_row_heights(df_loc, cv_max=ROW_HEIGHT_CV_MAX):
     comp = df_loc[df_loc['obj_name'] == 'comp']
     if comp.empty or comp['row'].nunique() < 3:
         return []
-    g = comp.groupby('row').agg(a=('y1', 'min'), b=('y2', 'max'))
-    h = (g['b'] - g['a']).to_numpy(dtype=float)
+    # **高さはセルごとに測る** (2026-09-12)．傾き補正のあとは同じ行でも列ごとに
+    # y が違うので，行の全セルの min/max では高さが水増しされる (14_p1 は 35 px
+    # の行が 49 px，12_p1 は 28 px が 39 px)．物差しが紙面の傾きで動いてしまう
+    h = (comp.assign(h=comp['y2'].astype(float) - comp['y1'].astype(float))
+         .groupby('row')['h'].median().to_numpy(dtype=float))
     if h.mean() <= 0:
         return []
     cv = float(h.std() / h.mean())

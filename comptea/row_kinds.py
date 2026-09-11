@@ -89,6 +89,24 @@ class _Region:
         """`a`〜`b` (画像の y) に字があるか"""
         return self.ink(a, b) >= self.need
 
+    def ink_cells(self, cells):
+        """セルごとに**自分の箱の中**の黒画素を数えて足す
+
+        傾き補正 (`row_skew`・`row_track.fix_offsets`) のあとは，同じ行でも列ごとに
+        y が違う (実データで行の高さの 1/4〜2/3．03_p2 は 35 px の行で 23 px)．
+        行の全セルの y の min/max で帯を作ると隣の行の字が入り，見出し (本体が空)
+        を見落とす (2026-09-12)
+        """
+        if not self.ok or len(cells) == 0:
+            return 0
+        total = 0
+        for x1, x2, y1, y2 in cells[['x1', 'x2', 'y1', 'y2']].to_numpy(dtype=float):
+            a, b = max(self.y1, int(y1)) - self.y1, min(self.y2, int(y2)) - self.y1
+            c, d = max(self.x1, int(x1)) - self.x1, min(self.x2, int(x2)) - self.x1
+            if b - a >= 1 and d - c >= 1:
+                total += int(self.clean[a:b, c:d].sum())
+        return total
+
 
 KANA = set('アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモ'
            'ヤユヨラリルレロワヲンガギグゲゴザジズゼゾダヂヅデドバビブベボパピプペポ'
@@ -384,17 +402,54 @@ def mark_rows(img, df_loc):
         # 本体が空かどうかは**種の行との比**で見る．見出しの帯には，隣の行を囲む枠や
         # その値の一部が入り込むので，絶対値では「字がある」になってしまう
         # (kinki_010-1 の見出し 3 行は本体の黒が 269〜397．種の行は 1000〜6900)
-        body_ink = {r: reg_body.ink(*span[r]) for r in rows}
-        pos = sorted(v for v in body_ink.values() if v > 0)
-        med = float(pos[len(pos) // 2]) if pos else 0.0
-        need_body = max(reg_body.need, BODY_FRAC * med)
+        # **黒画素はセルごとに自分の箱の中で数える** (2026-09-12)．傾き補正の
+        # あとは同じ行でも列ごとに y が違うので，行の全セルの min/max の帯では
+        # 隣の行の「・」が入り，見出し (本体が空) を見落とす
+        by_row = {r: g[g['row'] == r] for r in rows}
+        name_span = {}
+        sn_span = {}
+        for r, cells in by_row.items():
+            nm = cells[cells['obj_name'].isin(NAME_CLASSES)]
+            sn = cells[cells['obj_name'] == 'sname']
+            name_span[r] = ((float(nm['y1'].min()), float(nm['y2'].max()))
+                            if len(nm) else span[r])
+            sn_span[r] = ((float(sn['y1'].min()), float(sn['y2'].max()))
+                          if len(sn) else name_span[r])
+        def has(reg, cells, band, need_band=None):
+            """**帯とセルの両方で見て，どちらかに字があれば「字あり」**
+
+            帯 (行の全セルの min/max) は隣の行の字を拾い，セルごとは傾き補正で
+            箱が字から外れていると拾い損ねる．どちらか一方に寄せると，一方の表を
+            直して他方を壊す (14_p2 は帯で 11 行の種の行が見出しに，17_p1 は
+            セルごとで 10 行の種の行が学名だけの行になった)．**片方でも字があれば
+            「空ではない」**とすれば，印は減る方向にしか動かない
+            """
+            n1 = reg.ink(*band) if reg else 0
+            n2 = reg.ink_cells(cells) if reg else 0
+            return n1 >= (need_band if need_band is not None else reg.need) \
+                or n2 >= reg.need
+
+        body_cell = {r: reg_body.ink_cells(c[c['obj_name'].isin(BODY_CLASSES)])
+                     for r, c in by_row.items()}
+        body_band = {r: reg_body.ink(*span[r]) for r in rows}
+
+        def need_of(vals):
+            pos = sorted(v for v in vals if v > 0)
+            med = float(pos[len(pos) // 2]) if pos else 0.0
+            return max(reg_body.need, BODY_FRAC * med)
+
+        need_band = need_of(body_band.values())
+        need_cell = need_of(body_cell.values())
         state = {}
-        for r in rows:
-            y1, y2 = span[r]
-            state[r] = (reg_name.has_ink(y1, y2),
-                        reg_ja.has_ink(y1, y2) if reg_ja else False,
-                        body_ink[r] >= need_body)
+        for r, cells in by_row.items():
+            nm = cells[cells['obj_name'].isin(NAME_CLASSES)]
+            ja = cells[cells['obj_name'] == 'species_col']
+            state[r] = (has(reg_name, nm, span[r]),
+                        has(reg_ja, ja, span[r]) if reg_ja else False,
+                        body_band[r] >= need_band or body_cell[r] >= need_cell)
         for i, r in enumerate(rows):
+            # 凡例は**行の全セルの帯**で見る (種名の側から本体の側へ 1 つの塊が
+            # またぐかどうかなので，帯を狭めると見落とす)
             y1, y2 = span[r]
             has_name, _has_ja, has_body = state[r]
             # 凡例は**生の黒画素**で見る (列をまたぐ 1 つの塊は，罫線として消される
@@ -407,7 +462,8 @@ def mark_rows(img, df_loc):
                 continue
             if not has_name or has_body:
                 continue
-            if sname_x and has_underline(dark, sname_x[0], sname_x[1], y1, y2, pitch):
+            if sname_x and has_underline(dark, sname_x[0], sname_x[1],
+                                         sn_span[r][0], sn_span[r][1], pitch):
                 marks[(block, r)] = 'heading'
                 continue
             nxt = rows[i + 1] if i + 1 < len(rows) else None
