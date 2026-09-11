@@ -68,6 +68,114 @@ def test_離れていれば別のまとまり():
     assert len(tf.cluster(pts, dist=200)) == 2
 
 
+# --- 3b. 縦に並んだ項目名だけを表とみなす (純粋) ---------------------------
+
+def test_縦に並ぶ項目名の数を数える():
+    """表頭の項目名は左端をそろえて縦に並ぶ (通し番号・調査番号・調査年月日…)"""
+    pts = [(100, 100), (104, 140), (98, 180), (400, 100)]
+    assert tf.vertical_run(pts, x_tol=20) == 3
+
+
+def test_横に並ぶ語は縦の連なりにならない():
+    """本文や文章の表頭は 1 行に流れる (kinki_026 の「Feld-Nr. 調査番号: …」)"""
+    pts = [(100, 100), (400, 104), (700, 98)]
+    assert tf.vertical_run(pts, x_tol=20) == 1
+
+
+def test_同じ高さの語は1つと数える():
+    """左端がそろっていても同じ行なら 1 つ (2 段組の見出しが並んだもの)"""
+    pts = [(100, 100), (104, 102), (100, 200)]
+    assert tf.vertical_run(pts, x_tol=20, y_tol=20) == 2
+
+
+def test_縦に並ばないまとまりは表とみなさない():
+    """`find_tables` の間引き．横一列の 3 語だけのまとまりは落ちる"""
+    groups = [[(100, 100), (104, 140), (98, 180)],      # 縦に 3 つ
+              [(900, 900), (1200, 904), (1500, 898)]]   # 横に 3 つ
+    kept = tf.keep_vertical(groups, x_tol=20, least=2)
+    assert len(kept) == 1 and kept[0][0] == (100, 100)
+
+
+# --- 3c. まとめる距離を項目名の並びから決める (純粋) ----------------------
+
+def test_項目名の縦の間隔から距離を決める():
+    """表頭の項目名は一定の間隔で縦に並ぶ．その間隔の何倍かでまとめる"""
+    pts = [(100, 100), (100, 140), (100, 180), (100, 220)]
+    assert tf.mark_pitch(pts, x_tol=20) == 40
+
+
+def test_縦に並ばなければ間隔は出ない():
+    pts = [(100, 100), (400, 104), (700, 98)]
+    assert tf.mark_pitch(pts, x_tol=20) is None
+
+
+def test_間隔が出ればそれを距離に使う():
+    """紙面の長辺の 1 割は，紙面ごとに合ったり合わなかったりする"""
+    pts = [(100, 100), (100, 140), (100, 180)]
+    assert tf.group_dist(pts, size=(4000, 6000), x_tol=20) == 40 * tf.PITCH_MUL
+
+
+def test_間隔が出なければ紙面の長辺で決める():
+    pts = [(100, 100), (400, 104)]
+    assert tf.group_dist(pts, size=(4000, 6000), x_tol=20) == 6000 * tf.DIST
+
+
+# --- 4b. 小さすぎる箱を落とす (純粋) --------------------------------------
+
+def test_いちばん大きい箱より極端に小さい箱は落とす():
+    """本文の語を拾った偽の箱は，表の箱よりずっと小さい"""
+    boxes = [(0, 0, 1000, 1000), (10, 10, 60, 60)]
+    assert tf.drop_small(boxes, rel=0.05) == [(0, 0, 1000, 1000)]
+
+
+def test_同じくらいの大きさの箱は残す():
+    """1 枚に大小の表が載る紙面もあるので，落とすのは極端なものだけ"""
+    boxes = [(0, 0, 1000, 1000), (0, 0, 400, 400)]
+    assert len(tf.drop_small(boxes, rel=0.05)) == 2
+
+
+def test_箱が1つなら落とさない():
+    boxes = [(10, 10, 60, 60)]
+    assert tf.drop_small(boxes, rel=0.05) == boxes
+
+
+# --- 4c. 白い縦の隙間で表の範囲を伸ばす (純粋) ----------------------------
+
+def _dark_table(w=400, h=300, y0=0, y1=150, pitch=10, cols=(100, 160, 220, 280)):
+    """上半分が表 (値が列に並ぶ)，下半分が文章の紙面の黒画素"""
+    d = np.zeros((h, w), dtype=bool)
+    for y in range(y0, y1, pitch):
+        d[y:y + 4, 20:80] = True                    # 種名
+        for x in cols:
+            d[y:y + 4, x:x + 6] = True              # 値
+    for y in range(y1, h, pitch):
+        d[y:y + 4, 20:w - 20] = True                # 文章 (幅いっぱい)
+    return d
+
+
+def test_表らしい帯には白い縦の隙間が何本もある():
+    d = _dark_table()
+    assert len(tf.gutters(d, 0, 400, 0, 150, min_w=8)) >= 3
+
+
+def test_文章の帯には縦の隙間が無い():
+    d = _dark_table()
+    assert len(tf.gutters(d, 0, 400, 160, 300, min_w=8)) == 0
+
+
+def test_表らしい行が続く限り下へ伸ばす():
+    """文章に変わったところで止まる (表の下端 150 の前後で止まること)"""
+    d = _dark_table()
+    box = tf.grow_box(d, (20, 0, 286, 40), pitch=10, min_w=8)
+    assert 130 <= box[3] <= 170
+
+
+def test_伸ばした範囲のインクの端を箱の左右にする():
+    d = _dark_table()
+    box = tf.grow_box(d, (100, 0, 180, 40), pitch=10, min_w=8)
+    assert box[0] <= 20 and box[2] >= 286
+
+
 # --- 5. 回した座標を元の紙面へ戻す (純粋) ---------------------------------
 
 @pytest.mark.parametrize('how', ['cw', 'ccw'])
@@ -170,12 +278,27 @@ def test_目印が足りていれば回さない():
 
 # --- 通し (偽の読み手) -----------------------------------------------------
 
+def _stacked(size=(400, 300), x=(40, 100), ys=(60, 90, 120), h=8):
+    """項目名らしく**縦に並ぶ**棒を描いた紙面"""
+    im = Image.new('RGB', size, 'white')
+    dr = ImageDraw.Draw(im)
+    for y in ys:
+        dr.rectangle((x[0], y, x[1], y + h), fill='black')
+    return im
+
+
 def test_通しで表の箱が1つ出る():
-    im = _sheet(size=(400, 300), rect=(40, 60, 100, 68))
-    boxes = tf.find_tables(im, reader=FakeReader(), tile=150, least=1)
+    im = _stacked()
+    boxes = tf.find_tables(im, reader=FakeReader(), tile=40, least=1)
     assert len(boxes) == 1
     x1, y1, x2, y2 = boxes[0]
-    assert x1 <= 40 and y1 <= 60 and x2 >= 100 and y2 >= 68
+    assert x1 <= 40 and y1 <= 60 and x2 >= 100 and y2 >= 128
+
+
+def test_横一列の目印だけでは箱を出さない():
+    """表頭が文章の紙面や本文の語 (kinki_026 型) を落とす"""
+    im = _sheet(size=(400, 300), rect=(40, 60, 100, 68))
+    assert tf.find_tables(im, reader=FakeReader(), tile=150, least=1) == []
 
 
 # --- 実データ (slow) -------------------------------------------------------

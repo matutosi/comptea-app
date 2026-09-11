@@ -111,6 +111,192 @@ def cluster(points, dist, least=1):
     return [g for g in groups.values() if len(g) >= least]
 
 
+# --- 3b. 縦に並んだ項目名だけを表とみなす ---------------------------------
+
+X_TOL = 0.02            # 縦の連なりとみなす x のずれ (紙面の長辺に対する比)
+Y_TOL = 0.004           # 同じ行とみなす y の差 (同上)．同じ行の語は 1 つと数える
+VERT_LEAST = 2          # 縦の連なりに要る項目名の数
+
+
+def vertical_run(points, x_tol, y_tol=0.0):
+    """左端をそろえて**縦に並ぶ**点の最大の数
+
+    表頭の項目名は「通し番号・調査番号・調査年月日…」と左端をそろえて縦に並びます．
+    一方，(a) 本文に紛れた語 (b) **表頭が文章で書かれた紙面** (kinki_026 の
+    「Feld-Nr. 調査番号: SS-30. Datum d. Aufn. 調査年月日: …」) は 1 行に流れます．
+    縦の連なりの数で，その 2 つを分けます．
+    同じ行の語は 1 つと数えます (`y_tol`)．2 段組の見出しが横に並ぶため．
+    """
+    pts = [(float(x), float(y)) for x, y in points]
+    best = 0
+    for x0, _y0 in pts:
+        ys = sorted(y for x, y in pts if abs(x - x0) <= x_tol)
+        n = 0
+        last = None
+        for y in ys:
+            if last is None or y - last > y_tol:
+                n += 1
+                last = y
+        best = max(best, n)
+    return best
+
+
+def keep_vertical(groups, x_tol, least=VERT_LEAST, y_tol=0.0):
+    """縦の連なりが `least` に満たないまとまりを落とす"""
+    return [g for g in groups if vertical_run(g, x_tol, y_tol) >= least]
+
+
+# --- 3c. まとめる距離を項目名の並びから決める -----------------------------
+
+PITCH_MUL = 6.0         # 項目名の縦の間隔のこの倍までを同じ表とみなす
+PITCH_LEAST = 3         # 間隔を出すのに要る項目名の数
+
+
+def mark_pitch(points, x_tol, least=PITCH_LEAST):
+    """縦に並ぶ項目名の**間隔の中央値** (出せなければ None)
+
+    表頭の項目名は一定の間隔で縦に並びます．紙面の大きさで距離を決めると，
+    A0 の折込では大きすぎて隣の表を橋渡しし，小さな表では足りません．
+    **紙面が自分で示している物差し**を使います．
+    """
+    pts = [(float(x), float(y)) for x, y in points]
+    best = []
+    for x0, _y0 in pts:
+        ys = sorted(y for x, y in pts if abs(x - x0) <= x_tol)
+        if len(ys) > len(best):
+            best = ys
+    if len(best) < least:
+        return None
+    gaps = [b - a for a, b in zip(best[:-1], best[1:]) if b - a > 0]
+    if not gaps:
+        return None
+    gaps.sort()
+    return float(gaps[len(gaps) // 2])
+
+
+def group_dist(points, size, x_tol, dist=DIST, mul=PITCH_MUL):
+    """まとめる距離．項目名の間隔が出ればそれを使い，出なければ紙面の長辺で決める"""
+    pitch = mark_pitch(points, x_tol)
+    if pitch:
+        return pitch * mul
+    return float(max(size)) * dist
+
+
+# --- 4b. 小さすぎる箱を落とす --------------------------------------------
+
+BOX_REL = 0.05          # いちばん大きい箱の面積に対する下限 (これ未満は偽の箱)
+
+
+def _touches(box, blobs):
+    """箱が塊から作られたか (塊のどれかと重なるか)"""
+    x1, y1, x2, y2 = box
+    for b in blobs:
+        if not (b[2] < x1 or b[0] > x2 or b[3] < y1 or b[1] > y2):
+            return True
+    return False
+
+
+def drop_small(boxes, rel=BOX_REL):
+    """いちばん大きい箱より極端に小さい箱を落とす
+
+    本文の語を項目名と取った偽の箱 (kinki_015 の「5 種類以下で，」) は，
+    表の箱よりずっと小さくなります．1 枚に大小の表が載る紙面もあるので，
+    落とすのは**極端なもの**だけにします．箱が 1 つなら落としません．
+    """
+    if len(boxes) < 2:
+        return list(boxes)
+    def area(b):
+        return max(0, b[2] - b[0]) * max(0, b[3] - b[1])
+    big = max(area(b) for b in boxes)
+    if big <= 0:
+        return list(boxes)
+    return [b for b in boxes if area(b) >= big * rel]
+
+
+# --- 4c. 白い縦の隙間で表の範囲を伸ばす -----------------------------------
+#
+# **紙面を見て組成表と分かるのは，値の列のあいだに白い縦の隙間が何本も，行を
+# またいで同じ x に通っているから**です (2026-09-12 ユーザ助言「人や AI が
+# 組成表だと認識する方法をよく考慮する」)．本文にはこれがありません．
+# 黒画素の塊 (`blob_boxes`) は A0 の折込では効きますが，本のページでは字が
+# 段落ごとに割れて塊が 0 個になります (47 枚中 5 枚)．膨張と面積の下限を
+# 振っても IoU は 0.4 止まりで，**塊は本のページには合わない道具**でした．
+
+GUT_MIN_W = 0.5         # 隙間とみなす幅 (行の高さの倍数)
+GUT_LEAST = 3           # 表らしい帯に要る隙間の数
+GROW_MISS = 2           # 隙間が足りない帯がこれだけ続いたら止める
+
+
+def gutters(dark, x1, x2, y1, y2, min_w):
+    """帯 `[y1:y2, x1:x2]` を縦に貫く白い列の並び [(左, 右)]
+
+    幅が `min_w` に満たないものと，帯の左右の余白は数えません．
+    """
+    h, w = dark.shape
+    x1, x2 = max(0, int(x1)), min(w, int(x2))
+    y1, y2 = max(0, int(y1)), min(h, int(y2))
+    if x2 - x1 < 3 or y2 - y1 < 1:
+        return []
+    col = dark[y1:y2, x1:x2].any(axis=0)
+    if not col.any():
+        return []
+    lo, hi = int(np.argmax(col)), int(len(col) - np.argmax(col[::-1]))
+    out = []
+    run = None
+    for i in range(lo, hi):
+        if not col[i]:
+            run = i if run is None else run
+        elif run is not None:
+            if i - run >= min_w:
+                out.append((x1 + run, x1 + i))
+            run = None
+    return out
+
+
+def grow_box(dark, seed, pitch, min_w=None, least=GUT_LEAST, miss=GROW_MISS):
+    """目印の箱 `seed` から，表らしい帯が続く限り上下へ伸ばす
+
+    表らしい = 白い縦の隙間が `least` 本以上ある．文章の行は隙間が無いので止まります．
+    左右は，伸ばした範囲のインクの端に合わせます (項目名は表の左半分にしかない)．
+    """
+    h, w = dark.shape
+    pitch = max(4.0, float(pitch))
+    min_w = pitch * GUT_MIN_W if min_w is None else min_w
+    x1, y1, x2, y2 = (float(v) for v in seed)
+    top, bot = max(0.0, y1), min(float(h), y2)
+
+    def ok(a, b):
+        return len(gutters(dark, 0, w, a, b, min_w)) >= least
+
+    n = 0
+    while bot + pitch <= h:
+        if ok(bot, bot + pitch):
+            bot += pitch
+            n = 0
+        else:
+            n += 1
+            bot += pitch
+            if n > miss:
+                bot -= pitch * (miss + 1)
+                break
+    n = 0
+    while top - pitch >= 0:
+        if ok(top - pitch, top):
+            top -= pitch
+            n = 0
+        else:
+            n += 1
+            top -= pitch
+            if n > miss:
+                top += pitch * (miss + 1)
+                break
+    band = dark[max(0, int(top)):min(h, int(bot)), :]
+    if band.size and band.any():
+        cols = np.flatnonzero(band.any(axis=0))
+        x1, x2 = float(cols[0]), float(cols[-1] + 1)
+    return int(x1), int(max(0.0, top)), int(x2), int(min(float(h), bot))
+
+
 # --- 5. 回す・戻す -------------------------------------------------------
 
 _HOW = {'cw': Image.ROTATE_270, 'ccw': Image.ROTATE_90}
@@ -233,10 +419,32 @@ def find_tables(im, reader=None, tile=TILE, dist=DIST, least=LEAST, pad=PAD):
     Image.MAX_IMAGE_PIXELS = None
     marks, _how = read_marks(im, reader=reader, tile=tile, least=least)
     points = [(x, y) for k, x, y, _t in marks if k == 'item']
-    groups = cluster(points, max(im.size) * dist, least=least)
+    dark = ink.binarize(im)
+    blobs = blob_boxes(dark)
+    return boxes_from(points, blobs, im.size, dist=dist, least=least, pad=pad,
+                      dark=dark)
+
+
+def boxes_from(points, blobs, size, dist=DIST, least=LEAST, pad=PAD,
+               x_tol=X_TOL, y_tol=Y_TOL, vert_least=VERT_LEAST,
+               box_rel=BOX_REL, use_pitch=True, dark=None):
+    """目印と塊から表の箱を作る (OCR を切り離した部分．案を測るのに使う)"""
+    long = float(max(size))
+    d = (group_dist(points, size, long * x_tol, dist=dist) if use_pitch
+         else long * dist)
+    groups = cluster(points, d, least=least)
+    groups = keep_vertical(groups, long * x_tol, least=vert_least,
+                           y_tol=long * y_tol)
     if not groups:
         return []
-    blobs = blob_boxes(ink.binarize(im))
-    boxes = [box_for(g, blobs, pad=pad, max_frac=MAX_FRAC, size=im.size)
-             for g in groups]
-    return sorted(set(boxes), key=lambda b: (b[1], b[0]))
+    boxes = []
+    for g in groups:
+        b = box_for(g, blobs, pad=pad, max_frac=MAX_FRAC, size=size)
+        # **塊が掴めなかったら，白い縦の隙間で伸ばす** (本のページは字が段落ごとに
+        # 割れて塊が 0 個になる)．目印の外接矩形のままでは表頭の左半分しか入らない
+        if dark is not None and not _touches(b, blobs):
+            pitch = mark_pitch(g, float(max(size)) * x_tol) or 0.0
+            b = grow_box(dark, b, pitch or float(max(size)) * 0.01)
+        boxes.append(b)
+    boxes = drop_small(set(boxes), rel=box_rel)
+    return sorted(boxes, key=lambda b: (b[1], b[0]))
