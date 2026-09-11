@@ -305,7 +305,16 @@ def text_like(dark, xs, a, b, rule):
     return blank / len(xs) < TEXT_BLANK_MIN
 
 
-def extend_edges(edges, prof_comp, prof_all, med, ext, is_text=None, prof_names=None):
+JUDGE_PAD = 0.3         # 帯を読むときに上下へ広げる割合 (行の高さの倍数)
+
+
+ONCE_TALL = 1.25        # 帯の高さ / 行の高さ．これを超える帯は見出しでも落とさない
+                        # (本物の行と混ざっている)
+
+
+
+def extend_edges(edges, prof_comp, prof_all, med, ext, is_text=None, prof_names=None,
+                 judge=None):
     """格子の上下端を，組成部の本当の範囲 `ext` まで行の高さで埋める
 
     格子の縦の範囲は `row` の検出で決まり，`_extend_rows_to_block()` は片側 2 行
@@ -323,8 +332,16 @@ def extend_edges(edges, prof_comp, prof_all, med, ext, is_text=None, prof_names=
     流し込み(列の境が埋まる行)は `is_text` で止める．
     **上端は全幅で判断する**．最初の行は種群の見出し(組成部は空)のことが多い．
 
+    **行としても文章としても取れるときは，読んだ内容で決めます** (2026-09-11
+    ユーザ指示)．表の最終行の真下に流し込みの 1 行目があると，帯の下端に文章の字が
+    食い込んで境が埋まり，`is_text` が立ちます (kinki_079-1 の「ヤマルリソウ」は
+    組成の黒画素 695 でしきい値 252 を超えているのに，文章として止まっていた)．
+    `judge(a, b)` が 'species' を返せば表の行とみなします．
+
     Args:
         prof_names: {obj_name: 黒画素の並び}(sname・species_col・layer のうち有るもの)
+        judge: 帯 (a, b) を読んで役割を返す関数．`is_row` と `is_text` が両方
+            立ったときだけ呼ぶ (読むのは表の端の 1〜2 帯だけ)
 
     Returns:
         (境, 下に足した行数, 上に足した行数, 下から落とした行数)
@@ -364,6 +381,35 @@ def extend_edges(edges, prof_comp, prof_all, med, ext, is_text=None, prof_names=
                    if mid(prof_names[k], a, b) >= v * END_MIN_INK)
         return hits >= need
 
+    def is_flow(a, b):
+        """文章の行か (**読みを正とする**)
+
+        **読んだ内容を先に見る** (2026-09-11 ユーザ指示)．「出現 1 回の種」の見出しが
+        読めたら，形の判定によらずそこから下は流し込みです (17_p1 は形の判定だけでは
+        見出しの下に 2 行入っていた)．見出しの中には種名も並ぶので，見出しを先に見ます．
+        読めて種名なら表の行です (kinki_079-1 の最終行)．
+        """
+        if judge is not None:
+            kind = judge(a, b)
+            # **落とすのは見出しと読めた帯だけ** (2026-09-11 ユーザ指示:
+            # 欠落は絶対に避ける)．「1 行に何種も並ぶ」で落とすと，和名が
+            # OCR の濁点で 2 つに割れた行 (22_p3)，帯に 2 行ぶんが入った行
+            # (20_p1)，記号がカナに読まれた行 (08_p5・10_p1) が落ちた．
+            # 取りすぎた流し込みは段階 3 が `note` を付ける
+            # **落とすのは帯の高さが 1 行ぶんのときだけ**．帯に本物の最終行と
+            # 見出しが両方入ることがあり (kinki_079-1 の「ヤマルリソウ」，
+            # 15_p2 の「オクノカンスゲ」)，そのまま落とすと欠落する．
+            # 実測: 純粋な見出しの帯は 1.14 行，混ざった帯は 1.47〜1.66 行
+            if kind == 'once' and (b - a) <= med * ONCE_TALL:
+                return True
+            # **読めたら，形では止めない** (2026-09-11 ユーザ指示: 学名・和名・
+            # 組成の欠落は絶対に避ける．多めに取ってから OCR で除外する)．
+            # 列の境の空きは，地点の列が少ない表では表の行でも 0.38〜0.50 に
+            # なり，流し込み (0.33〜1.00) と重なる (09_p5 は本物の 4 行が
+            # 落ちていた)．読んで違うと分かったものだけ落とす
+            return False
+        return is_text is not None and is_text(a, b)
+
     trimmed = 0
     # 行の高さは一定なので，**中央値の 3/4 に満たない末尾の行は無条件に落とす**．
     # 並べ直し(`lattice_rows`)は最後に 0.5〜1.5 行の余りを残し，20 px の余りが
@@ -372,7 +418,7 @@ def extend_edges(edges, prof_comp, prof_all, med, ext, is_text=None, prof_names=
         out.pop()
         trimmed += 1
     while len(out) > 2 and (not is_row(out[-2], out[-1])
-                            or (is_text is not None and is_text(out[-2], out[-1]))):
+                            or is_flow(out[-2], out[-1])):
         out.pop()
         trimmed += 1
     # 足す行は**行の高さのまま**足す(範囲の端で切り詰めると短い行ができ，
@@ -380,7 +426,7 @@ def extend_edges(edges, prof_comp, prof_all, med, ext, is_text=None, prof_names=
     below = 0
     while hi - out[-1] > med * END_MIN_GAP:
         new = out[-1] + med
-        if is_text is not None and is_text(out[-1], new):
+        if is_flow(out[-1], new):
             break                                   # 流し込みに入った
         if not is_row(out[-1], new):
             break
@@ -527,9 +573,27 @@ def fix_row_heights(img, df_loc, df_det=None, tol=ROW_TOL):
                 nc = body[body['obj_name'] == cls]
                 if len(nc):
                     prof_names[cls] = _profile(dark, nc['x1'].min(), nc['x2'].max())
+            # **行としても文章としても取れる帯は，種名の領域を読んで決める**
+            # (2026-09-11 ユーザ指示)．範囲は学名の左端から組成部の手前まで．
+            # 「出現 1 回の種」の見出しはこの幅に書かれており，流し込みの中にも
+            # 種名が並ぶので，**見出しを先に見る**必要がある．読むのは表の端の
+            # 1〜2 帯だけなので速度には響かない
+            nm = body[body['obj_name'].isin(('sname', 'species_col'))]
+            name_box = ((float(nm['x1'].min()), float(cb['x1'].min()))
+                        if len(nm) else None)
+
+            def judge(a, b, box=name_box, pad=med * JUDGE_PAD):
+                if box is None:
+                    return 'other'
+                from . import row_kinds
+                # 帯を広げて読む (端の帯は境が字の下端を切る)．採るのは
+                # **字の中心が帯の中にある読みだけ** (`read_kind` の中で絞る)
+                return row_kinds.read_kind(img, (box[0], a, box[1], b), pad=pad)
+
             new, n_below, n_above, n_trim = extend_edges(new, prof, prof_all, med, ext,
                                                          is_text=is_text,
-                                                         prof_names=prof_names)
+                                                         prof_names=prof_names,
+                                                         judge=judge)
             if n_below or n_above or n_trim:
                 grew = True
                 warnings.append(

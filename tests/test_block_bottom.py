@@ -70,3 +70,31 @@ def test_半行未満の差は足さない():
 def test_段が1つなら何もしない():
     out, n = blocks.align_block_bottoms(_block(10, 1, 0))
     assert n == 0 and len(out) == len(_block(10, 1, 0))
+
+
+def test_列の境をまたぐ行が下に固まっていれば流し込み():
+    """`flow_top_by_edges` (15_p5 型): 本体の値はセルの中，文章は幅いっぱいに流れる"""
+    import numpy as np
+    from comptea import body_rows as br
+    dark = np.zeros((400, 600), dtype=bool)
+    edges = [200, 300, 400, 500]
+    for r in range(8):                             # 本体 8 行: セルの中だけ
+        y = 20 + r * 30
+        for x in (120, 220, 320, 420):
+            dark[y + 8:y + 20, x:x + 40] = True
+    for r in range(8, 11):                         # 下 3 行: 文章 (境をまたぐ)
+        y = 20 + r * 30
+        dark[y + 8:y + 20, 60:560] = True
+    assert br.flow_top_by_edges(dark, edges, 20, 20 + 11 * 30, 30) == 20 + 8 * 30
+
+
+def test_値がセルに収まっていれば切らない():
+    import numpy as np
+    from comptea import body_rows as br
+    dark = np.zeros((400, 600), dtype=bool)
+    for r in range(11):
+        y = 20 + r * 30
+        for x in (120, 220, 320, 420):
+            dark[y + 8:y + 20, x:x + 40] = True
+    y2 = 20 + 11 * 30
+    assert br.flow_top_by_edges(dark, [200, 300, 400, 500], 20, y2, 30) == float(y2)

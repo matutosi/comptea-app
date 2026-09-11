@@ -247,6 +247,9 @@ VALUE_INK_THR = 0.1     # 値の側で「字がある」とみなす黒画素 (�
 VALUE_MIN_H = 0.2       # 値の行の高さの下限 (行の高さの倍数)．句読点のかけらを落とす
 
 
+VALUE_GAP_MIN = 0.15    # 連なりの隙間が行の高さのこの倍より近ければ，同じ行としてつなぐ
+
+
 SLANT_BIN = 16          # 傾きを測るときに列をまとめる幅 (px)
 SLANT_MAX = 0.03        # 試す勾配の上限 (約 1.7°)
 SLANT_MIN_W = 8.0       # 領域の幅が行の高さのこの倍未満なら傾きを測らない
@@ -339,17 +342,34 @@ def value_lines(dark, box, pitch, thr=VALUE_INK_THR, min_h=VALUE_MIN_H, info=Non
     lo = max(1.0, float(np.median(prof[prof > 0])) * thr)
     floor = max(2.0, float(pitch) * min_h)
     runs = _runs_above(prof, lo, floor)
+    # **近すぎる連なりはつなぐ** (2026-09-11 ユーザ目視: 07_p3 の「高木層の高さ」は
+    # 値が「−」ばかりで，横棒 (6 px) と数字 (11 px) が 2 px 空いただけで別の行に
+    # なっていた)．行と行の隙間は行の高さの 2 割ほどあるので，それより近いものは
+    # 同じ行．この表の本物の隙間は 7〜13 px，割れていた所は 2 px
+    gap_min = max(3.0, float(pitch) * VALUE_GAP_MIN)
+    merged = []
+    for a, b in runs:
+        if merged and a - merged[-1][1] < gap_min:
+            merged[-1] = (merged[-1][0], b)
+        else:
+            merged.append((a, b))
+    runs = merged
     # **行の高さの 1.4 倍より高い連なりは，その中で閾値を上げて切り直す** (2026-09-10)．
     # 行間の狭いタイプ打ちでは 25 列の字の上下が重なり，投影が行のあいだで 1 割まで
     # 落ちない (14_p4 は 8 行が 1 帯，03_p2 は 8 行)．連なりの中の山の 2〜5 割まで
     # 閾値を上げ，行の高さに収まる片に分かれたところで採る．分かれなければそのまま
-    # **切り直しは使わない** (2026-09-10 に測って取り下げた)．帯は増える (14_p4 は 5 → 13)
-    # が，切り直した境の一部が字に乗り，字を割る境が 5.4% → 9.3% と増えた．ユーザの
-    # 基準は「正確に区切れるなら区切りすぎる側」で，正確さが先．つながった行は
-    # つながったまま 1 帯にし，段階 3 で複数行の値として扱う (`_resplit_tall` は控え)
+    # **切り直しは，傾きに沿った投影になってから使う** (2026-09-10 ユーザ目視 10 回目:
+    # 16_p2 は値の先頭 5 行が 1 帯)．以前 (水平な投影) は切り直した境が字に乗って
+    # 字を割る境が 5.4% → 9.3% と増えたので取り下げたが，谷が埋まっていたのは傾きの
+    # せいだった．傾きに沿った投影では谷が山の 1〜3 割まで落ちる (16_p2 の 57 列でも
+    # 92〜270 / 889)．行の高さの 1.4 倍より高い連なりだけ，谷で切り直す
     out = []
     for a, b in runs:
-        out.append((y1 + (a + b) / 2.0, float(y1 + a), float(y1 + b)))
+        parts = [(a, b)]
+        if b - a > float(pitch) * TALL_BOX:
+            parts = _resplit_tall(prof, a, b, float(pitch), floor)
+        for s_, e_ in parts:
+            out.append((y1 + (s_ + e_) / 2.0, float(y1 + s_), float(y1 + e_)))
     return out
 
 
@@ -497,6 +517,92 @@ def snap_to_value_lines(edges, spans, pitch, reach=VALUE_SNAP):
     return np.maximum.accumulate(np.array(out, dtype=float))
 
 
+TOP_REACH_ROWS = 8      # 表頭の上端を上へ伸ばす行数の上限
+TOP_COVER_MIN = 0.5     # 値の行とみなすのに要る，字のある地点の列の割合
+TOP_GAP_MAX = 1.5       # 行と行の間隔がこの倍 (行の高さ) を超えたら，そこで止める
+
+
+def extend_top(dark, value_x, x_edges, top, pitch, reach=TOP_REACH_ROWS,
+               cover=TOP_COVER_MIN, gap=TOP_GAP_MAX):
+    """表頭の上端 `top` を，値の行が続く限り上へ伸ばした y を返す (2026-09-10)
+
+    `plot_row`・`header` の検出枠は先頭の項目 (群落記号・通し番号・調査番号・
+    調査年月日) まで届かないことがある (10_p1 は 4 項目 6 行が枠の外)．検出枠の上を
+    傾きに沿った投影で行に切り，**地点の列の半分以上に字がある行**が 1.5 行以内の
+    間隔で続いていれば，そこまで含める．表題や群落名は数列にしかかからない．
+    """
+    y0 = max(0.0, float(top) - float(pitch) * reach)
+    if float(top) - y0 < pitch:
+        return float(top)
+    lines = value_lines(dark, (value_x[0], y0, value_x[1], float(top) + pitch * 0.5),
+                        float(pitch))
+    if not lines:
+        return float(top)
+    # **またぎを見るときは罫線を消す** (2026-09-10)．群落記号の行は枠で組まれており，
+    # 枠の横線がすべての列の境をまたぐので，そのままでは凡例と区別できない
+    # (10_p1 は「a」「b」の枠が表頭に入らなかった)．線を消せば残るのは短い記号だけ
+    from . import row_track
+    clean = row_track.clean_rules(dark, int(value_x[0]), int(value_x[1]),
+                                  int(y0), int(float(top) + pitch * 0.5), float(pitch))
+    cols = [(float(a), float(b)) for a, b in zip(x_edges[:-1], x_edges[1:])]
+    if not cols:
+        return float(top)
+    new_top = float(top)
+    last = float(top)
+    stop_bottom = None          # 止めた行 (凡例など) の下端．上端はこれより上へ出さない
+    for _c, a, b in sorted(lines, key=lambda t: -t[1]):     # 上端の高い順 = 下から上へ
+        if a >= float(top):
+            continue
+        if last - b > pitch * gap:
+            break
+        have = np.mean([ink.ratio(dark, a, b, xa, xb) > 0 for xa, xb in cols])
+        if have < cover:
+            stop_bottom = float(b)
+            break
+        # **字が列の境をまたぐ行は凡例・表題** (15_p5 は地点 4 列で，凡例の文が列の
+        # 半分にかかり，値の行に見えた)．値は列の中に収まるので境をまたがない
+        if _cross_frac(clean, a - y0, b - y0, x_edges, x0=value_x[0]) >= TOP_CROSS_MAX:
+            stop_bottom = float(b)
+            break
+        new_top = float(a)
+        last = float(a)
+    if new_top >= float(top):
+        return float(top)
+    y = new_top - pitch * 0.3
+    if stop_bottom is not None:
+        # 凡例の字の上に上端を置かない: 凡例の下端と値の行の上端の中間まで
+        y = max(y, (stop_bottom + new_top) / 2.0)
+    return max(0.0, y)
+
+
+TOP_CROSS_MAX = 0.4     # 字がまたぐ列の境がこの割合以上なら，値の行ではない
+
+
+def _cross_frac(dark, y1, y2, x_edges, half=3, x0=0.0):
+    """行 `y1`-`y2` で，字が列の境をまたいでいる境の割合 (境の両側 `half` px に字)
+
+    `x0` は `dark` の左端に当たる画像の x (切り出した配列を渡すときに使う)．
+    """
+    inner = [float(x) - float(x0) for x in x_edges[1:-1]]
+    if not inner:
+        return 0.0
+    band = dark[max(0, int(y1)):max(0, int(y2))]
+    if band.size == 0:
+        return 0.0
+    n = 0
+    for x in inner:
+        xi = int(x)
+        if xi <= 0 or xi >= band.shape[1]:
+            continue
+        left = band[:, max(0, xi - half):xi]
+        right = band[:, xi:xi + half]
+        # **同じ画素行で両側に字があること**．帯ぜんたいで見ると，隣り合う列の
+        # 値が別々の高さにあるだけで「またいだ」ことになる (10_p1 は 1.00 になった)
+        if left.size and right.size and (left.any(axis=1) & right.any(axis=1)).any():
+            n += 1
+    return n / len(inner)
+
+
 def drop_unvalued(edges, dark, value_x, min_ratio=VALUE_INK_MIN):
     """先頭・末尾の帯のうち，値側に字の無いもの (表題・凡例) を落とす"""
     if edges is None or len(edges) < 3:
@@ -577,6 +683,8 @@ def header_bands(img, box, value_x, pitch=None, reader=None, dark=None, info=Non
         else:
             edges = bands_from_pairs(spans, vs, edges, pitch=float(pitch))
             edges = snap_to_gap(edges, dark, value_x, float(pitch), slope=slope)
+        # **値の行の内側を通る境は，行の外へ出す** (2026-09-11)
+        edges = keep_out_of_runs(edges, vs)
     edges = drop_unvalued(edges, dark, value_x)
     if edges is None or len(edges) < MIN_LINES + 1:
         return None
@@ -584,6 +692,36 @@ def header_bands(img, box, value_x, pitch=None, reader=None, dark=None, info=Non
 
 
 SHEAR_MIN = 2.0         # 端の列のずれがこの px 未満なら傾けない
+
+
+RUN_KEEP = 2            # 値の行の端からこの px 以内なら，行の内側とはみなさない
+
+
+def keep_out_of_runs(edges, runs, keep=RUN_KEEP):
+    """**値の行の内側を通る境を，行の外へ出す** (2026-09-11 ユーザ指摘: kinki_021)
+
+    表頭の帯の境は，値の行 (黒画素の連なり) のあいだに置くのが正しい形です
+    (2026-09-10 ユーザ定義: 1 つの文字の途中に境が無い)．上端を伸ばす処理や
+    項目名の側の行から来た境が，値の行の真ん中を通ることがあります
+    (kinki_021 は通し番号の数字を上下に割っていた)．
+
+    行の内側の境は，近い方の端の外へ出します．出すと隣の境を越えるなら落とします．
+    """
+    if edges is None or len(edges) < 3 or not runs:
+        return edges
+    out = [float(edges[0])]
+    for e in [float(v) for v in edges[1:-1]]:
+        for _c, a, b in runs:
+            if a + keep < e < b - keep:
+                e = (a - keep) if (e - a) < (b - e) else (b + keep)
+                break
+        if e > out[-1] + keep:
+            out.append(e)
+    last = float(edges[-1])
+    while len(out) > 1 and out[-1] >= last - keep:
+        out.pop()
+    out.append(last)
+    return np.asarray(out, dtype=float)
 
 
 def shear_header_values(img, df_loc, dark=None):

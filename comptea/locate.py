@@ -616,9 +616,13 @@ def _locate_block(df: pd.DataFrame, source_image: str, img, max_shift_ratio: flo
                     '付けてある．段階1で右端の列を目で確かめる．')
             # **左端の外の列も同じように足す** (2026-09-10 ユーザ指摘: 09_p5)．
             # 種名の列の右端より左へは出ない．階層の列は表頭が空なので巻き込まない
+            # 検出済みの階層の右端は**限界にしない** (2026-09-10 ユーザ目視 10 回目:
+            # 05_p2 は階層の検出枠 1423-1606 が組成の 1 列目 (1546-1637) を飲み込んで
+            # おり，枠を限界にすると 1 列目が足せない)．階層は「表頭が空」で止まる．
+            # 足したあと記号が食い込めば，階層の右端と組成の左端を 1 本にする
+            # (`layer_col.refit_layer_width`)
             name_x2 = [float(r['x2'].iloc[0])
-                       for r in (spec_x_range, sname_x_range, layer_x_range)
-                       if r is not None]   # 検出済みの階層があればその右端まで
+                       for r in (spec_x_range, sname_x_range) if r is not None]
             x_edges, n_left = col_reach.reach_left(
                 dark_x, x_edges, y_edges, y_head=y_head,
                 x_min=max(name_x2) if name_x2 else None)
@@ -630,6 +634,14 @@ def _locate_block(df: pd.DataFrame, source_image: str, img, max_shift_ratio: flo
                     f'組成部の左端の外に，本体にも表頭にも字のある列が {n_left} 列あったので'
                     "足した(検出の箱が届いていない)．内挿した列として note に 'interpolated' を"
                     '付けてある．段階1で左端の列を目で確かめる．')
+            # **境を印字の地点の隙間へ寄せる** (2026-09-11 ユーザ指摘: kinki_070)
+            from . import col_edges as _ce
+            x_edges, n_snap = _ce.snap_to_plot_gaps(
+                dark_x, x_edges, (float(y_edges[0]), float(y_edges[-1])))
+            if n_snap:
+                warnings.append(
+                    f'列の境 {n_snap} 本を，印字の地点の隙間へ寄せた'
+                    '(内挿の刻みがずれて積もっていた)．段階1で列の対応を目で確かめる．')
     if y_interp.any():
         warnings.append(
             f'行のうち {int(y_interp.sum())} 行は検出されず，前後の間隔から内挿した'
@@ -774,6 +786,29 @@ def _locate_header(df: pd.DataFrame, source_image: str, x_edges, warnings: list,
     rows = filter_results(df, source_image, class_plot_row).sort_values(by='y1')
     if rows.empty:
         return []
+    # **表頭は組成部より上にしかない** (2026-09-11 ユーザ指摘: 11_p1 は常在度の総合表で，
+    # 本体の途中の行が `plot_row` として検出され，表頭の帯が y 4085-5744 (本体は
+    # 971-6199) に出ていた)．行の検出の上端より下の `plot_row` は誤検出として捨てる
+    det_rows = filter_results(df, source_image, 'row')
+    if len(det_rows) >= 3:
+        # **上端は 10% 分位で見る** (2026-09-11)．`row` は表頭の中にも誤検出される
+        # ので，最小値を使うと表頭ごと捨ててしまう (14_p1 は y 430 の 1 本のせいで
+        # 表頭の 18 本すべてが「組成部の中」になった)．本体の途中に出た表頭
+        # (11_p1 は y 4085，本体は 971-6199) は分位でも下に来る
+        body_top = float(np.percentile(det_rows['y1'].astype(float), 10))
+        keep = rows['y1'] < body_top + float((rows['y2'] - rows['y1']).median())
+        if not keep.all():
+            n_drop = int((~keep).sum())
+            rows = rows[keep]
+            warnings.append(
+                f"組成部の中にあった '{class_plot_row}' の検出 {n_drop} 本を捨てた"
+                '(表頭は組成部より上にしかない)．表頭が本体の途中に出ていたら，'
+                '段階1で確かめる')
+        if rows.empty:
+            warnings.append(
+                f"'{class_plot_row}' の検出がすべて組成部の中にあったため，"
+                '表頭のセルを出力しない．')
+            return []
     if x_edges is None:
         warnings.append(
             f"'{class_plot_row}' はあるが列の位置が決まらないため，"
@@ -852,6 +887,14 @@ def _locate_header(df: pd.DataFrame, source_image: str, x_edges, warnings: list,
         if not head.empty:
             ocr_top = min(ocr_top, float(head['y1'].min()))
         ocr_top = max(0.0, ocr_top - median_h)
+        # **上端は，値の行が続く限り上へ伸ばす** (2026-09-10 ユーザ目視 10 回目: 10_p1 は
+        # 群落記号・通し番号・調査番号・調査年月日の 4 項目 (値 6 行) が検出枠より上に
+        # あり，帯の外に落ちていた)．検出枠の上に，地点の列の半分以上に字のある行が
+        # 1.5 行以内の間隔で続いていれば，そこまで含める (表題や群落名は数列にしか
+        # かからないので含まれない)
+        ocr_top = header_lines.extend_top(
+            ink.binarize(img), (float(x_edges[0]), float(x_edges[-1])), x_edges,
+            ocr_top, float(median_h))
         # 行を束ねる閾値は**組成部の行の高さ**(検出の `row` の箱の高さの中央値)の半分．
         # 表頭の項目行は組成部と同じ行送りで組まれている
         body_rows = filter_results(df, source_image, 'row')

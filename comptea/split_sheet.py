@@ -407,6 +407,54 @@ def find_tables(dark, min_gutter=MIN_GUTTER, min_gap=MIN_GAP,
     return sorted(result, key=lambda b: (b[0], b[1]))
 
 
+NOTE_BLANK = 0.002      # 行の黒画素が幅のこの割合未満なら空白の行
+
+
+def note_boxes(dark, boxes, gap=BLOB_REACH_GAP, blank=NOTE_BLANK):
+    """表の箱ごとに，**すぐ下に続く注記**の箱を返す (無ければ None)
+
+    表の下には「出現 1 回の種」と調査地・調査年月日・出典が書かれており，
+    **表頭に無い地点の情報の出どころ**です (2026-09-11 ユーザ指摘: 02_p1・02_p2 で
+    欠落)．帯で切った箱では，これが丸ごと落ちていました．
+
+    **表の画像には含めません**．含めると画像が高くなり，検出器の入力の縮尺が
+    変わって列や階層の枠が動きます (09_p5 は組成の 1 列目が階層の枠に食われた)．
+    注記は別の画像として書き出し，読む側 (`once_page.parse_site_notes`) が使います．
+
+    箱の x の幅で黒画素の並びを見て，空白の行が箱の高さの `gap` ぶん続くまで
+    下へ辿ります．**他の箱の上端は越えません**．
+
+    Returns:
+        [(x1, y1, x2, y2) または None] を `boxes` と同じ並びで
+    """
+    h, w = dark.shape
+    out = []
+    for x1, y1, x2, y2 in boxes:
+        limit_y = min([b[1] for b in boxes
+                       if b[1] >= y2 and min(x2, b[2]) - max(x1, b[0]) > 0] + [h])
+        room = max(10, int((y2 - y1) * gap))
+        prof = dark[:, int(x1):int(x2)].sum(axis=1)
+        thr = max(1.0, (x2 - x1) * blank)
+        bottom, run, y = y2, 0, int(y2)
+        while y < int(limit_y):
+            if prof[y] < thr:
+                run += 1
+                if run > room:
+                    break
+            else:
+                run = 0
+                bottom = y + 1
+            y += 1
+        top = None
+        for y in range(int(y2), int(bottom)):    # 注記の最初の字まで詰める
+            if prof[y] >= thr:
+                top = y
+                break
+        out.append((x1, top, x2, int(bottom)) if top is not None and bottom - top > 10
+                   else None)
+    return out
+
+
 def check_rotation(image):
     """紙面が 90 度回して組まれていれば警告を返す (対策 H の入口．2026-09-10)
 
@@ -457,12 +505,17 @@ def split_sheet(path, outdir, page=0, dpi=300, **kw):
     boxes = find_tables(dark, **kw)
     stem = os.path.splitext(os.path.basename(path))[0]
     os.makedirs(outdir, exist_ok=True)
+    notes = note_boxes(dark, boxes)
     written = []
-    for i, box in enumerate(boxes, 1):
+    for i, (box, note) in enumerate(zip(boxes, notes), 1):
         dst = os.path.join(outdir, f'{stem}_p{i}.png')
         cut, _ = cut_table(im, box)
         cut.save(dst)
         written.append((dst, box))
+        if note is not None:
+            # **注記は別の画像**．表の画像に含めると検出器の入力の縮尺が変わる
+            im.crop(tuple(int(v) for v in note)).save(
+                os.path.join(outdir, f'{stem}_p{i}_note.png'))
     return written
 
 

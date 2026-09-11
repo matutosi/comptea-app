@@ -31,6 +31,8 @@
 段階 2 (境を谷でなく拍の中点に置く) と段階 3 (見出し・凡例を note に付ける) は別途．
 """
 
+import re
+
 import numpy as np
 import pandas as pd
 
@@ -102,7 +104,11 @@ CV_MAX = 0.15           # 拍の間隔の散らばりがこれを超える段は
 BEAT_DIFF = 3           # 格子と拍の行数がこれ以上食い違えば警告
 
 
-SHIFT_CLASSES = ('sname', 'species_col', 'layer')
+# **組成の列も追従の対象にする** (2026-09-10 ユーザ目視 10 回目: 17_p1 は紙面が 12,466 px と
+# 高く，一定の刻みで進むと「ブナ」の周辺 (行 200 前後) で組成の行が半行ほど下へずれ，
+# 値の上端を切っていた．種名の列は合っている)．採用の条件は他の列と同じ
+# 「字の単位を境が割る数が減るときだけ」なので，合っている表では動かない
+SHIFT_CLASSES = ('sname', 'species_col', 'layer', 'comp')
 
 
 FOLLOW_K = 5            # 行ごとのずれを滑らかにする窓 (行数．3・5・10 で差は無く，3 は活字で雑音を拾った)
@@ -121,16 +127,18 @@ MIN_BAND = 0.5          # 行の高さのこの倍を下回る帯は作らない
 
 
 def _strip_slanted(band, min_len, slant=RULE_SLANT):
-    """縦に長く続く黒を，左右のぶれを許して消した写しを返す (`band` は転置済み)
+    """軸 1 に長く続く黒を，軸 0 のぶれを許して消した写しを返す
 
-    傾いた縦罫線は，まっすぐな連なりを探す `_strip_long_runs` では途中で切れて
-    残る．左右 `slant` px に広げた写しで「長い連なり」を見つけ，その範囲にある
-    **元の**黒画素だけを消す (広げた分まで消すと，罫線の脇の字が欠ける)．
+    傾いた罫線は，まっすぐな連なりを探す `_strip_long_runs` では途中で切れて
+    残る．軸 0 の前後 `slant` px に広げた写しで「長い連なり」を見つけ，その範囲に
+    ある**元の**黒画素だけを消す (広げた分まで消すと，罫線の脇の字が欠ける)．
+
+    縦罫線には転置して渡す (軸 0 が画像の x になる)．横罫線にはそのまま渡す．
     """
     if band.size == 0 or slant <= 0:
         return _strip_long_runs(band, min_len)
     wide = band.copy()
-    for k in range(1, slant + 1):            # 転置してあるので，軸 0 が画像の x
+    for k in range(1, slant + 1):
         wide[k:, :] |= band[:-k, :]
         wide[:-k, :] |= band[k:, :]
     keep = _strip_long_runs(wide, min_len)       # 長い連なりだけが False になる
@@ -140,14 +148,19 @@ def _strip_slanted(band, min_len, slant=RULE_SLANT):
 
 
 def clean_rules(dark, x1, x2, y1, y2, pitch, slant=RULE_SLANT):
-    """帯 `dark[y1:y2, x1:x2]` から下線・横罫線と縦罫線を消した写しを返す"""
+    """帯 `dark[y1:y2, x1:x2]` から下線・横罫線と縦罫線を消した写しを返す
+
+    **横罫線も上下のぶれを許して消す** (2026-09-10)．紙面は 0.5 度ほど傾いており，
+    幅 3,800 px の罫線は 1 本の画素行に収まらない．まっすぐな連なりだけを消すと
+    切れ端が残り，10_p1 の群落記号の枠は 1,335 → 444 px しか減らなかった．
+    """
     h, w = dark.shape
     x1, x2 = max(0, int(x1)), min(w, int(x2))
     y1, y2 = max(0, int(y1)), min(h, int(y2))
     band = dark[y1:y2, x1:x2]
     if band.size == 0:
         return band.copy()
-    out = _strip_long_runs(band, int(max(RULE_H, RULE_H_P * pitch)))
+    out = _strip_slanted(band, int(max(RULE_H, RULE_H_P * pitch)), slant)
     out = _strip_slanted(np.ascontiguousarray(out.T), int(RULE_V_P * pitch) + 1,
                          slant).T
     return np.ascontiguousarray(out)
@@ -522,6 +535,7 @@ def fix_offsets(img, df_loc, classes=SHIFT_CLASSES):
     out = df_loc
     warnings = []
     changed = False
+    fixed = {}
     for block, g in df_loc.groupby('block', sort=True):
         comp = g[g['obj_name'] == 'comp']
         n_rows = int(comp['row'].nunique()) if not comp.empty else 0
@@ -551,7 +565,22 @@ def fix_offsets(img, df_loc, classes=SHIFT_CLASSES):
                     continue
                 out = _apply_edges(out, mask, edges, note)
                 changed = True
-                warnings.append(f'段{block}: **列 {cls} の境を直した**' + msg)
+                fixed.setdefault((block, cls), []).append(msg)
+    # **列ごとに 1 行にまとめる** (2026-09-10)．組成部を対象に足したら，地点が 128 列の
+    # 17_p1 で警告が 120 本を超えた．直した本数と，字を割る単位の合計だけを出す
+    for (block, cls), msgs in fixed.items():
+        tot = [0, 0]
+        for m in msgs:
+            n = re.search(r'字を割る単位 (\d+) → (\d+)/(\d+)', m)
+            if n:
+                tot[0] += int(n.group(1))
+                tot[1] += int(n.group(2))
+        if len(msgs) == 1:
+            warnings.append(f'段{block}: **列 {cls} の境を直した**' + msgs[0])
+        else:
+            warnings.append(
+                f'段{block}: **列 {cls} の境を直した** ({len(msgs)} 列．'
+                f'字を割る単位 {tot[0]} → {tot[1]})．行ごとに追従し，境を字の間の空白へ')
     if not changed:
         return df_loc, warnings
     return out, warnings

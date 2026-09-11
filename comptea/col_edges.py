@@ -396,6 +396,17 @@ def align_header_columns(df_loc, img=None):
             cells.append(r)
     out = pd.concat([df_loc[df_loc['obj_name'] != 'header_value'],
                      pd.DataFrame(cells)], ignore_index=True)
+    # **項目名の列の右端は，値の左端まで届かせる** (2026-09-10)．左端の外の列を足す
+    # 処理が，あとで捨てられる列を一時的に作ることがあり (kinki_003 は 1420-1516 px の
+    # 余白)，そのとき項目名の右端がその列の左端で止まったままになる (96 px 短い)．
+    # 字は切れないが，区切りが変わったと数えられ，見直しの対象が 36 表増えた
+    ja = out['obj_name'] == 'header_item_ja'
+    if not ja.any():
+        ja = out['obj_name'] == 'header_item'
+    if ja.any():
+        x2 = float(out.loc[ja, 'x2'].max())
+        if x2 < float(edges[0]):
+            out.loc[ja & (out['x2'] >= x2 - 0.5), 'x2'] = float(edges[0])
     if 'cell_id' in out.columns:
         out['cell_id'] = range(1, len(out) + 1)
     return out, [f'表頭の列を本体の境から作り直した({n_head} 列 → {n_body} 列)．'
@@ -614,3 +625,74 @@ def fix_name_layer_edge(img, df_loc, window=NL_WINDOW):
     if not changed:
         return df_loc, warnings
     return out, warnings
+
+GAP_SNAP_NEAR = 0.45    # 境をこの割合 (列の幅) より近い隙間へ寄せる
+
+
+GAP_FAR_MIN = 10        # これ以下のずれは寄せない (`checks.CHECK_NEAR_PX` と同じ
+                        # 「隙間に乗っている」距離．寄せると副作用だけが出る)
+
+
+GAP_BAD_RATIO = 0.5     # 境のこの割合以上が離れている表だけ直す (刻みのずれが
+                        # 積もっている表)．数本だけずれている表は，そこが正しい
+
+
+GAP_FAR_MED = 15        # ずれの中央値がこの px 以上の表だけ直す (kinki_070 は 27 px，
+                        # 列を失った 19_p2 は 10 px．割合だけでは分かれなかった)
+
+
+GAP_KEEP_W = 0.7        # 寄せたあと，隣の列がこの割合 (列の幅) より細くなるなら寄せない
+
+
+def snap_to_plot_gaps(dark, x_edges, y_range, near=GAP_SNAP_NEAR):
+    """**列の境を，印字の地点の隙間へ寄せる** (2026-09-11 ユーザ指摘: kinki_070)
+
+    列の刻みは内挿で決まるので，隙間が拾えない所では刻みがずれて積もります
+    (kinki_070 は印字が 75 px 刻みなのに格子は 78〜80 px で進み，通し番号 3・4 の
+    境が 27〜32 px 右にあって「KF」を割っていた)．**印字の隙間は紙面が示す正しい
+    区切り**なので，近ければそこへ寄せます．
+
+    **直すのは，刻みのずれが積もっている表だけ**です (境の半分以上が隙間から
+    10 px 以上離れている)．数 px のずれまで寄せると，もともと正しい境が動いて
+    列が細くなり，後段の「細い列の併合」で列ごと消えます (07_p3 は 8 → 5 列，
+    19_p2 は 16 → 14 列，kinki_086 は階層が消えた．どれもずれの中央値は 4〜5 px)．
+
+    寄せるのは (a) 隙間が 10 px 以上・列の幅の `near` 倍以下に離れており，
+    (b) 隣の境を越えず，(c) 隣の列が細くなりすぎず，(d) 寄せて**字を割る回数が
+    増えない**とき．「直して悪くならないこと」は他の直しと同じ歯止めです．
+
+    Returns:
+        (境, 寄せた本数)
+    """
+    xs = [float(v) for v in x_edges]
+    if len(xs) < 4:
+        return np.asarray(xs, dtype=float), 0
+    w = float(np.median(np.diff(xs)))
+    if not w > 0:
+        return np.asarray(xs, dtype=float), 0
+    y1, y2 = int(y_range[0]), int(y_range[1])
+    gaps = plot_gaps(dark, (int(xs[0]), y1, int(xs[-1]), y2))
+    if not gaps:
+        return np.asarray(xs, dtype=float), 0
+    gaps = np.asarray(gaps, dtype=float)
+    dist = [float(np.min(np.abs(gaps - e))) for e in xs[1:-1]]
+    if (np.mean([v > GAP_FAR_MIN for v in dist]) < GAP_BAD_RATIO
+            or float(np.median(dist)) < GAP_FAR_MED):
+        return np.asarray(xs, dtype=float), 0     # 刻みは積もっていない
+    cross = crossing_counts(dark, [(float(y1), float(y2))], dark.shape[1])
+    moved = 0
+    for i in range(1, len(xs) - 1):
+        e = xs[i]
+        g = float(gaps[int(np.argmin(np.abs(gaps - e)))])
+        if not GAP_FAR_MIN < abs(g - e) <= w * near:
+            continue
+        if not (xs[i - 1] + 2 < g < xs[i + 1] - 2):
+            continue
+        if min(g - xs[i - 1], xs[i + 1] - g) < w * GAP_KEEP_W:
+            continue
+        if int(cross[int(g)]) > int(cross[int(e)]):
+            continue
+        xs[i] = g
+        moved += 1
+    return np.asarray(xs, dtype=float), moved
+

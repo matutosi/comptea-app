@@ -19,6 +19,8 @@
 枠線が見出しの帯に入り，「組成に字がある」と誤判定した (010・066 の各 2 見出し)．
 """
 
+import re
+
 import numpy as np
 import pandas as pd
 
@@ -86,6 +88,127 @@ class _Region:
     def has_ink(self, a, b):
         """`a`〜`b` (画像の y) に字があるか"""
         return self.ink(a, b) >= self.need
+
+
+KANA = set('アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモ'
+           'ヤユヨラリルレロワヲンガギグゲゴザジズゼゾダヂヅデドバビブベボパピプペポ'
+           'ァィゥェォッャュョーヴヵヶ')
+
+MIN_LATIN = 3           # ラテン文字がこの字数以上なら 1 語と数える
+
+
+MAX_LATIN = 4           # 学名は「属名 種小名 (var. 変種名)」で 4 語まで
+
+
+FLOW_KANA = 2           # 和名がこれだけ並べば，1 行に何種も書いた流し込み
+                        # (表の行の和名は 1 つ)
+
+
+FLOW_KANA_MIN = 2       # 流し込みの和名を数えるときのカナの長さ (「カヤ」は 2 字)
+
+
+FLOW_LATIN = 6          # ラテン文字の語がこれだけ並べば同じ (学名は 4 語まで)．
+                        # 語数だけで 3 にすると「var.」を含む学名 + 和名で誤る
+                        # (kinki_014・019・048・071・075 の本物の行が落ちた)
+
+
+MIN_KANA = 3            # カナがこれだけ続けば和名がある
+
+
+# **「出現 1 回の種」の見出し** (2026-09-11 ユーザ指示: そのまま書かれている．
+# ただし 1 は漢数字とアラビア数字の両方がある)．独文は「Außerdem je einmal in
+# Lfd. Nr.」で，OCR は ß を B・s・β と読むことがあるので緩く当てる
+# **表記の揺れを緩く見る** (2026-09-11 ユーザ指示)．
+# - 語順: 「出現一回の種」と「一回出現の種」は同じもの
+# - 数字: 漢数字とアラビア数字 (全角も)
+# - 区切り: 字と字のあいだに空白・ハイフン・記号が入る (OCR が「出現-一回」と読む)
+# - 末尾: 「の種」は**求めない**．OCR が「種」を「稲」「穫」と読み違えるため
+#   (09_p5 は「出現-一回の稲」と読まれて見出しと分からなかった)．
+#   「出現」と「回」が並ぶ形は，この資料では見出し以外に出てこない
+ONCE_JA = re.compile(r'(?:出現\W{0,3}[1１一壱]\W{0,3}回'
+                     r'|[1１一壱]\W{0,3}回\W{0,3}出現)')
+ONCE_DE = re.compile(r'(?:Au[\u00dfBbs\u03b2]+erdem|je\s*einmal)', re.I)
+
+
+def kind_of_text(text):
+    """1 行の読みから，その行の役割を決める
+
+    Returns:
+        'once' (出現 1 回の種の見出し) / 'flow' (1 行に何種も並ぶ流し込み) /
+        'item' (表頭の項目名) / 'species' (種名) / 'other'
+    """
+    from .correct_text import known_names
+    from .plot_table import match_item
+    t = (text or '').strip()
+    if not t:
+        return 'other'
+    packed0 = t.replace(' ', '')
+    if ONCE_JA.search(t) or ONCE_JA.search(packed0) or ONCE_DE.search(t):
+        return 'once'
+    # **1 行に何種も並ぶ行は流し込み** (2026-09-11 ユーザ指示: 多めに取ってから
+    # OCR で除外する)．「出現 1 回の種」の見出しが読めない行でも，種名が 3 つ以上
+    # 並んでいれば本文ではなく流し込み (04_p2 の 1 行は学名 2 つと和名 2 つ)．
+    # 表の行は 学名 1 つ + 和名 1 つ で 2 つまで
+    # **濁点や引用符は詰めてから数える**．OCR は半角濁点を `"` や `'` と読み，
+    # 1 つの和名が 2 つに割れる (22_p3 の「ヨツバムグラ」は「ヨハ"ムグラ」と
+    # 読まれ，和名 2 つ = 流し込みとみなして本物の最終行が落ちた)
+    n_kana = len(re.findall(
+        '[' + ''.join(sorted(KANA)) + ']{%d,}' % FLOW_KANA_MIN,
+        re.sub(r'[\s\u0022\u0027\u2019\u201d\u309b\u309c\uff9e\uff9f]', '', t)))
+    n_latin = len(re.findall('[A-Za-z]{%d,}' % MIN_LATIN, t))
+    if n_kana >= FLOW_KANA or n_latin >= FLOW_LATIN:
+        return 'flow'
+    if match_item(t) is not None:
+        return 'item'
+    # 和名は空白で区切られていることがある (「ア カ マ ツ」)．詰めて引く
+    packed = t.replace(' ', '')
+    for cand in (t, packed):
+        if known_names([cand])[0]:
+            return 'species'
+    # 種の行は「学名 和名 階層 値」が 1 行に並ぶので，カナの**割合**では見ない．
+    # カナが 3 字以上**続く**なら和名がある (辞書に無い古い表記・誤読も含む)．
+    # 表頭の項目名の行は先に `match_item` で拾っているので，ここへは来ない
+    if re.search('[' + ''.join(sorted(KANA)) + ']{%d,}' % MIN_KANA, packed):
+        return 'species'
+    # **学名 (ラテン文字が 2〜4 語) も種名**とみなす (09_p5 の最下 4 行は和名が
+    # 読めず学名だけが読めていた)．並びすぎるものは上で `flow` にしてある
+    if 2 <= len(re.findall('[A-Za-z]{%d,}' % MIN_LATIN, t)) <= MAX_LATIN:
+        return 'species'
+    return 'other'
+
+
+def read_kind(img, box, reader=None, pad=0.0):
+    """帯 `box` (x1, y1, x2, y2) を読んで，その行の役割を返す
+
+    **行としても文章としても取れるときの決め手**に使います (2026-09-11 ユーザ指示)．
+    黒画素の形だけでは，表の最終行と直下の流し込みの 1 行目が重なると分けられません
+    (kinki_079-1 の「ヤマルリソウ」)．読んで，種名の辞書に当たれば表の行です．
+
+    **`pad` を与えると，上下に広げて読みます**．端の帯は境が字の下端を数 px
+    切っており，「出現一回の種」の「種」が欠けて見出しと分かりません
+    (04_p2 は 11 px 足りなかった)．ただし採るのは**字の中心が元の帯の中に
+    ある読みだけ**です．広げたまま全部採ると，下の行の見出しを自分の行と
+    誤ります (kinki_038 の「ホウキギク」，086 の「ヘビノネゴザ」が落ちた)．
+    """
+    from . import ocr
+    x1, y1, x2, y2 = (int(v) for v in box)
+    if x2 - x1 < 4 or y2 - y1 < 4:
+        return 'other'
+    reader = ocr.READER if reader is None else reader
+    ry1 = max(0, int(y1 - pad))
+    ry2 = min(img.height, int(y2 + pad))
+    try:
+        cell = np.asarray(img.crop((x1, ry1, x2, ry2)).convert('RGB'))
+        found = reader.readtext(cell, detail=1, paragraph=False)
+    except Exception:                           # noqa: BLE001  読めなくても進む
+        return 'other'
+    keep = []
+    for pts, text, _c in found:
+        cy = ry1 + float(np.mean([p[1] for p in pts]))
+        if y1 <= cy <= y2:
+            keep.append((float(np.mean([p[0] for p in pts])), text))
+    keep.sort()
+    return kind_of_text(' '.join(t for _x, t in keep))
 
 
 def _runs(row, gap=2):

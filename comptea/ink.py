@@ -169,6 +169,10 @@ def text_ratio(dark, y1, y2, x1, x2, min_run=4, fill=RULE_FILL):
 
     高さの `fill` 以上が黒い x は罫線とみなして外してから測る．
     字は縦に連なっても行の間で切れるので，この割合には届かない．
+
+    **横罫線は外さない**．幅の狭い列では，記号の行がそのまま「幅の 8 割が黒」に
+    なるので，字ごと消えてしまう (階層の列)．横罫線を除きたい呼び出し側は，
+    `row_track.clean_rules()` で消した写しを渡す．
     """
     y1, y2 = max(0, int(y1)), min(dark.shape[0], int(round(y2)))
     x1, x2 = max(0, int(x1)), min(dark.shape[1], int(round(x2)))
