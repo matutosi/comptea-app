@@ -167,3 +167,21 @@ def test_種の行と表頭の項目名():
     assert kind_of_text('Omphalodes japonica ヤマルリソウ K') == 'species'
     assert kind_of_text('調査年月日') == 'item'
     assert kind_of_text('') == 'other'
+
+
+def test_ラテン語の語は階級の略語とローマ数字を数えない():
+    """長い学名の「var. intermedium」が和名の欄へはみ出しても，流し込みに見せない"""
+    from comptea.row_kinds import latin_words
+    assert latin_words('var, intermedium') == ['intermedium']
+    assert latin_words('III IV V Carex lenta') == ['Carex', 'lenta']
+    assert len(latin_words('Avena fatua カラスムギ Cardamine flexuosa')) == 4
+
+
+def test_表の下の注記を見分ける():
+    """調査地・出典の注記は種の行ではない (下端を多めに取ると足されていた)"""
+    from comptea.row_kinds import kind_of_text
+    assert kind_of_text('Lage d. Aufn. 調査地：Fluß Takeda, Hyogo-Präf. 兵庫県') == 'note'
+    assert kind_of_text('Nachweis d. Vegetationsaufnahmen 既発表資料名') == 'note'
+    assert kind_of_text('Quercus glauca アラカシ K') == 'species'
+    # 学名の中の「datum」(cuspidatum) を注記の「Datum」と取らない (kinki_060)
+    assert kind_of_text('Polygonum cuspidatum イタドリ') == 'species'

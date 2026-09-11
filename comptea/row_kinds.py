@@ -128,14 +128,24 @@ MIN_KANA = 3            # カナがこれだけ続けば和名がある
 ONCE_JA = re.compile(r'(?:出現\W{0,3}[1１一壱]\W{0,3}回'
                      r'|[1１一壱]\W{0,3}回\W{0,3}出現)')
 ONCE_DE = re.compile(r'(?:Au[\u00dfBbs\u03b2]+erdem|je\s*einmal)', re.I)
+# **表の下の注記** (調査地・出典)．「Lage d. Aufn. 調査地: …」「Nachweis d.
+# Vegetationsaufnahmen 既発表資料名: …」．下端を多めに取ると，この行が種の行として
+# 足される (2026-09-11: 本のページ 8 表で +1 行)
+# 2 段組では右の段の帯が注記の途中から読まれる (「Hyogo 兵庫県城崎郡香住町三田浜
+# Datum 調査年月日」) ので，住所 (県…郡/市/町) と出典の語も手掛かりにする．
+# 「Präf」は表頭の項目 (Signal d. Präf.) にも出るので使わない
+NOTE_RE = re.compile(r'(?:Lage\s*d|Nachweis|Aufnahmen|調査地\s*[:：]'
+                     r'|既発表|出典|\bDatum\b|\bOriginal\b|原調査資料'
+                     r'|[都道府県][^\s]{0,10}[郡市町村])', re.I)
 
 
 def kind_of_text(text):
     """1 行の読みから，その行の役割を決める
 
     Returns:
-        'once' (出現 1 回の種の見出し) / 'flow' (1 行に何種も並ぶ流し込み) /
-        'item' (表頭の項目名) / 'species' (種名) / 'other'
+        'once' (出現 1 回の種の見出し) / 'note' (表の下の注記: 調査地・出典) /
+        'flow' (1 行に何種も並ぶ流し込み) / 'item' (表頭の項目名) /
+        'species' (種名) / 'other'
     """
     from .correct_text import known_names
     from .plot_table import match_item
@@ -145,6 +155,8 @@ def kind_of_text(text):
     packed0 = t.replace(' ', '')
     if ONCE_JA.search(t) or ONCE_JA.search(packed0) or ONCE_DE.search(t):
         return 'once'
+    if NOTE_RE.search(t) or NOTE_RE.search(packed0):
+        return 'note'
     # **1 行に何種も並ぶ行は流し込み** (2026-09-11 ユーザ指示: 多めに取ってから
     # OCR で除外する)．「出現 1 回の種」の見出しが読めない行でも，種名が 3 つ以上
     # 並んでいれば本文ではなく流し込み (04_p2 の 1 行は学名 2 つと和名 2 つ)．
@@ -175,6 +187,62 @@ def kind_of_text(text):
     if 2 <= len(re.findall('[A-Za-z]{%d,}' % MIN_LATIN, t)) <= MAX_LATIN:
         return 'species'
     return 'other'
+
+
+JA_LATIN = 2            # 和名の列にラテン語がこれだけあれば流し込み
+                        # (本物の行の和名の欄はカタカナだけ)
+
+
+def read_texts(img, box, reader=None, pad=0.0):
+    """帯 `box` を読んで，**字の中心が帯の中にある**読みを左から順に返す"""
+    from . import ocr
+    x1, y1, x2, y2 = (int(v) for v in box)
+    if x2 - x1 < 4 or y2 - y1 < 4:
+        return []
+    reader = ocr.READER if reader is None else reader
+    ry1 = max(0, int(y1 - pad))
+    ry2 = min(img.height, int(y2 + pad))
+    try:
+        cell = np.asarray(img.crop((x1, ry1, x2, ry2)).convert('RGB'))
+        found = reader.readtext(cell, detail=1, paragraph=False)
+    except Exception:                           # noqa: BLE001  読めなくても進む
+        return []
+    keep = []
+    for pts, text, _c in found:
+        cy = ry1 + float(np.mean([p[1] for p in pts]))
+        if y1 <= cy <= y2:
+            keep.append((float(np.mean([p[0] for p in pts])), text))
+    keep.sort()
+    return [t for _x, t in keep]
+
+
+def looks_flow_ja(img, box, reader=None, pad=0.0, need=JA_LATIN):
+    """**和名の列から右**を読んで，流し込みらしいかを返す (2026-09-11)
+
+    本物の行は 和名 → 階層の記号 → 値 (数字・+・・) で，和名より右にラテン語は
+    ありません．流し込みは 1 行に何種も並ぶ文章が欄を突き抜けるので，和名より
+    右にラテン語 (学名) が入ります．学名+和名+階層をまとめて読むと，長い学名
+    (var. 付き) + 和名 が「名前 2 つ」に見えて本物の行を落とすので，**学名の列を
+    外して読む**のが肝心です．箱は (和名の左端, 組成部の右端) で渡します —
+    和名の列だけでは，地点が 2 列しかない表 (kinki_048・077) で 2 つ目の種名が
+    組成部に隠れて見えません．ローマ数字 (常在度) はラテン語に数えません．
+    """
+    t = ' '.join(read_texts(img, box, reader=reader, pad=pad))
+    return len(latin_words(t)) >= need
+
+
+RANKS = {'var', 'ssp', 'subsp', 'forma', 'aff', 'sect', 'agg'}
+
+
+def latin_words(text):
+    """ラテン文字の語 (3 字以上)
+
+    **数えないもの**: ローマ数字 (III・IV = 常在度の値)，階級の略語 (var・ssp…)．
+    長い学名 (「Xxx yyy var. intermedium」) は和名の欄へはみ出すことがあり，
+    「var」と変種名の 2 語を数えると本物の行が流し込みに見える (kinki_043・056)．
+    """
+    return [w for w in re.findall('[A-Za-z]{%d,}' % MIN_LATIN, text)
+            if not re.fullmatch('[IVXivx]+', w) and w.lower() not in RANKS]
 
 
 def read_kind(img, box, reader=None, pad=0.0):
