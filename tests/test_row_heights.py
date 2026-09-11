@@ -278,3 +278,48 @@ def test_下端の目安を越えても読んで表の行なら足す():
     out, below, _above, _trim = extend_edges(edges, prof, prof, med, ext,
                                              judge=judge)
     assert below == 1 and out[-1] == 30.0
+
+
+def _tail_case(name_ink, kind):
+    """末尾の帯 (30-40) の組成が薄く，種名の側の字の位置と読みを変えて呼ぶ
+
+    16_p2 の最終行「イワボタン」: タイプの薄い「・」が二値化で消え，学名が和名より
+    8 px 下に印字されて帯の中央 1/2 に 4 割しか入らず，形では「字が無い」に見えた
+    """
+    from comptea.row_heights import extend_edges
+    med = 10.0
+    edges = [0.0, 10.0, 20.0, 30.0, 40.0]
+    prof = np.ones(60)
+    prof[30:40] = 0.01                          # 薄い「・」
+    names = {}
+    for cls, (a, b) in name_ink.items():
+        p = np.ones(60)
+        p[28:50] = 0.0
+        p[a:b] = 1.0
+        names[cls] = p
+
+    def judge(a, _b):
+        return kind if int(a) == 30 else 'other'
+
+    return extend_edges(edges, prof, prof, med, (0.0, 40.0),
+                        prof_names=names, judge=judge)
+
+
+def test_形で字が無く見えても読んで種の行なら末尾で落とさない():
+    """和名は帯の中，学名は 8 px 下 (中央 1/2 に届かない)．読みは species → 残す"""
+    out, _below, _above, trim = _tail_case(
+        {'species_col': (33, 38), 'sname': (38, 47)}, 'species')
+    assert trim == 0 and out[-1] == 40.0
+
+
+def test_読めなければ末尾の薄い帯は落とす():
+    out, _below, _above, trim = _tail_case(
+        {'species_col': (33, 38), 'sname': (38, 47)}, 'other')
+    assert trim == 1 and out[-1] == 30.0
+
+
+def test_直下の流し込みは種と読めても字の中心が外なので落とす():
+    """流し込みの 1 行目は帯の下半分にかかるだけ (02_p1・22_p1 は ja_flow が効かない)"""
+    out, _below, _above, trim = _tail_case(
+        {'species_col': (38, 48), 'sname': (39, 49)}, 'species')
+    assert trim == 1 and out[-1] == 30.0

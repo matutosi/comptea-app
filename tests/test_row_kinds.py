@@ -77,6 +77,45 @@ def _sheet(edges=EDGES, headings=(), name_only=(), legends=(), blank_ja=(),
     return img
 
 
+def _skewed(df, img, dys=(0, 15, 30)):
+    """組成の列ごとに y を `dys` だけずらす (傾き補正後の格子の形)．紙面の「・」も同じだけずらす
+
+    傾き補正 (`row_skew`・`row_track.fix_offsets`) のあとは同じ行でも列ごとに y が
+    違う (実データでは行の高さの 1/4〜2/3．03_p2 は 35 px の行で 23 px)．
+    行の全セルの y の min/max で帯を作ると隣の行の字が入る
+    """
+    out = df.copy()
+    px = img.load()
+    for c, dy in enumerate(dys, 1):
+        m = (out.obj_name == 'comp') & (out.col == c)
+        out.loc[m, ['y1', 'y2']] += float(dy)
+    for i, (ya, yb) in enumerate(zip(EDGES[:-1], EDGES[1:]), 1):
+        cy = int((ya + yb) // 2)
+        for (xa, xb), dy in zip(zip(X_COMP[:-1], X_COMP[1:]), dys):
+            xc = (xa + xb) // 2
+            for x in range(xc - 2, xc + 3):
+                for y in range(cy - 3, cy + 4):
+                    if px[x, y] == 0:
+                        px[x, y] = 255
+            if px[10, cy] == 0 and px[320, cy] == 0:     # 種の行だけ「・」を打つ
+                _fill(px, xc - 2, xc + 3, cy + dy - 3, cy + dy + 4)
+    return out, img
+
+
+def test_列ごとに_y_がずれても種の行に印を付けない():
+    """傾き補正後の格子で，種の行が見出しや学名だけの行にされないこと
+
+    帯 (行の全セルの min/max) だけで測ると，行の高さが水増しされて黒画素の
+    中央値が上がり，本物の種の行が「本体が空」になる (14_p2 で 11 行)．
+    セルごとだけで測ると，箱が字から外れている表で逆に落ちる (17_p1 で 10 行)．
+    **どちらかに字があれば空でない**とするので，印は減る方向にしか動かない
+    (見出しを見落とすことはあるが，種の行を落とすより安全)．
+    """
+    df, img = _skewed(_df(), _sheet(headings=(4,)))
+    k = _kinds(img, df)
+    assert all(v == '' for r, v in k.items() if r != 4)
+
+
 def _kinds(img, df):
     out, _warns = row_kinds.mark_rows(img, df)
     k = (out[out.obj_name == 'sname'].sort_values('row')

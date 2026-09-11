@@ -19,6 +19,7 @@ kinki_014 の切り出しが回転を忘れていた件も同じ型)．
 ので，記録された場所に無ければ同じ名前を `workdir` とその親から探します．
 """
 import os
+import re
 
 import pandas as pd
 
@@ -45,12 +46,22 @@ def find(df, workdir=None):
         return p
     if not p:
         return None
-    name = os.path.basename(p)
+    name = basename(p)
     for d in _dirs(workdir):
         q = os.path.join(d, name)
         if os.path.exists(q):
             return q
     return None
+
+
+def basename(path):
+    """`\\` と `/` のどちらで区切られていても名前を返す (2026-09-12)
+
+    格子は Windows で作り，CI や別の PC (Linux) から読むことがあります．
+    `os.path.basename` は Linux では `\\` を区切りと見ないので，
+    `C:\\もう無い場所\\a_deskew.png` がまるごと名前になり，探せませんでした．
+    """
+    return re.split(r'[\\/]', str(path))[-1]
 
 
 def _dirs(workdir):
