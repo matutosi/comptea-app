@@ -261,3 +261,20 @@ def test_検出を渡さなければ端は触らない():
     df = _grid(short, [300, 340, 380, 420], 'comp')
     out, warns = row_heights.fix_row_heights(_page(print_edges, size=(500, 800)), df)
     assert out is df
+
+
+def test_下端の目安を越えても読んで表の行なら足す():
+    """目安 `ext` の直下に本物の行があり，読みが species ならその行を足す (13_p3)"""
+    from comptea.row_heights import extend_edges
+    med = 10.0
+    edges = [0.0, 10.0, 20.0]                   # 2 行の格子
+    prof = np.ones(60)                          # 組成部はどの行にも字がある
+    ext = (0.0, 22.0)                           # 目安は 2 px しか余裕が無い
+    kinds = {2: 'species', 3: 'once'}           # 3 行目は本物，4 行目は見出し
+
+    def judge(a, b):
+        return kinds.get(int(a // med), 'other')
+
+    out, below, _above, _trim = extend_edges(edges, prof, prof, med, ext,
+                                             judge=judge)
+    assert below == 1 and out[-1] == 30.0

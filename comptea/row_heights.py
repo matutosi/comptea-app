@@ -305,6 +305,9 @@ def text_like(dark, xs, a, b, rule):
     return blank / len(xs) < TEXT_BLANK_MIN
 
 
+END_EXTRA = 2.0         # 下端の目安をこの行数ぶん越えても，読んで表の行なら足す
+
+
 JUDGE_PAD = 0.3         # 帯を読むときに上下へ広げる割合 (行の高さの倍数)
 
 
@@ -314,7 +317,7 @@ ONCE_TALL = 1.25        # 帯の高さ / 行の高さ．これを超える帯は
 
 
 def extend_edges(edges, prof_comp, prof_all, med, ext, is_text=None, prof_names=None,
-                 judge=None):
+                 judge=None, ja_flow=None):
     """格子の上下端を，組成部の本当の範囲 `ext` まで行の高さで埋める
 
     格子の縦の範囲は `row` の検出で決まり，`_extend_rows_to_block()` は片側 2 行
@@ -400,7 +403,14 @@ def extend_edges(edges, prof_comp, prof_all, med, ext, is_text=None, prof_names=
             # 見出しが両方入ることがあり (kinki_079-1 の「ヤマルリソウ」，
             # 15_p2 の「オクノカンスゲ」)，そのまま落とすと欠落する．
             # 実測: 純粋な見出しの帯は 1.14 行，混ざった帯は 1.47〜1.66 行
-            if kind == 'once' and (b - a) <= med * ONCE_TALL:
+            # 見出しか，表の下の注記 (調査地・出典) と読めた帯は落とす
+            if kind in ('once', 'note') and (b - a) <= med * ONCE_TALL:
+                return True
+            # **和名の列にラテン語が入れば流し込み** (2026-09-11 ユーザ指示:
+            # 後で落とせるなら，ここで落としておく)．まとめて読むと長い学名 +
+            # 和名 が「名前 2 つ」に見えて本物の行が落ちるので，列を分けて読む
+            if ja_flow is not None and (b - a) <= med * ONCE_TALL \
+                    and ja_flow(a, b):
                 return True
             # **読めたら，形では止めない** (2026-09-11 ユーザ指示: 学名・和名・
             # 組成の欠落は絶対に避ける．多めに取ってから OCR で除外する)．
@@ -424,11 +434,22 @@ def extend_edges(edges, prof_comp, prof_all, med, ext, is_text=None, prof_names=
     # 足す行は**行の高さのまま**足す(範囲の端で切り詰めると短い行ができ，
     # 行の高さがそろわない)．範囲の端は箱の端なので数 px 越えてよい
     below = 0
-    while hi - out[-1] > med * END_MIN_GAP:
+    # **目安 `hi` を少し越えても試す** (2026-09-11 ユーザ指示: 多めに取ってから
+    # 読んで除外する)．`hi` は流し込みの手前で詰めた範囲だが，本物の最終行の
+    # 直下に流し込みがあると詰めすぎる (13_p3 は最終行「コチヂミザサ」の手前
+    # 20 px で止まり，1 行足りなかった)．越えたぶんは読みで止める (見出し・流し込み)
+    # ので，**読み手 (`judge`) があるときだけ**越える．無ければ除外できない
+    reach = hi + (med * END_EXTRA if judge is not None else 0.0)
+    while reach - out[-1] > med * END_MIN_GAP:
         new = out[-1] + med
         if is_flow(out[-1], new):
             break                                   # 流し込みに入った
         if not is_row(out[-1], new):
+            break
+        # **目安を越えた分は，読んで種の行と分かったものだけ**足す．読めない
+        # (other) ものは足さない — 除外の手段が無いまま多めに取ると，直下の
+        # 流し込みを行として足す (04_p2 型) のを防げない
+        if new > hi + 1 and judge(out[-1], new) != 'species':
             break
         out.append(new)
         below += 1
@@ -590,10 +611,26 @@ def fix_row_heights(img, df_loc, df_det=None, tol=ROW_TOL):
                 # **字の中心が帯の中にある読みだけ** (`read_kind` の中で絞る)
                 return row_kinds.read_kind(img, (box[0], a, box[1], b), pad=pad)
 
+            # **和名の列だけを読む判定**．流し込みは欄を突き抜けるので
+            # 和名の欄にラテン語 (学名) が入る
+            ja = body[body['obj_name'] == 'species_col']
+            # 和名の左端から**組成部の右端まで** (和名の列だけでは，地点が 2 列の
+            # 表で 2 つ目の種名が組成部に隠れて見えない．kinki_048・077)
+            ja_box = ((float(ja['x1'].min()), float(cb['x2'].max()))
+                      if len(ja) else None)
+
+            def ja_flow(a, b, box=ja_box, pad=med * JUDGE_PAD):
+                if box is None:
+                    return False
+                from . import row_kinds
+                return row_kinds.looks_flow_ja(
+                    img, (box[0], a, box[1], b), pad=pad)
+
             new, n_below, n_above, n_trim = extend_edges(new, prof, prof_all, med, ext,
                                                          is_text=is_text,
                                                          prof_names=prof_names,
-                                                         judge=judge)
+                                                         judge=judge,
+                                                         ja_flow=ja_flow)
             if n_below or n_above or n_trim:
                 grew = True
                 warnings.append(

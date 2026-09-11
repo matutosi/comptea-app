@@ -107,6 +107,8 @@ def test_行の役割():
     # **1 行に何種も並ぶ行は流し込み** (多めに取ってから OCR で除外する)
     assert noyolo.row_kind('Skimmia japonica ミヤマシキミ K-+, '
                            'Torreya nucifera カヤ B1-1・1') == 'flow'
+    assert noyolo.row_kind('Quercus glauca アラカシ K') == 'species'
+    assert noyolo.row_kind('Paederia scandens var. mairei ヘクソカズラ B2,S') == 'species'
     assert noyolo.row_kind('') == 'other'
 
 

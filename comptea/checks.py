@@ -27,6 +27,18 @@ CHECK_NEAR_PX = 10      # 境が隙間に乗っているとみなす距離
 CHECK_MIN_RATIO = 0.7   # これを下回ると知らせる
 
 
+def check_source_image(image, df_loc):
+    """**格子が，突き合わせている画像に収まっているか**
+
+    工程は傾きを直した画像や横倒しを起こした画像で検出するので，格子の座標は
+    元画像とずれます．収まっていなければ，違う画像を見ている印です
+    (2026-09-11: 20_p3 の表頭の境が元画像では「12 本字を割る」と出た)．
+    """
+    from . import source
+    im = Image.open(image) if isinstance(image, str) else image
+    return source.check(df_loc, im)
+
+
 def check_grid_columns(image, df_loc, min_cols=CHECK_MIN_COLS,
                        near=CHECK_NEAR_PX, ratio=CHECK_MIN_RATIO):
     """格子の列の境が，印字の地点の隙間に乗っているかを測る
