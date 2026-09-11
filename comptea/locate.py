@@ -634,6 +634,14 @@ def _locate_block(df: pd.DataFrame, source_image: str, img, max_shift_ratio: flo
                     f'組成部の左端の外に，本体にも表頭にも字のある列が {n_left} 列あったので'
                     "足した(検出の箱が届いていない)．内挿した列として note に 'interpolated' を"
                     '付けてある．段階1で左端の列を目で確かめる．')
+            # **境を印字の地点の隙間へ寄せる** (2026-09-11 ユーザ指摘: kinki_070)
+            from . import col_edges as _ce
+            x_edges, n_snap = _ce.snap_to_plot_gaps(
+                dark_x, x_edges, (float(y_edges[0]), float(y_edges[-1])))
+            if n_snap:
+                warnings.append(
+                    f'列の境 {n_snap} 本を，印字の地点の隙間へ寄せた'
+                    '(内挿の刻みがずれて積もっていた)．段階1で列の対応を目で確かめる．')
     if y_interp.any():
         warnings.append(
             f'行のうち {int(y_interp.sum())} 行は検出されず，前後の間隔から内挿した'
