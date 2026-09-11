@@ -327,6 +327,7 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
     # 表頭の列を本体に合わせる(本体で捨てた列が表頭に残ると，地点がずれる)
     df_loc, align_warn = col_edges.align_header_columns(df_loc)
     warnings += align_warn
+    warnings += checks.check_source_image(image, df_loc)
     warnings += checks.check_grid_columns(image, df_loc)
     # **行も測る**．列だけを見ていたので，行が9割落ちても黙って通っていた
     warnings += checks.check_grid_rows(image, df_loc, df_det=df_det)
