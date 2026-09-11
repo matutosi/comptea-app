@@ -683,6 +683,8 @@ def header_bands(img, box, value_x, pitch=None, reader=None, dark=None, info=Non
         else:
             edges = bands_from_pairs(spans, vs, edges, pitch=float(pitch))
             edges = snap_to_gap(edges, dark, value_x, float(pitch), slope=slope)
+        # **値の行の内側を通る境は，行の外へ出す** (2026-09-11)
+        edges = keep_out_of_runs(edges, vs)
     edges = drop_unvalued(edges, dark, value_x)
     if edges is None or len(edges) < MIN_LINES + 1:
         return None
@@ -690,6 +692,36 @@ def header_bands(img, box, value_x, pitch=None, reader=None, dark=None, info=Non
 
 
 SHEAR_MIN = 2.0         # 端の列のずれがこの px 未満なら傾けない
+
+
+RUN_KEEP = 2            # 値の行の端からこの px 以内なら，行の内側とはみなさない
+
+
+def keep_out_of_runs(edges, runs, keep=RUN_KEEP):
+    """**値の行の内側を通る境を，行の外へ出す** (2026-09-11 ユーザ指摘: kinki_021)
+
+    表頭の帯の境は，値の行 (黒画素の連なり) のあいだに置くのが正しい形です
+    (2026-09-10 ユーザ定義: 1 つの文字の途中に境が無い)．上端を伸ばす処理や
+    項目名の側の行から来た境が，値の行の真ん中を通ることがあります
+    (kinki_021 は通し番号の数字を上下に割っていた)．
+
+    行の内側の境は，近い方の端の外へ出します．出すと隣の境を越えるなら落とします．
+    """
+    if edges is None or len(edges) < 3 or not runs:
+        return edges
+    out = [float(edges[0])]
+    for e in [float(v) for v in edges[1:-1]]:
+        for _c, a, b in runs:
+            if a + keep < e < b - keep:
+                e = (a - keep) if (e - a) < (b - e) else (b + keep)
+                break
+        if e > out[-1] + keep:
+            out.append(e)
+    last = float(edges[-1])
+    while len(out) > 1 and out[-1] >= last - keep:
+        out.pop()
+    out.append(last)
+    return np.asarray(out, dtype=float)
 
 
 def shear_header_values(img, df_loc, dark=None):
