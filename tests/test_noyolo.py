@@ -101,7 +101,12 @@ def test_行の役割():
     assert noyolo.row_kind('調査年月日') == 'item'
     assert noyolo.row_kind('アカマツ') == 'species'
     assert noyolo.row_kind('ア カ マ ツ') == 'species'      # 空白入りも詰めて引く
-    assert noyolo.row_kind('Quercus glauca') == 'other'
+    # **学名も種名**とみなす (2026-09-11．09_p5 の最下 4 行は和名が読めず
+    # 学名だけが読めていて，本物の行が落ちていた)
+    assert noyolo.row_kind('Quercus glauca') == 'species'
+    # **1 行に何種も並ぶ行は流し込み** (多めに取ってから OCR で除外する)
+    assert noyolo.row_kind('Skimmia japonica ミヤマシキミ K-+, '
+                           'Torreya nucifera カヤ B1-1・1') == 'flow'
     assert noyolo.row_kind('') == 'other'
 
 

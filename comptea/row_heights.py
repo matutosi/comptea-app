@@ -305,6 +305,14 @@ def text_like(dark, xs, a, b, rule):
     return blank / len(xs) < TEXT_BLANK_MIN
 
 
+JUDGE_PAD = 0.3         # 帯を読むときに上下へ広げる割合 (行の高さの倍数)
+
+
+ONCE_TALL = 1.25        # 帯の高さ / 行の高さ．これを超える帯は見出しでも落とさない
+                        # (本物の行と混ざっている)
+
+
+
 def extend_edges(edges, prof_comp, prof_all, med, ext, is_text=None, prof_names=None,
                  judge=None):
     """格子の上下端を，組成部の本当の範囲 `ext` まで行の高さで埋める
@@ -374,7 +382,7 @@ def extend_edges(edges, prof_comp, prof_all, med, ext, is_text=None, prof_names=
         return hits >= need
 
     def is_flow(a, b):
-        """文章の行か
+        """文章の行か (**読みを正とする**)
 
         **読んだ内容を先に見る** (2026-09-11 ユーザ指示)．「出現 1 回の種」の見出しが
         読めたら，形の判定によらずそこから下は流し込みです (17_p1 は形の判定だけでは
@@ -383,10 +391,23 @@ def extend_edges(edges, prof_comp, prof_all, med, ext, is_text=None, prof_names=
         """
         if judge is not None:
             kind = judge(a, b)
-            if kind == 'once':
+            # **落とすのは見出しと読めた帯だけ** (2026-09-11 ユーザ指示:
+            # 欠落は絶対に避ける)．「1 行に何種も並ぶ」で落とすと，和名が
+            # OCR の濁点で 2 つに割れた行 (22_p3)，帯に 2 行ぶんが入った行
+            # (20_p1)，記号がカナに読まれた行 (08_p5・10_p1) が落ちた．
+            # 取りすぎた流し込みは段階 3 が `note` を付ける
+            # **落とすのは帯の高さが 1 行ぶんのときだけ**．帯に本物の最終行と
+            # 見出しが両方入ることがあり (kinki_079-1 の「ヤマルリソウ」，
+            # 15_p2 の「オクノカンスゲ」)，そのまま落とすと欠落する．
+            # 実測: 純粋な見出しの帯は 1.14 行，混ざった帯は 1.47〜1.66 行
+            if kind == 'once' and (b - a) <= med * ONCE_TALL:
                 return True
-            if kind == 'species' and is_row(a, b):
-                return False
+            # **読めたら，形では止めない** (2026-09-11 ユーザ指示: 学名・和名・
+            # 組成の欠落は絶対に避ける．多めに取ってから OCR で除外する)．
+            # 列の境の空きは，地点の列が少ない表では表の行でも 0.38〜0.50 に
+            # なり，流し込み (0.33〜1.00) と重なる (09_p5 は本物の 4 行が
+            # 落ちていた)．読んで違うと分かったものだけ落とす
+            return False
         return is_text is not None and is_text(a, b)
 
     trimmed = 0
@@ -561,11 +582,13 @@ def fix_row_heights(img, df_loc, df_det=None, tol=ROW_TOL):
             name_box = ((float(nm['x1'].min()), float(cb['x1'].min()))
                         if len(nm) else None)
 
-            def judge(a, b, box=name_box):
+            def judge(a, b, box=name_box, pad=med * JUDGE_PAD):
                 if box is None:
                     return 'other'
                 from . import row_kinds
-                return row_kinds.read_kind(img, (box[0], a, box[1], b))
+                # 帯を広げて読む (端の帯は境が字の下端を切る)．採るのは
+                # **字の中心が帯の中にある読みだけ** (`read_kind` の中で絞る)
+                return row_kinds.read_kind(img, (box[0], a, box[1], b), pad=pad)
 
             new, n_below, n_above, n_trim = extend_edges(new, prof, prof_all, med, ext,
                                                          is_text=is_text,
