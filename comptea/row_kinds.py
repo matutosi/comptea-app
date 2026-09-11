@@ -211,13 +211,31 @@ JA_LATIN = 2            # 和名の列にラテン語がこれだけあれば流
                         # (本物の行の和名の欄はカタカナだけ)
 
 
+def reader_or_none(reader=None):
+    """OCR の読み手．**入っていなければ None** (2026-09-12)
+
+    読みは補助で，無ければ形の判定に任せます (`extend_edges` は読み手が
+    無ければ下端の目安を越えません)．ここで ImportError をそのまま投げると，
+    OCR と関わりのない行の高さのテストまで落ちます (CI は EasyOCR を
+    入れていない．main の CI が 5 件失敗していた)．
+    """
+    if reader is not None:
+        return reader
+    try:
+        from . import ocr
+    except Exception:                           # noqa: BLE001  入っていない
+        return None
+    return getattr(ocr, 'READER', None)
+
+
 def read_texts(img, box, reader=None, pad=0.0):
     """帯 `box` を読んで，**字の中心が帯の中にある**読みを左から順に返す"""
-    from . import ocr
     x1, y1, x2, y2 = (int(v) for v in box)
     if x2 - x1 < 4 or y2 - y1 < 4:
         return []
-    reader = ocr.READER if reader is None else reader
+    reader = reader_or_none(reader)
+    if reader is None:
+        return []
     ry1 = max(0, int(y1 - pad))
     ry2 = min(img.height, int(y2 + pad))
     try:
@@ -276,11 +294,12 @@ def read_kind(img, box, reader=None, pad=0.0):
     ある読みだけ**です．広げたまま全部採ると，下の行の見出しを自分の行と
     誤ります (kinki_038 の「ホウキギク」，086 の「ヘビノネゴザ」が落ちた)．
     """
-    from . import ocr
     x1, y1, x2, y2 = (int(v) for v in box)
     if x2 - x1 < 4 or y2 - y1 < 4:
         return 'other'
-    reader = ocr.READER if reader is None else reader
+    reader = reader_or_none(reader)
+    if reader is None:
+        return 'other'
     ry1 = max(0, int(y1 - pad))
     ry2 = min(img.height, int(y2 + pad))
     try:

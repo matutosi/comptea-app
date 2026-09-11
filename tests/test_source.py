@@ -87,3 +87,14 @@ def test_元画像を渡されても記録が優先される(tmp_path):
     other = _png(tmp_path / 'a.png', size=(50, 40))
     im = source.open_image(_grid(p), fallback=other)
     assert im.size == (100, 80)
+
+
+def test_区切りが逆スラッシュでも名前で探す(tmp_path):
+    """格子は Windows で作り，CI や別の PC (Linux) から読むことがある
+
+    `os.path.basename` は Linux では `\` を区切りと見ないので，記録された
+    場所がまるごと名前になり，探せなかった (main の CI が失敗していた)．
+    """
+    assert source.basename(r'C:\もう無い場所\a_deskew.png') == 'a_deskew.png'
+    assert source.basename('/tmp/もう無い場所/a_deskew.png') == 'a_deskew.png'
+    assert source.basename('a_deskew.png') == 'a_deskew.png'
