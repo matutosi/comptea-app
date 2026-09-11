@@ -408,6 +408,42 @@ def _blobs(votes, need, gap):
     return list(zip(starts.tolist(), ends.tolist()))
 
 
+VRULE_RUN = 0.2         # 帯の高さのこの割合以上**続けて**黒い x は，印字の縦罫線
+                        # (08_p3 は罫線 0.35・階層の記号 0.01．罫線は途切れる)
+                        # (黒の割合では記号と区別できない．階層の記号は全行に
+                        # 並ぶので割合は高いが，1 つの走りは字の高さしかない)
+
+
+def _vrule_between(dark, x_from, x_to, rows, run=VRULE_RUN):
+    """`x_from`〜`x_to` にある印字の縦罫線の x を返す (無ければ None)
+
+    階層の列と組成部のあいだには縦罫線が引かれた紙面があります (08_p3)．
+    罫線は紙面が示す正しい区切りなので，枠の右端はそこに合わせます．
+
+    見分けるのは**続けて黒い長さ**です．黒画素の割合で見ると，全行に並ぶ
+    階層の記号 (08_p3 は 0.30) と罫線 (0.51) が近く，合成画像では逆転します．
+    """
+    x_from, x_to = max(0, int(x_from)), int(min(x_to, dark.shape[1]))
+    if x_to - x_from < 2 or not rows:
+        return None
+    y1 = max(0, int(min(a for a, _ in rows)))
+    y2 = int(min(dark.shape[0], max(b for _, b in rows)))
+    band = dark[y1:y2, x_from:x_to]
+    if band.size == 0:
+        return None
+    need = max(3, int(band.shape[0] * run))
+    for k in range(band.shape[1]):
+        col = band[:, k]
+        if not col.any():
+            continue
+        # いちばん長い連なり
+        idx = np.flatnonzero(np.diff(
+            np.concatenate(([False], col, [False])).astype(np.int8)))
+        if (idx[1::2] - idx[0::2]).max() >= need:
+            return float(x_from + k)
+    return None
+
+
 def _clip_rows(dark, x1, x2, rows, pitch):
     """記号が枠の左右をはみ出している行の数 (罫線は段の全高で消してから見る)"""
     from . import row_track
@@ -503,6 +539,16 @@ def refit_layer_width(img, df_loc):
             na = max(lo_stop, int(mid - cap / 2))
             nb = min(hi_stop, int(mid + cap / 2))
         nx1, nx2 = left + na, left + nb
+        # **印字の縦罫線は越えない** (2026-09-11 ユーザ指摘: 08_p3 は階層の枠が
+        # 罫線 (x 1167) を越えて 1213 まで広がり，組成の値「3・4」の左を切った)．
+        # 罫線は正しい区切りなので，そこで止める．探すのは**記号の右端から**
+        # (罫線が今の枠の中にあることがある)
+        # 探し始めは**記号のかたまりの左端 + 最小幅**から．枠の左境にも罫線が
+        # あるので (08_p3 は 1128 px)，そこを拾わないようにする．記号そのものは
+        # 罫線の濃さに届かない (08_p3 は記号 0.30・罫線 0.51)
+        rule_x = _vrule_between(dark, left + a + min_w, max(nx2, right), rows)
+        if rule_x is not None:
+            nx2 = min(nx2, rule_x)
         # **和名と共有している左端は動かさない** (2026-09-10 ユーザ指摘 45: kinki_045-1 は
         # 「B, S」の B が票の山 (S・K の列) の外にあり，左端を 1663 → 1758 px に寄せて
         # B を落とした)．「和名の右端と階層の左端は 1 本」の規則を破らない．直すのは右端
@@ -527,14 +573,35 @@ def refit_layer_width(img, df_loc):
         c_w = float(np.median(comp.groupby('col')['x2'].max()
                               - comp.groupby('col')['x1'].min()))
         # 1 列目が細くなりすぎるなら動かさない (値が入らなくなる)
-        if nx2 > c_left and (c_w <= 0 or c_left + c_w - nx2 >= c_w * LAYER_COMP_MIN_W):
+        # **印字の縦罫線が見つかったときは，左へも寄せる** (2026-09-11 ユーザ指摘:
+        # 08_p3 は組成の 1 列目が 1196 px から始まり，値「3・4」の左半分が枠の外に
+        # 出ていた．罫線 1178 px が紙面の示す正しい区切り)
+        move = (nx2 != c_left and (rule_x is not None or nx2 > c_left)
+                and (c_w <= 0 or c_left + c_w - nx2 >= c_w * LAYER_COMP_MIN_W))
+        if move and nx2 > c_left:
+            # **組成の値を切るなら動かさない** (2026-09-11 ユーザ指摘: 08_p3 は
+            # 境が 1196 → 1213 px へ動いて「3・4」が「4」になった)．
+            # 縦の境なので，行ごとに**字のかたまりを割る回数**で測る
+            # (`col_edges.crossing_counts`)．「直して悪くならないこと」は他と同じ歯止め
+            from .col_edges import crossing_counts
+            rows_yy = comp.drop_duplicates('row')[['y1', 'y2']].values
+            bands = [(float(a), float(b)) for a, b in rows_yy]
+            cross = crossing_counts(dark, bands, dark.shape[1])
+            before = int(cross[int(c_left)])
+            after_c = int(cross[int(nx2)])
+            if after_c > before:
+                warnings.append(
+                    f'段{block}: 階層の右端は組成部に寄せなかった'
+                    f'(寄せると組成の値を割る回数が {before} → {after_c} に増える)')
+                move = False
+        if move:
             first = ((out['block'] == block) & (out['obj_name'] == 'comp')
                      & (out['x1'].astype(float) <= c_left + 0.5))
             out.loc[first, 'x1'] = float(nx2)
             warnings.append(
-                f'段{block}: 階層の記号が組成部の左端より右へ出ていたので，'
-                f'**組成の 1 列目の左端を階層の右端に合わせた** '
-                f'({c_left:.0f} → {nx2:.0f} px)．階層と組成の境は 1 本')
+                f'段{block}: **組成の 1 列目の左端を階層の右端に合わせた** '
+                f'({c_left:.0f} → {nx2:.0f} px)．階層と組成の境は 1 本'
+                + ('．印字の縦罫線に合わせた' if rule_x is not None else ''))
         changed = True
         warnings.append(
             f'段{block}: **階層の列の幅を黒画素で決め直した** '
