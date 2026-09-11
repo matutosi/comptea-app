@@ -315,7 +315,8 @@ def slanted_profile(dark, x1, x2, slope, bin_w=SLANT_BIN):
     return _shift_sum(bins, xc, h, float(slope))
 
 
-def value_lines(dark, box, pitch, thr=VALUE_INK_THR, min_h=VALUE_MIN_H, info=None):
+def value_lines(dark, box, pitch, thr=VALUE_INK_THR, min_h=VALUE_MIN_H, info=None,
+                gap_min=None):
     """値の側の行 (中心, 上端, 下端) を**黒画素の連なり**から作る
 
     **OCR の箱では駄目でした** (2026-09-10 に測った)．値は列ごとに数字が並ぶので，
@@ -346,7 +347,8 @@ def value_lines(dark, box, pitch, thr=VALUE_INK_THR, min_h=VALUE_MIN_H, info=Non
     # 値が「−」ばかりで，横棒 (6 px) と数字 (11 px) が 2 px 空いただけで別の行に
     # なっていた)．行と行の隙間は行の高さの 2 割ほどあるので，それより近いものは
     # 同じ行．この表の本物の隙間は 7〜13 px，割れていた所は 2 px
-    gap_min = max(3.0, float(pitch) * VALUE_GAP_MIN)
+    if gap_min is None:
+        gap_min = max(3.0, float(pitch) * VALUE_GAP_MIN)
     merged = []
     for a, b in runs:
         if merged and a - merged[-1][1] < gap_min:
@@ -458,6 +460,14 @@ def bands_from_pairs(item_spans, value_spans, edges, pitch=None):
     return np.maximum.accumulate(np.array(out, dtype=float))
 
 
+OWN_GAP_MIN = 1.0       # 項目名の行をつなぐ幅 (px)．値と違い，隣の項目が 3 px で
+                        # 接することがあるので，事実上つながない
+
+
+OWN_PITCH_LO = 0.4      # 決め直す刻みの下限 (渡された刻みに対する比)．
+                        # 下げすぎると 1 行が上下に割れる
+
+
 def bands_from_own_lines(dark, box, pitch, fallback):
     """項目名の領域 `box` の**自分の行**から帯を作る (2026-09-10 ユーザ指摘 2)
 
@@ -467,11 +477,50 @@ def bands_from_own_lines(dark, box, pitch, fallback):
     段階 3 (`plot_table`) は帯どうしの縦の重なりで組にするので，数が違ってよい．
 
     行が 3 つ未満なら `fallback` (値の帯をずらしたもの) をそのまま返します．
+
+    **刻みは項目名自身の行の高さで決め直します** (2026-09-11 ユーザ目視 13 回目:
+    「表頭の項目の行区切りが足りない」13 表)．渡される `pitch` は組成部や表頭の
+    行の高さで，項目名の行はそれより低いことがあります (16_p2 は 55 px に対し
+    項目名は 30 px)．刻みが大きいと短い行が捨てられ (`VALUE_MIN_H`)，隙間も
+    つながって (`VALUE_GAP_MIN`) 行が足りません (9 行 → 真値 12〜13 行)．
+    1 度切って高さの中央値を採り，それで切り直します．
     """
-    lines = value_lines(dark, box, pitch)
+    # **項目名は値とは独立に切る** (2026-09-11 ユーザ指示: 対応は後処理で)．
+    # (1) 「近すぎる連なりはつなぐ」は値のための規則 (「−」と数字が 2 px 空く)．
+    #     項目名では隣の項目をつないでしまう (16_p2 の「調査面積 (林縁方位)」と
+    #     「方位」は隙間 3 px)．つながない (1 px だけ許す)
+    # (2) 傾きに沿った投影の基準は列の中央だが，項目名は左寄せで印字される．
+    #     箱を**字のある範囲**に縮めてから投影する (21_p1 は幅 512 px × 傾き
+    #     0.023 の半分 ≈ 6 px 境がずれ，「調査番号」の下端を通っていた)
+    box = _shrink_to_ink(dark, box)
+    lines = value_lines(dark, box, pitch, gap_min=OWN_GAP_MIN)
     if len(lines) < MIN_LINES:
         return np.asarray(fallback, dtype=float)
+    own = float(np.median([b - a for _m, a, b in lines]))
+    if OWN_PITCH_LO * pitch < own < pitch:
+        again = value_lines(dark, box, own, gap_min=OWN_GAP_MIN)
+        if len(again) > len(lines):
+            lines = again
     return bands_from_value_lines(lines, float(box[1]), float(box[3]))
+
+
+def _shrink_to_ink(dark, box, pad=4):
+    """箱の x を，字のある範囲 (黒画素の 2〜98% 点) に縮める．y は変えない"""
+    x1, y1, x2, y2 = (int(v) for v in box)
+    x1, x2 = max(0, x1), min(dark.shape[1], x2)
+    y1, y2 = max(0, y1), min(dark.shape[0], y2)
+    if x2 - x1 < 8 or y2 - y1 < 2:
+        return box
+    col = dark[y1:y2, x1:x2].sum(axis=0).astype(float)
+    if col.sum() <= 0:
+        return box
+    cum = np.cumsum(col) / col.sum()
+    lo = int(np.searchsorted(cum, 0.02))
+    hi = int(np.searchsorted(cum, 0.98)) + 1
+    nx1, nx2 = x1 + max(0, lo - pad), x1 + min(x2 - x1, hi + pad)
+    if nx2 - nx1 < 8:
+        return box
+    return (float(nx1), float(box[1]), float(nx2), float(box[3]))
 
 
 def bands_from_value_lines(value_spans, top, bottom):
