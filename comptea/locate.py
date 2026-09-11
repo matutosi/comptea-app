@@ -177,6 +177,9 @@ LAYER_BLOB_ROWS = 0.3     # 行のこの割合より少ない行にしか字が�
                           # 記号が無いので，行の多い表ほど割合が下がる．2026-09-10)
 
 
+LAYER_BLOB_CUT = 2        # 太いかたまりを割るときの，中の隙間の幅 (px)
+
+
 LAYER_BLOB_SPLIT = 1.2    # 上限より太いかたまりは，左からこの幅 (行の高さの倍数) を
                           # 切り出して階層として試す (20_p3 は階層と未検出の組成 1 列が
                           # つながって 4.9 行になり，丸ごと落ちていた)
@@ -217,6 +220,21 @@ def _gap_text_blob(dark, gx1, gx2, gy1, gy2, pitch):
         spans.append((a, b))
         if b - a > hi_w:
             spans.append((a, a + int(LAYER_BLOB_SPLIT * pitch)))
+            spans.append((max(a, b - int(LAYER_BLOB_SPLIT * pitch)), b))
+            # **中の隙間で割った片も候補にする** (2026-09-11)．階層の記号に
+            # 和名のはみ出しがつながって上限を超えることがあり (17_p1 は
+            # 85 px)，左右の窓ではどちらも記号を捉えきれない
+            sub = cols[a:b]
+            off = np.flatnonzero(~sub)
+            if off.size:
+                cut = np.flatnonzero(np.diff(off) > 1)
+                s0 = np.r_[off[0], off[cut + 1]]
+                e0 = np.r_[off[cut], off[-1]] + 1
+                edges = [a] + [int(a + (x + y) // 2)
+                               for x, y in zip(s0.tolist(), e0.tolist())
+                               if y - x >= LAYER_BLOB_CUT] + [b]
+                spans += [(edges[i], edges[i + 1])
+                          for i in range(len(edges) - 1)]
     for a, b in spans:
         if b - a < lo_w or b - a > hi_w:
             continue
