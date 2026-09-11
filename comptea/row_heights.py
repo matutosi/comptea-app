@@ -312,6 +312,7 @@ JUDGE_PAD = 0.3         # 帯を読むときに上下へ広げる割合 (行の�
 
 
 ONCE_TALL = 1.25        # 帯の高さ / 行の高さ．これを超える帯は見出しでも落とさない
+END_UNIT_MIN = 0.3      # 末尾の帯を読んで戻すとき，種名の側の字の塊がこの高さ (行の高さの倍数) 以上で，中心が帯の中にあること (点や下線の切れ端は数えない)
                         # (本物の行と混ざっている)
 
 
@@ -427,10 +428,41 @@ def extend_edges(edges, prof_comp, prof_all, med, ext, is_text=None, prof_names=
     while len(out) > 2 and (out[-1] - out[-2]) < med * END_SHORT:
         out.pop()
         trimmed += 1
+    dropped = []
     while len(out) > 2 and (not is_row(out[-2], out[-1])
                             or is_flow(out[-2], out[-1])):
-        out.pop()
+        dropped.append(out.pop())
         trimmed += 1
+
+    def unit_centred(a, b):
+        """種名の側の字の塊 (黒画素の連なり) の中心が帯 (a, b) の中にあるか
+
+        本物の行は字が帯に収まる．直下の流し込みの 1 行目は帯の下半分にかかる
+        だけで，中心は帯の外 (02_p1・22_p1 は `ja_flow` が欠けた読みで止められない)
+        """
+        for p in prof_names.values():
+            lo_, hi_ = max(0, int(a - med)), min(len(p), int(b + med))
+            idx = np.flatnonzero(p[lo_:hi_] > 0)
+            if len(idx) == 0:
+                continue
+            cut = np.flatnonzero(np.diff(idx) > 1)
+            for s, e in zip(np.r_[idx[0], idx[cut + 1]], np.r_[idx[cut], idx[-1]] + 1):
+                if (e - s) >= med * END_UNIT_MIN and a <= lo_ + (s + e) / 2 <= b:
+                    return True
+        return False
+
+    # **形で字が無く見えても，読んで種の行なら落とさない** (2026-09-12．16_p2 の
+    # 最終行「イワボタン」: タイプの薄い「・」が二値化で消え，学名が和名より 8 px
+    # 下に印字されて帯の中央 1/2 に 4 割しか入らず，3 つの判定すべてで「字が無い」
+    # になった)．落とした帯を上から読み直し，種の行と分かるものを戻す．
+    # 最初に違うものが出たら止める (見出しの下に並ぶ種名を拾わない: 13_p1)
+    if judge is not None:
+        for e in reversed(dropped):
+            a = out[-1]
+            if is_flow(a, e) or not unit_centred(a, e) or judge(a, e) != 'species':
+                break
+            out.append(e)
+            trimmed -= 1
     # 足す行は**行の高さのまま**足す(範囲の端で切り詰めると短い行ができ，
     # 行の高さがそろわない)．範囲の端は箱の端なので数 px 越えてよい
     below = 0
