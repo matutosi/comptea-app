@@ -5,8 +5,8 @@
 別経路．**表のどこに何があるか (部分) は決めない**．紙面のどこに組成表があるか
 (箱) だけを返す．
 
-**2026-09-12 の水準**: 本のページ 78 枚で格子との IoU >= 0.7 が **58 枚**，
-折込 23 枚で表の数が合うのが **19 枚** (それぞれ 53 枚・14 枚から)．
+**2026-09-12 の水準**: 本のページ 78 枚で格子との IoU >= 0.7 が **64 枚**，
+折込 23 枚で表の数が合うのが **19 枚** (その日の朝は 53 枚・14 枚)．
 
 1. 紙面を**タイルに分けて** OCR する．EasyOCR の `readtext` は既定で長辺を
    2560 px に縮める (`canvas_size`) ので，A0 級の紙面をそのまま渡すと項目名が
@@ -45,9 +45,26 @@
 - 塊から作った箱にも隙間で**伸ばす**: 本のページの当たりが 56 → 43 と大きく
   悪化 (41 枚で悪くなった)．塊が掴めているときは，その端の方が表の端に近い．
 
-**残る弱点**: 折込の「1 枚に何枚あるか」(19/23)．いまの幾何の切り分け
-(`split_sheet.find_tables`．21/23) にはまだ届かない．本のページで外れる 20 枚は，
-表頭が文章の紙面と，箱が表の一部にしか掛からない紙面．
+4d. **上下端を目印で押さえる** (`clamp_box`)．**表頭の項目名より上に表は無い**
+    (上にあるのは表題や本文)．**「出現 1 回の種」は表のすぐ下**にあるので，その上で
+    切る．どちらも読んだ目印そのもので，測り直す必要がない (当たり 58 → 60)．
+4e. **箱の中で，列の隙間が続いている範囲だけを採る** (`table_span`)．表頭が文章で
+    書かれ，しかも本文が項目名と同じ語を使う紙面があり (kinki_043 の本文
+    「高木層の高さ 7 m，植被率 80%」)，目印が本文に散って箱が本文ごと覆う．
+    **肝心なのは「3 行まとめて見る」こと** (`GUT_WIN`)．1 行ずつでは日本語の
+    本文も語間が隙間に見える．3 行まとめると隙間は同じ x に通ったものだけが
+    残り，表 3〜5 本に対し本文 0 本とはっきり分かれる (043・026・020 で実測)．
+    **行の高さは黒画素から推す** (`line_pitch`)．目印の間隔は，目印が本文に
+    散る紙面では当てにならない (043 は 1157 px になり，窓が高すぎて効かなかった)．
+    当たり 60 → **64**．
+
+**残る弱点**
+- 折込の「1 枚に何枚あるか」(19/23)．外す 4 枚のうち 16・21 は**2 つ目・4 つ目の
+  表の項目名が読めていない** (OCR の取りこぼし)，17 は**ごみを項目名と誤認**して
+  横一列になり落ちる．いまの幾何の切り分け (`split_sheet.find_tables`．21/23)
+  にはまだ届かない．
+- 本のページで外れる 14 枚．箱が表の一部にしか掛からない紙面と，本文の語が
+  項目名と重なる紙面．
 """
 import re
 
@@ -248,6 +265,10 @@ def drop_small(boxes, rel=BOX_REL):
 # 段落ごとに割れて塊が 0 個になります (47 枚中 5 枚)．膨張と面積の下限を
 # 振っても IoU は 0.4 止まりで，**塊は本のページには合わない道具**でした．
 
+GUT_WIN = 3.0           # 隙間を見る窓の高さ (行の高さの倍数)．
+                        # **1 行ずつ見てはいけない**: 日本語の本文も 1 行なら
+                        # 隙間が空く．3 行まとめると，表は隙間 3〜5 本，本文は
+                        # 0 本とはっきり分かれる (kinki_043・026・020 で実測)
 GUT_MIN_W = 0.5         # 隙間とみなす幅 (行の高さの倍数)
 GUT_LEAST = 3           # 表らしい帯に要る隙間の数
 GROW_MISS = 2           # 隙間が足りない帯がこれだけ続いたら止める
@@ -255,6 +276,20 @@ GROW_MISS = 2           # 隙間が足りない帯がこれだけ続いたら止
 # **伸ばすのは塊が掴めなかったときだけ** (2026-09-12 に測って決めた)．
 # 塊から作った箱にも伸ばすと，本のページ 78 枚で当たりが 56 → 43 に落ち，
 # 41 枚で悪くなった．塊が掴めているときは，その端の方が表の端に近い
+
+
+def line_pitch(dark):
+    """紙面の**行の高さ**を黒画素から推す
+
+    項目名の間隔 (`mark_pitch`) は，目印が本文に散る紙面では当てにならない
+    (kinki_043 は 1157 px になった)．隙間を見る窓の高さはこちらで決めます．
+    """
+    from .noyolo import guess_pitch
+    try:
+        p = float(guess_pitch(dark))
+    except Exception:                           # noqa: BLE001
+        p = 0.0
+    return p if p >= 4 else max(4.0, dark.shape[0] * 0.01)
 
 
 def gutters(dark, x1, x2, y1, y2, min_w):
@@ -336,6 +371,88 @@ def grow_box(dark, seed, pitch, min_w=None, least=GUT_LEAST, miss=GROW_MISS):
         cols = np.flatnonzero(band.any(axis=0))
         x1, x2 = float(cols[0]), float(cols[-1] + 1)
     return int(x1), int(max(0.0, top)), int(x2), int(min(float(h), bot))
+
+
+# --- 4e. 箱の中で，表らしい範囲だけを取る ---------------------------------
+#
+# 本のページで外す紙面には，**表頭が文章**で書かれ，しかも**本文が項目名と同じ語**
+# を使うものがある (kinki_043 の本文「高木層の高さ 7 m，植被率 80%」)．目印が
+# 本文に散るので，箱が本文ごと覆ってしまう．
+# **表は，列の隙間が縦に続いている範囲**なので，箱の中でその続きがいちばん長い
+# ところだけを採る．
+
+SPAN_LEAST = 3          # 表らしい帯に要る隙間の数 (2→62，3→64，4→61 枚)
+SPAN_MISS = 3           # 隙間が足りない帯をこれだけまでは間に挟んでよい
+                        # (1→62，2〜5→64 枚．3 を採る)
+SPAN_MIN = 4            # 表とみなすのに要る帯の数
+
+
+def table_span(dark, box, pitch, least=SPAN_LEAST, miss=SPAN_MISS,
+               least_rows=SPAN_MIN, min_w=None):
+    """箱の中で，表らしい帯がいちばん長く続く範囲 (y1, y2)．無ければ None"""
+    x1, y1, x2, y2 = (float(v) for v in box)
+    pitch = max(4.0, float(pitch))
+    min_w = pitch * GUT_MIN_W if min_w is None else min_w
+    ys = []
+    y = y1
+    while y + pitch <= y2 + pitch:
+        ys.append((y, min(y + pitch, y2)))
+        y += pitch
+    flags = [len(gutters(dark, x1, x2, a, b, min_w)) >= least for a, b in ys]
+    best = cur = None
+    gap = 0
+    for i, f in enumerate(flags):
+        if f:
+            cur = i if cur is None else cur
+            gap = 0
+            if best is None or (i - cur) > (best[1] - best[0]):
+                best = (cur, i)
+        elif cur is not None:
+            gap += 1
+            if gap > miss:
+                cur = None
+                gap = 0
+    if best is None or (best[1] - best[0] + 1) < least_rows:
+        return None
+    return ys[best[0]][0], ys[best[1]][1]
+
+
+# --- 4d. 上下端を目印で押さえる -------------------------------------------
+#
+# 本のページで外す紙面は，**x はほぼ正しいのに y の範囲が広すぎる**ものが大半
+# だった (kinki_024 は真値 1591-1764 に対し箱 605-1910，043 は 2018-3151 に対し
+# 602-3291．2026-09-12)．塊も隙間も，表の上下の本文まで拾ってしまう．
+#
+# **人は 2 つの手がかりで表の上下を決めている**．
+#   - **表頭の項目名より上に表は無い** (上にあるのは表題や本文)
+#   - **「出現 1 回の種」は表のすぐ下**にある (その上で切れる)
+# どちらも読んだ目印そのものなので，あらためて測る必要がない．
+
+TOP_PAD = 2.0           # 上端は，いちばん上の項目名からこの行数ぶんまで上を許す
+ONCE_PAD = 0.5          # 「出現 1 回の種」の目印から，この行数ぶん上で切る
+CLAMP_MIN = 3.0         # 押さえた結果がこの行数ぶんより低くなるなら，押さえない
+
+
+def clamp_box(box, marks, once, pitch, top_pad=TOP_PAD, once_pad=ONCE_PAD,
+              min_h=CLAMP_MIN):
+    """箱の上下端を，項目名と「出現 1 回の種」の目印で押さえる
+
+    Args:
+        marks: そのまとまりの項目名 [(x, y)]
+        once: 紙面の「出現 1 回の種」の目印 [(x, y)]
+        pitch: 項目名の縦の間隔 (無ければ紙面から決めた目安)
+    """
+    x1, y1, x2, y2 = (float(v) for v in box)
+    pitch = max(4.0, float(pitch))
+    ys = [float(y) for _x, y in marks]
+    if ys:
+        y1 = max(y1, min(ys) - pitch * top_pad)
+    below = [float(y) for _x, y in once if not ys or float(y) > min(ys)]
+    if below:
+        y2 = min(y2, min(below) - pitch * once_pad)
+    if y2 - y1 < pitch * min_h:                 # 潰れるなら押さえない
+        return tuple(int(v) for v in box)
+    return int(x1), int(y1), int(x2), int(y2)
 
 
 # --- 5. 回す・戻す -------------------------------------------------------
@@ -462,14 +579,16 @@ def find_tables(im, reader=None, tile=TILE, dist=DIST, least=LEAST, pad=PAD):
     points = [(x, y) for k, x, y, _t in marks if k == 'item']
     dark = ink.binarize(im)
     blobs = blob_boxes(dark)
+    once = [(x, y) for k, x, y, _t in marks if k == 'once']
     return boxes_from(points, blobs, im.size, dist=dist, least=least, pad=pad,
-                      dark=dark)
+                      dark=dark, once=once)
 
 
 def boxes_from(points, blobs, size, dist=DIST, least=LEAST, pad=PAD,
                x_tol=X_TOL, y_tol=Y_TOL, vert_least=VERT_LEAST,
                box_rel=BOX_REL, use_pitch=True, dark=None, drop_flat=False,
-               mul=PITCH_MUL):
+               mul=PITCH_MUL, once=None, clamp=True, span=True,
+               span_least=SPAN_LEAST, span_miss=SPAN_MISS):
     """目印と塊から表の箱を作る (OCR を切り離した部分．案を測るのに使う)"""
     long = float(max(size))
     d = (group_dist(points, size, long * x_tol, dist=dist, mul=mul) if use_pitch
@@ -479,14 +598,24 @@ def boxes_from(points, blobs, size, dist=DIST, least=LEAST, pad=PAD,
                            y_tol=long * y_tol)
     if not groups:
         return []
+    lp = line_pitch(dark) if dark is not None else 0.0
     boxes = []
     for g in groups:
         b = box_for(g, blobs, pad=pad, max_frac=MAX_FRAC, size=size)
         # **塊が掴めなかったら，白い縦の隙間で伸ばす** (本のページは字が段落ごとに
         # 割れて塊が 0 個になる)．目印の外接矩形のままでは表頭の左半分しか入らない
+        pitch = mark_pitch(g, float(max(size)) * x_tol) or float(max(size)) * 0.01
         if dark is not None and not _touches(b, blobs):
-            pitch = mark_pitch(g, float(max(size)) * x_tol) or 0.0
-            b = grow_box(dark, b, pitch or float(max(size)) * 0.01)
+            b = grow_box(dark, b, lp * GUT_WIN, min_w=lp * GUT_MIN_W)
+        # **上下端を目印で押さえる** (表頭の項目名より上・「出現 1 回の種」より下は表でない)
+        if clamp:
+            b = clamp_box(b, g, once or [], pitch)
+        # **箱の中で，列の隙間が続いている範囲だけを採る** (本文を覆ってしまった分を削る)
+        if dark is not None and span:
+            sp = table_span(dark, b, lp * GUT_WIN, least=span_least,
+                            miss=span_miss, min_w=lp * GUT_MIN_W)
+            if sp is not None:
+                b = (b[0], int(sp[0]), b[2], int(sp[1]))
         boxes.append(b)
     boxes = drop_small(set(boxes), rel=box_rel)
     # **表らしくない箱を落とす** (本文の語を拾った偽の箱)．**既定では使わない**:
