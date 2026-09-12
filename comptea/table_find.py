@@ -455,6 +455,76 @@ def clamp_box(box, marks, once, pitch, top_pad=TOP_PAD, once_pad=ONCE_PAD,
     return int(x1), int(y1), int(x2), int(y2)
 
 
+# --- 4f. 「出現 1 回の種」「随伴種」からも表を拾う -------------------------
+#
+# 折込で表の数が合わない紙面は，**2 つ目・4 つ目の表の項目名が読めていない**
+# ことが多い (s01115_16 の 2 つ目の表は，項目名が 1 個しか読めなかった)．
+# しかし，その表の**「出現 1 回の種」と「随伴種」は読めている**．
+# **「出現 1 回の種」は表のすぐ下**，**「随伴種」は表の中**にあるので，
+# そこを手がかりに，上へ隙間をたどって表を拾う，という案．
+#
+# **測って取り下げた** (2026-09-12)．既定では使わない (`notes=False`)．
+#   - すでにある箱と少しでも重なったら捨てる形 … 折込 19 枚のまま変わらない
+#     (拾った箱が上の表の箱に接して，ことごとく捨てられる)
+#   - 重なりを割合で見る形 … 偽の箱が増えて**折込が 19 → 4 枚**に崩れる．
+#     1 つの表に「出現 1 回の種」と「Außerdem」が両方あり，種が 2 つできる．
+#     `head` (随伴種) を種に足すとさらに悪い．
+# 折込の弱点は**読みの取りこぼし**なので，箱の作り方ではなく読み手の側で直す．
+
+NOTE_MIN_ROWS = 6       # 拾った箱に要る高さ (窓の数)
+NOTE_REACH = 5          # 目印から上へ，この窓の数まで表を探す
+NOTE_OVERLAP = 0.5      # すでにある箱とこの割合より重なるなら拾わない
+
+
+def boxes_from_notes(dark, once, head, size, boxes, pitch,
+                     least=GUT_LEAST, min_rows=NOTE_MIN_ROWS):
+    """目印 `once`・`head` のうち，どの箱にも入らないものから表を拾う
+
+    Args:
+        once: 「出現 1 回の種」の目印 [(x, y)]．表の**すぐ下**
+        head: 「随伴種」などの目印 [(x, y)]．表の**中**
+        boxes: すでに作った箱
+        pitch: 隙間を見る窓の高さ (行の高さの `GUT_WIN` 倍)
+    """
+    h, w = dark.shape
+    pitch = max(4.0, float(pitch))
+    out = []
+    seeds = [(x, y, True) for x, y in once] + [(x, y, False) for x, y in head]
+    for x, y, below in seeds:
+        if any(b[0] <= x <= b[2] and b[1] <= y <= b[3] for b in boxes + out):
+            continue
+        # 「出現 1 回の種」と表のあいだには余白や注記があるので，**上へ探しながら
+        # 最初の「表らしい帯」を種にする** (`NOTE_REACH` 窓まで)
+        min_w = pitch * GUT_MIN_W / GUT_WIN
+        seed = None
+        start = y + pitch * 0.5 if not below else y - pitch * 0.5
+        for k in range(NOTE_REACH):
+            b2 = start - pitch * k
+            a2 = b2 - pitch
+            if a2 < 0:
+                break
+            if len(gutters(dark, 0, w, a2, b2, min_w)) >= least:
+                seed = (0, a2, w, b2)
+                break
+        if seed is None:
+            continue
+        b = grow_box(dark, seed, pitch, min_w=min_w, least=least)
+        if (b[3] - b[1]) < pitch * min_rows:
+            continue
+        # **重なりは割合で見る**．少しでも触れたら捨てると，上の表の箱に接した
+        # だけで落ちる (s01115_16 の 2 つ目の表)
+        area = max(1.0, (b[2] - b[0]) * (b[3] - b[1]))
+        over = 0.0
+        for bb in boxes + out:
+            ix = max(0, min(b[2], bb[2]) - max(b[0], bb[0]))
+            iy = max(0, min(b[3], bb[3]) - max(b[1], bb[1]))
+            over = max(over, ix * iy / area)
+        if over > NOTE_OVERLAP:
+            continue
+        out.append(b)
+    return out
+
+
 # --- 5. 回す・戻す -------------------------------------------------------
 
 _HOW = {'cw': Image.ROTATE_270, 'ccw': Image.ROTATE_90}
@@ -580,15 +650,17 @@ def find_tables(im, reader=None, tile=TILE, dist=DIST, least=LEAST, pad=PAD):
     dark = ink.binarize(im)
     blobs = blob_boxes(dark)
     once = [(x, y) for k, x, y, _t in marks if k == 'once']
+    head = [(x, y) for k, x, y, _t in marks if k == 'head']
     return boxes_from(points, blobs, im.size, dist=dist, least=least, pad=pad,
-                      dark=dark, once=once)
+                      dark=dark, once=once, head=head)
 
 
 def boxes_from(points, blobs, size, dist=DIST, least=LEAST, pad=PAD,
                x_tol=X_TOL, y_tol=Y_TOL, vert_least=VERT_LEAST,
                box_rel=BOX_REL, use_pitch=True, dark=None, drop_flat=False,
                mul=PITCH_MUL, once=None, clamp=True, span=True,
-               span_least=SPAN_LEAST, span_miss=SPAN_MISS):
+               span_least=SPAN_LEAST, span_miss=SPAN_MISS,
+               head=None, notes=False, use_head=False):
     """目印と塊から表の箱を作る (OCR を切り離した部分．案を測るのに使う)"""
     long = float(max(size))
     d = (group_dist(points, size, long * x_tol, dist=dist, mul=mul) if use_pitch
@@ -617,6 +689,11 @@ def boxes_from(points, blobs, size, dist=DIST, least=LEAST, pad=PAD,
             if sp is not None:
                 b = (b[0], int(sp[0]), b[2], int(sp[1]))
         boxes.append(b)
+    # **項目名が読めなかった表を，「出現 1 回の種」「随伴種」から拾う**
+    if dark is not None and notes and (once or head):
+        boxes += boxes_from_notes(dark, once or [],
+                                  (head or []) if use_head else [],
+                                  size, boxes, lp * GUT_WIN)
     boxes = drop_small(set(boxes), rel=box_rel)
     # **表らしくない箱を落とす** (本文の語を拾った偽の箱)．**既定では使わない**:
     # 本のページの余分な箱は 27 → 25 に減るが，折込が 19 → 18 枚に落ちる
