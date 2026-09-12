@@ -305,6 +305,8 @@ def test_横一列の目印だけでは箱を出さない():
 
 SCAN = os.environ.get('COMPTEA_SCAN', '')
 GRIDS = os.environ.get('COMPTEA_GRIDS', '')
+PARTS = os.environ.get('COMPTEA_PARTS', '')
+CACHE = os.environ.get('COMPTEA_TF_CACHE', '')
 
 
 def _iou(a, b):
@@ -361,3 +363,76 @@ def test_横倒しの折込でも表が出る():
     marks, how = tf.read_marks(im)
     assert how != 'up', '回さずに読めてしまった (横倒しのはず)'
     assert sum(1 for k, *_ in marks if k == 'item') >= 10
+
+
+# --- 取り置いた目印で，全紙面の水準を守る (slow) ---------------------------
+#
+# OCR は 1 枚 6〜180 秒かかるので，**目印と塊を取り置いて**箱の作り方だけを測ります．
+# 取り置きの置き場は `COMPTEA_TF_CACHE`．2026-09-12 に上げた水準を，ここで守ります．
+
+
+def _cards():
+    import glob
+    import json
+    out = {}
+    for p in sorted(glob.glob(os.path.join(CACHE, '*.json'))):
+        out[os.path.basename(p)[:-5]] = json.load(open(p, encoding='utf-8'))
+    return out
+
+
+def _boxes(card):
+    pts = [(m[1], m[2]) for m in card['marks'] if m[0] == 'item']
+    blobs = [tuple(b) for b in card['blobs']]
+    return tf.boxes_from(pts, blobs, tuple(card['size']))
+
+
+@pytest.mark.slow
+def test_取り置きで本のページの当たりを守る():
+    """格子の外接矩形と IoU >= 0.7 の枚数 (2026-09-12 に 53 → 56)
+
+    塊が掴めない紙面を隙間で伸ばす分 (+2) は画像が要るので，ここでは数えません．
+    """
+    pd = pytest.importorskip('pandas')
+    if not CACHE or not GRIDS:
+        pytest.skip('取り置きか格子が無い')
+    cards = _cards()
+    if len(cards) < 50:
+        pytest.skip('取り置きが足りない')
+    cls = ('comp', 'sname', 'species_col', 'layer',
+           'header_value', 'header_item', 'header_item_ja')
+    hit = n = 0
+    for name, c in cards.items():
+        f = os.path.join(GRIDS, name, 'located.csv')
+        if name.startswith('s01115_') or not os.path.exists(f):
+            continue
+        d = pd.read_csv(f)
+        d = d[d.obj_name.isin(cls)]
+        if d.empty:
+            continue
+        t = (float(d.x1.min()), float(d.y1.min()),
+             float(d.x2.max()), float(d.y2.max()))
+        n += 1
+        if max([_iou(b, t) for b in _boxes(c)], default=0.0) >= 0.7:
+            hit += 1
+    assert n >= 70, f'本のページが {n} 枚しかない'
+    assert hit >= 56, f'当たりが {hit}/{n} 枚に減った (2026-09-12 は 56)'
+
+
+@pytest.mark.slow
+def test_取り置きで折込の表の数を守る():
+    """切り分けの表の数と合った枚数 (2026-09-12 に 14 → 19)"""
+    import glob
+    if not CACHE or not PARTS:
+        pytest.skip('取り置きか切り出しが無い')
+    truth = {}
+    for p in glob.glob(os.path.join(PARTS, 's01115_*.png')):
+        nm = os.path.basename(p)[:-4]
+        if not nm.endswith('_note'):
+            truth[nm.split('_p')[0]] = truth.get(nm.split('_p')[0], 0) + 1
+    cards = _cards()
+    got = {k: len(_boxes(c)) for k, c in cards.items() if k.startswith('s01115_')}
+    if len(got) < 20 or len(truth) < 20:
+        pytest.skip('取り置きか真値が足りない')
+    ok = sum(1 for k, v in truth.items() if got.get(k) == v)
+    assert ok >= 19, (f'表の数が合った折込が {ok}/{len(truth)} 枚に減った '
+                      '(2026-09-12 は 19)')

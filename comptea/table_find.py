@@ -5,8 +5,8 @@
 別経路．**表のどこに何があるか (部分) は決めない**．紙面のどこに組成表があるか
 (箱) だけを返す．
 
-手順は 2026-09-11 の試行で当たったもの (本のページ 10 枚中 9 枚，折込は表の数が
-23 枚中 14 枚で一致)．
+**2026-09-12 の水準**: 本のページ 78 枚で格子との IoU >= 0.7 が **58 枚**，
+折込 23 枚で表の数が合うのが **19 枚** (それぞれ 53 枚・14 枚から)．
 
 1. 紙面を**タイルに分けて** OCR する．EasyOCR の `readtext` は既定で長辺を
    2560 px に縮める (`canvas_size`) ので，A0 級の紙面をそのまま渡すと項目名が
@@ -22,10 +22,32 @@
    横倒しで，そのままでは 0 個，時計回りに回すと 48 個)．読んだ位置は元の紙面の
    座標へ戻す．
 
-弱いのは「1 枚に何枚あるか」で，1 表が 2 つに割れる紙面と 2 表が 1 つになる
-紙面がある．いまの幾何の切り分け (`split_sheet.find_tables`．23 枚中 21 枚) には
-及ばない．**幾何で箱を作り，こちらで検算する**使い方が実がある (箱 70 個のうち
-57 個にまとまりがちょうど 1 つ入る)．
+2026-09-12 に足した 3 つ (ユーザ指示「次の一手を 1 から順に実装」)．
+
+3b. **縦に並んだ項目名のまとまりだけ**を表とみなす (`keep_vertical`)．表頭の
+    項目名は左端をそろえて縦に並ぶ．本文に紛れた語と，**表頭が文章で書かれた
+    紙面** (kinki_026 の「Feld-Nr. 調査番号: SS-30. Datum d. Aufn. …」) は
+    1 行に流れる．これだけで余分な箱が 75 → 44，折込は 14 → 19 枚になった．
+3c. まとめる距離を**項目名の縦の間隔**から決める (`group_dist`)．紙面の長辺の
+    1 割は紙面ごとに合わない．間隔の 16 倍が本のページ・折込の両方で最良
+    (倍率を 4〜16 で振って決めた)．
+4c. 塊が掴めなければ**白い縦の隙間**で伸ばす (`grow_box`)．**紙面を見て組成表と
+    分かるのは，値の列のあいだに白い縦の隙間が何本も，行をまたいで同じ x に
+    通っているから**で，本文にはこれが無い (2026-09-12 ユーザ助言)．黒画素の塊は
+    A0 の折込では効くが，本のページでは字が段落ごとに割れて**塊が 0 個**になる
+    (78 枚中 14 枚)．膨張と面積の下限を振っても IoU は 0.4 止まりだった．
+
+**測って取り下げたもの**
+- 箱の**大きさ**で偽の箱を落とす: 本のページの余分な箱は減る (39 → 32) が，
+  折込の**本物の小さい表**まで落ちる (19 → 13 枚)．既定では使わない (`BOX_REL`)．
+- 「表らしさ」で落とす (`looks_table`): 余分な箱 27 → 25 だが折込が 19 → 18．
+  既定では使わない (`drop_flat`)．
+- 塊から作った箱にも隙間で**伸ばす**: 本のページの当たりが 56 → 43 と大きく
+  悪化 (41 枚で悪くなった)．塊が掴めているときは，その端の方が表の端に近い．
+
+**残る弱点**: 折込の「1 枚に何枚あるか」(19/23)．いまの幾何の切り分け
+(`split_sheet.find_tables`．21/23) にはまだ届かない．本のページで外れる 20 枚は，
+表頭が文章の紙面と，箱が表の一部にしか掛からない紙面．
 """
 import re
 
@@ -148,7 +170,9 @@ def keep_vertical(groups, x_tol, least=VERT_LEAST, y_tol=0.0):
 
 # --- 3c. まとめる距離を項目名の並びから決める -----------------------------
 
-PITCH_MUL = 6.0         # 項目名の縦の間隔のこの倍までを同じ表とみなす
+PITCH_MUL = 16.0        # 項目名の縦の間隔のこの倍までを同じ表とみなす．
+                        # 折込 23 枚で 4→16，5→16，6→17，8→16，10→16，12→17，
+                        # 16→19 枚が一致．本のページは 6 以上どれも当たり 56
 PITCH_LEAST = 3         # 間隔を出すのに要る項目名の数
 
 
@@ -184,7 +208,9 @@ def group_dist(points, size, x_tol, dist=DIST, mul=PITCH_MUL):
 
 # --- 4b. 小さすぎる箱を落とす --------------------------------------------
 
-BOX_REL = 0.05          # いちばん大きい箱の面積に対する下限 (これ未満は偽の箱)
+BOX_REL = 0.0           # いちばん大きい箱の面積に対する下限．**既定では使わない**．
+                        # 本のページの偽の箱は減る (余分な箱 39 → 32) が，折込の
+                        # **本物の小さい表**まで落ちる (23 枚中 19 → 13．2026-09-12)
 
 
 def _touches(box, blobs):
@@ -226,6 +252,10 @@ GUT_MIN_W = 0.5         # 隙間とみなす幅 (行の高さの倍数)
 GUT_LEAST = 3           # 表らしい帯に要る隙間の数
 GROW_MISS = 2           # 隙間が足りない帯がこれだけ続いたら止める
 
+# **伸ばすのは塊が掴めなかったときだけ** (2026-09-12 に測って決めた)．
+# 塊から作った箱にも伸ばすと，本のページ 78 枚で当たりが 56 → 43 に落ち，
+# 41 枚で悪くなった．塊が掴めているときは，その端の方が表の端に近い
+
 
 def gutters(dark, x1, x2, y1, y2, min_w):
     """帯 `[y1:y2, x1:x2]` を縦に貫く白い列の並び [(左, 右)]
@@ -251,6 +281,17 @@ def gutters(dark, x1, x2, y1, y2, min_w):
                 out.append((x1 + run, x1 + i))
             run = None
     return out
+
+
+def looks_table(dark, box, pitch, least=GUT_LEAST):
+    """箱の中が**表らしい**か (白い縦の隙間が `least` 本以上あるか)
+
+    大きさで落とすと，折込の**本物の小さい表**まで落ちます (23 枚中 19 → 14)．
+    表かどうかは大きさでなく**中の様子**で決めます．
+    """
+    x1, y1, x2, y2 = (int(v) for v in box)
+    min_w = max(4.0, float(pitch)) * GUT_MIN_W
+    return len(gutters(dark, x1, x2, y1, y2, min_w)) >= least
 
 
 def grow_box(dark, seed, pitch, min_w=None, least=GUT_LEAST, miss=GROW_MISS):
@@ -427,10 +468,11 @@ def find_tables(im, reader=None, tile=TILE, dist=DIST, least=LEAST, pad=PAD):
 
 def boxes_from(points, blobs, size, dist=DIST, least=LEAST, pad=PAD,
                x_tol=X_TOL, y_tol=Y_TOL, vert_least=VERT_LEAST,
-               box_rel=BOX_REL, use_pitch=True, dark=None):
+               box_rel=BOX_REL, use_pitch=True, dark=None, drop_flat=False,
+               mul=PITCH_MUL):
     """目印と塊から表の箱を作る (OCR を切り離した部分．案を測るのに使う)"""
     long = float(max(size))
-    d = (group_dist(points, size, long * x_tol, dist=dist) if use_pitch
+    d = (group_dist(points, size, long * x_tol, dist=dist, mul=mul) if use_pitch
          else long * dist)
     groups = cluster(points, d, least=least)
     groups = keep_vertical(groups, long * x_tol, least=vert_least,
@@ -447,4 +489,11 @@ def boxes_from(points, blobs, size, dist=DIST, least=LEAST, pad=PAD,
             b = grow_box(dark, b, pitch or float(max(size)) * 0.01)
         boxes.append(b)
     boxes = drop_small(set(boxes), rel=box_rel)
+    # **表らしくない箱を落とす** (本文の語を拾った偽の箱)．**既定では使わない**:
+    # 本のページの余分な箱は 27 → 25 に減るが，折込が 19 → 18 枚に落ちる
+    if dark is not None and drop_flat and len(boxes) > 1:
+        pitch = float(max(size)) * 0.005
+        keep = [b for b in boxes if looks_table(dark, b, pitch)]
+        if keep:
+            boxes = keep
     return sorted(boxes, key=lambda b: (b[1], b[0]))
