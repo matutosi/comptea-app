@@ -68,6 +68,225 @@ def test_離れていれば別のまとまり():
     assert len(tf.cluster(pts, dist=200)) == 2
 
 
+# --- 3b. 縦に並んだ項目名だけを表とみなす (純粋) ---------------------------
+
+def test_縦に並ぶ項目名の数を数える():
+    """表頭の項目名は左端をそろえて縦に並ぶ (通し番号・調査番号・調査年月日…)"""
+    pts = [(100, 100), (104, 140), (98, 180), (400, 100)]
+    assert tf.vertical_run(pts, x_tol=20) == 3
+
+
+def test_横に並ぶ語は縦の連なりにならない():
+    """本文や文章の表頭は 1 行に流れる (kinki_026 の「Feld-Nr. 調査番号: …」)"""
+    pts = [(100, 100), (400, 104), (700, 98)]
+    assert tf.vertical_run(pts, x_tol=20) == 1
+
+
+def test_同じ高さの語は1つと数える():
+    """左端がそろっていても同じ行なら 1 つ (2 段組の見出しが並んだもの)"""
+    pts = [(100, 100), (104, 102), (100, 200)]
+    assert tf.vertical_run(pts, x_tol=20, y_tol=20) == 2
+
+
+def test_縦に並ばないまとまりは表とみなさない():
+    """`find_tables` の間引き．横一列の 3 語だけのまとまりは落ちる"""
+    groups = [[(100, 100), (104, 140), (98, 180)],      # 縦に 3 つ
+              [(900, 900), (1200, 904), (1500, 898)]]   # 横に 3 つ
+    kept = tf.keep_vertical(groups, x_tol=20, least=2)
+    assert len(kept) == 1 and kept[0][0] == (100, 100)
+
+
+# --- 3c. まとめる距離を項目名の並びから決める (純粋) ----------------------
+
+def test_項目名の縦の間隔から距離を決める():
+    """表頭の項目名は一定の間隔で縦に並ぶ．その間隔の何倍かでまとめる"""
+    pts = [(100, 100), (100, 140), (100, 180), (100, 220)]
+    assert tf.mark_pitch(pts, x_tol=20) == 40
+
+
+def test_縦に並ばなければ間隔は出ない():
+    pts = [(100, 100), (400, 104), (700, 98)]
+    assert tf.mark_pitch(pts, x_tol=20) is None
+
+
+def test_間隔が出ればそれを距離に使う():
+    """紙面の長辺の 1 割は，紙面ごとに合ったり合わなかったりする"""
+    pts = [(100, 100), (100, 140), (100, 180)]
+    assert tf.group_dist(pts, size=(4000, 6000), x_tol=20) == 40 * tf.PITCH_MUL
+
+
+def test_間隔が出なければ紙面の長辺で決める():
+    pts = [(100, 100), (400, 104)]
+    assert tf.group_dist(pts, size=(4000, 6000), x_tol=20) == 6000 * tf.DIST
+
+
+# --- 4b. 小さすぎる箱を落とす (純粋) --------------------------------------
+
+def test_いちばん大きい箱より極端に小さい箱は落とす():
+    """本文の語を拾った偽の箱は，表の箱よりずっと小さい"""
+    boxes = [(0, 0, 1000, 1000), (10, 10, 60, 60)]
+    assert tf.drop_small(boxes, rel=0.05) == [(0, 0, 1000, 1000)]
+
+
+def test_同じくらいの大きさの箱は残す():
+    """1 枚に大小の表が載る紙面もあるので，落とすのは極端なものだけ"""
+    boxes = [(0, 0, 1000, 1000), (0, 0, 400, 400)]
+    assert len(tf.drop_small(boxes, rel=0.05)) == 2
+
+
+def test_箱が1つなら落とさない():
+    boxes = [(10, 10, 60, 60)]
+    assert tf.drop_small(boxes, rel=0.05) == boxes
+
+
+# --- 4c. 白い縦の隙間で表の範囲を伸ばす (純粋) ----------------------------
+
+def _dark_table(w=400, h=300, y0=0, y1=150, pitch=10, cols=(100, 160, 220, 280)):
+    """上半分が表 (値が列に並ぶ)，下半分が文章の紙面の黒画素"""
+    d = np.zeros((h, w), dtype=bool)
+    for y in range(y0, y1, pitch):
+        d[y:y + 4, 20:80] = True                    # 種名
+        for x in cols:
+            d[y:y + 4, x:x + 6] = True              # 値
+    for y in range(y1, h, pitch):
+        d[y:y + 4, 20:w - 20] = True                # 文章 (幅いっぱい)
+    return d
+
+
+def test_表らしい帯には白い縦の隙間が何本もある():
+    d = _dark_table()
+    assert len(tf.gutters(d, 0, 400, 0, 150, min_w=8)) >= 3
+
+
+def test_文章の帯には縦の隙間が無い():
+    d = _dark_table()
+    assert len(tf.gutters(d, 0, 400, 160, 300, min_w=8)) == 0
+
+
+def test_表らしい行が続く限り下へ伸ばす():
+    """文章に変わったところで止まる (表の下端 150 の前後で止まること)"""
+    d = _dark_table()
+    box = tf.grow_box(d, (20, 0, 286, 40), pitch=10, min_w=8)
+    assert 130 <= box[3] <= 170
+
+
+def test_伸ばした範囲のインクの端を箱の左右にする():
+    d = _dark_table()
+    box = tf.grow_box(d, (100, 0, 180, 40), pitch=10, min_w=8)
+    assert box[0] <= 20 and box[2] >= 286
+
+
+# --- 4e. 箱の中で，表らしい範囲だけを取る (純粋) --------------------------
+
+def test_文章が混じった箱から表の範囲だけを取る():
+    """上が文章・下が表の紙面．箱が両方を覆っていても，表の側だけにする"""
+    d = _dark_table(h=400, y1=200)              # 0-200 が表，200-400 が文章
+    got = tf.table_span(d, (0, 0, 400, 400), pitch=10)
+    assert got is not None
+    a, b = got
+    assert a <= 20 and 180 <= b <= 230
+
+
+def test_表らしい範囲が無ければ_None():
+    d = np.zeros((200, 400), dtype=bool)
+    for y in range(0, 200, 10):
+        d[y:y + 4, 20:380] = True               # 文章だけ
+    assert tf.table_span(d, (0, 0, 400, 200), pitch=10) is None
+
+
+def test_いちばん長い連なりを採る():
+    """紙面に表が 2 つあっても，箱の中でいちばん長く続く方を採る"""
+    d = np.zeros((400, 400), dtype=bool)
+    for y in range(0, 60, 10):                  # 短い表
+        for x in (20, 100, 200, 300):
+            d[y:y + 4, x:x + 6] = True
+    for y in range(200, 380, 10):               # 長い表
+        for x in (20, 100, 200, 300):
+            d[y:y + 4, x:x + 6] = True
+    a, b = tf.table_span(d, (0, 0, 400, 400), pitch=10)
+    assert a >= 180 and b >= 360
+
+
+def test_本文の帯も1行なら隙間が空く():
+    """**1 行ずつ見てはいけない**．日本語の本文は 1 行なら語間が隙間に見える
+
+    3 行まとめると，表は隙間が同じ x に通るので残り，本文は消える
+    (kinki_043・026・020 で実測: 表 3〜5 本に対し本文 0 本)．
+    """
+    d = np.zeros((300, 400), dtype=bool)
+    for i, y in enumerate(range(0, 300, 10)):
+        a = 80 + (i % 5) * 14                   # 行ごとに語の切れ目がずれる
+        d[y:y + 4, 20:a] = True
+        d[y:y + 4, a + 10:380] = True
+    one = len(tf.gutters(d, 0, 400, 0, 10, min_w=5))
+    three = len(tf.gutters(d, 0, 400, 0, 30, min_w=5))
+    assert one >= 1 and three == 0
+
+
+def test_行の高さは黒画素から推す():
+    """目印の間隔は，目印が本文に散る紙面では当てにならない (043 は 1157 px)"""
+    d = np.zeros((600, 400), dtype=bool)
+    for y in range(0, 600, 20):
+        d[y:y + 8, 50:350] = True
+    p = tf.line_pitch(d)
+    assert 12 <= p <= 30
+
+
+# --- 4d. 上下端を目印で押さえる (純粋) ------------------------------------
+
+def test_箱の上端は一番上の項目名より上へ行かない():
+    """**表頭の項目名より上に表は無い**．上にあるのは表題や本文"""
+    box = tf.clamp_box((100, 0, 900, 2000), marks=[(120, 500), (120, 560)],
+                       once=[], pitch=40)
+    assert box[1] >= 500 - 40 * 2 and box[1] <= 500
+
+
+def test_出現1回の種より下は表でない():
+    """**「出現 1 回の種」は表のすぐ下**にある．その上で切る"""
+    box = tf.clamp_box((100, 400, 900, 2000), marks=[(120, 500)],
+                       once=[(150, 1500)], pitch=40)
+    assert 1400 <= box[3] <= 1500
+
+
+def test_目印の上にある出現1回の種は使わない():
+    """前の表の「出現 1 回の種」が上にあることがある"""
+    box = tf.clamp_box((100, 400, 900, 2000), marks=[(120, 900)],
+                       once=[(150, 300)], pitch=40)
+    assert box[3] == 2000
+
+
+def test_押さえた結果が潰れるなら元のまま():
+    box = tf.clamp_box((100, 400, 900, 800), marks=[(120, 700)],
+                       once=[(150, 720)], pitch=40)
+    assert box == (100, 400, 900, 800)
+
+
+# --- 4f. 「出現 1 回の種」「随伴種」からも表を拾う (純粋) -----------------
+
+def test_出現1回の種の上に表を拾う():
+    """**「出現 1 回の種」は表のすぐ下**にある．項目名が読めなくても，
+    その上に表があると分かる (s01115_16 の 2 つ目の表)"""
+    d = _dark_table(h=400, y1=250)              # 0-250 が表，その下は文章
+    got = tf.boxes_from_notes(d, [(200, 300)], [], (400, 400), [], pitch=30)
+    assert len(got) == 1
+    x1, y1, x2, y2 = got[0]
+    assert y1 <= 40 and 200 <= y2 <= 300
+
+
+def test_すでに箱がある所では拾わない():
+    d = _dark_table(h=400, y1=250)
+    got = tf.boxes_from_notes(d, [(200, 300)], [], (400, 400),
+                              [(0, 0, 400, 320)], pitch=30)
+    assert got == []
+
+
+def test_上に表が無ければ拾わない():
+    d = np.zeros((400, 400), dtype=bool)
+    for y in range(0, 400, 10):
+        d[y:y + 4, 20:380] = True               # 文章だけ
+    assert tf.boxes_from_notes(d, [(200, 300)], [], (400, 400), [], pitch=30) == []
+
+
 # --- 5. 回した座標を元の紙面へ戻す (純粋) ---------------------------------
 
 @pytest.mark.parametrize('how', ['cw', 'ccw'])
@@ -170,18 +389,35 @@ def test_目印が足りていれば回さない():
 
 # --- 通し (偽の読み手) -----------------------------------------------------
 
+def _stacked(size=(400, 300), x=(40, 100), ys=(60, 90, 120), h=8):
+    """項目名らしく**縦に並ぶ**棒を描いた紙面"""
+    im = Image.new('RGB', size, 'white')
+    dr = ImageDraw.Draw(im)
+    for y in ys:
+        dr.rectangle((x[0], y, x[1], y + h), fill='black')
+    return im
+
+
 def test_通しで表の箱が1つ出る():
-    im = _sheet(size=(400, 300), rect=(40, 60, 100, 68))
-    boxes = tf.find_tables(im, reader=FakeReader(), tile=150, least=1)
+    im = _stacked()
+    boxes = tf.find_tables(im, reader=FakeReader(), tile=40, least=1)
     assert len(boxes) == 1
     x1, y1, x2, y2 = boxes[0]
-    assert x1 <= 40 and y1 <= 60 and x2 >= 100 and y2 >= 68
+    assert x1 <= 40 and y1 <= 60 and x2 >= 100 and y2 >= 128
+
+
+def test_横一列の目印だけでは箱を出さない():
+    """表頭が文章の紙面や本文の語 (kinki_026 型) を落とす"""
+    im = _sheet(size=(400, 300), rect=(40, 60, 100, 68))
+    assert tf.find_tables(im, reader=FakeReader(), tile=150, least=1) == []
 
 
 # --- 実データ (slow) -------------------------------------------------------
 
 SCAN = os.environ.get('COMPTEA_SCAN', '')
 GRIDS = os.environ.get('COMPTEA_GRIDS', '')
+PARTS = os.environ.get('COMPTEA_PARTS', '')
+CACHE = os.environ.get('COMPTEA_TF_CACHE', '')
 
 
 def _iou(a, b):
@@ -238,3 +474,77 @@ def test_横倒しの折込でも表が出る():
     marks, how = tf.read_marks(im)
     assert how != 'up', '回さずに読めてしまった (横倒しのはず)'
     assert sum(1 for k, *_ in marks if k == 'item') >= 10
+
+
+# --- 取り置いた目印で，全紙面の水準を守る (slow) ---------------------------
+#
+# OCR は 1 枚 6〜180 秒かかるので，**目印と塊を取り置いて**箱の作り方だけを測ります．
+# 取り置きの置き場は `COMPTEA_TF_CACHE`．2026-09-12 に上げた水準を，ここで守ります．
+
+
+def _cards():
+    import glob
+    import json
+    out = {}
+    for p in sorted(glob.glob(os.path.join(CACHE, '*.json'))):
+        out[os.path.basename(p)[:-5]] = json.load(open(p, encoding='utf-8'))
+    return out
+
+
+def _boxes(card):
+    pts = [(m[1], m[2]) for m in card['marks'] if m[0] == 'item']
+    blobs = [tuple(b) for b in card['blobs']]
+    return tf.boxes_from(pts, blobs, tuple(card['size']))
+
+
+@pytest.mark.slow
+def test_取り置きで本のページの当たりを守る():
+    """格子の外接矩形と IoU >= 0.7 の枚数 (2026-09-12 に 53 → 64)
+
+    **画像が要る分 (隙間で伸ばす・表らしい範囲だけ採る) はここでは効きません**．
+    取り置きだけで測れる水準 (56 枚) を守ります．画像も使うと 64 枚．
+    """
+    pd = pytest.importorskip('pandas')
+    if not CACHE or not GRIDS:
+        pytest.skip('取り置きか格子が無い')
+    cards = _cards()
+    if len(cards) < 50:
+        pytest.skip('取り置きが足りない')
+    cls = ('comp', 'sname', 'species_col', 'layer',
+           'header_value', 'header_item', 'header_item_ja')
+    hit = n = 0
+    for name, c in cards.items():
+        f = os.path.join(GRIDS, name, 'located.csv')
+        if name.startswith('s01115_') or not os.path.exists(f):
+            continue
+        d = pd.read_csv(f)
+        d = d[d.obj_name.isin(cls)]
+        if d.empty:
+            continue
+        t = (float(d.x1.min()), float(d.y1.min()),
+             float(d.x2.max()), float(d.y2.max()))
+        n += 1
+        if max([_iou(b, t) for b in _boxes(c)], default=0.0) >= 0.7:
+            hit += 1
+    assert n >= 70, f'本のページが {n} 枚しかない'
+    assert hit >= 56, f'当たりが {hit}/{n} 枚に減った (2026-09-12 は 56)'
+
+
+@pytest.mark.slow
+def test_取り置きで折込の表の数を守る():
+    """切り分けの表の数と合った枚数 (2026-09-12 に 14 → 19)"""
+    import glob
+    if not CACHE or not PARTS:
+        pytest.skip('取り置きか切り出しが無い')
+    truth = {}
+    for p in glob.glob(os.path.join(PARTS, 's01115_*.png')):
+        nm = os.path.basename(p)[:-4]
+        if not nm.endswith('_note'):
+            truth[nm.split('_p')[0]] = truth.get(nm.split('_p')[0], 0) + 1
+    cards = _cards()
+    got = {k: len(_boxes(c)) for k, c in cards.items() if k.startswith('s01115_')}
+    if len(got) < 20 or len(truth) < 20:
+        pytest.skip('取り置きか真値が足りない')
+    ok = sum(1 for k, v in truth.items() if got.get(k) == v)
+    assert ok >= 19, (f'表の数が合った折込が {ok}/{len(truth)} 枚に減った '
+                      '(2026-09-12 は 19)')
