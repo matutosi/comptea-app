@@ -1492,3 +1492,40 @@ yomitoku の `TableStructureRecognizer` (表の行・列・セルを返す) を�
 
 **外部の道具と比べるときは，`(1) 何を 1 つと数えるか` `(2) どの範囲を含むか`
 `(3) 1 対 1 で対応が付くか` を先に書き出してから測る**．
+
+### 表の下の注記と「1 回出現の種」は，レイアウト解析で読める (2026-09-13)
+
+未着手だった課題「**表の下の地点情報を読む**」(2026-09-08) を，yomitoku の
+`DocumentAnalyzer` (段落として切り出し，中身も読む) で試した．**読める**．
+
+**本のページ** (1 枚 4〜8 秒)．欲しい 3 つがそのまま出た．
+
+    kinki_043  「Lage d. Aufn. 調査地:Insel Kuroshima, Yura-cho, Hidaka-gun,
+                Präf. Wakayama 和歌山県日高郡由良町黒島
+                Datum d. Aufn. 調査年月日:6. Ju…」
+    kinki_010-1「Lage d. Aufn. 調査地:Lfd. Nr. 1, 3: Kumihama-cho, Kumano-gun
+                熊野郡久美浜町湊宮 (6. Juli 1983), 2, …」
+    kinki_017   調査地・既発表資料名・出現 1 回の随伴種の 3 つとも
+
+**折込は，切り出した注記画像 (`*_note.png`) に当てる**．3757x1612 を 4.8 秒・
+58 段落で読み，「Dicranopteris dichotoma コシダ K-1·2, in 3: Asplenium
+oligophlebium … K-+」のように**学名・和名・階層と被度の組・地点番号**まで取れた．
+**「1 回出現の種」を構造化して表に戻せる**見込みがある (いま目視に回している領域)．
+
+**大事な条件**: **紙面全体ではなく，切り出した領域に当てる**．A0 を丸ごと渡すと
+縮小されて読みが崩れる (16_p2 の紙面全体では「"ry AND 1000」のようになった)．
+`split_sheet.note_boxes` が既に注記を別画像に切り出しているので，そこに当てればよい．
+
+**選別は既存の規則で足りる**．注記画像 10 枚の 264 段落に `row_kinds.NOTE_RE`
+(調査地・既発表・原調査資料…) と `ONCE_JA` を当てると，**注記 64・出現 1 回 10**
+を選び，本文 190 を外せた．中身は課題が求めていたものそのもの:
+
+    「調査地 Lage d. Aufnahme Lfd. Nr. 1 : Shinomisaki, Kushimoto-cho,
+      Nishimuro-gun 西牟婁郡串本町潮岬, 2 : Hamashima, Hamajima-cho, …」
+    「既発表資料名 / Nachweis d. Vegetationsaufnahmen; Lfd. Nr. 1 :
+      Präf. Wakayama 和歌山県 1979, 2-9 : Original 原調査資料.」
+
+**地点番号と地名が対になって取れる**ので，既存の `parse_site_notes()` に渡せば
+`plot_table` に結合できる．**必要な部品はすべて揃っている**
+(切り出し `split_sheet.note_boxes` → 読み `DocumentAnalyzer` → 選別
+`row_kinds.NOTE_RE` → 構文解析 `link_pages.parse_site_notes`)．
