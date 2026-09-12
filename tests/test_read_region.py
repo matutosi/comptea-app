@@ -119,3 +119,109 @@ def test_1セルに収まる読みは分けても変わらない():
     cells = _cells([(1, 0, 0, 200, 50)])
     found = [((10, 10, 90, 40), '調査地'), ((120, 10, 180, 40), '(県名)')]
     assert read_region.assign(cells, found, split=True) == {1: '調査地 (県名)'}
+
+
+# --- 複数の読み手を重ねる ------------------------------------------------
+#
+# **読み手ごとに落とすセルが違う** (2026-09-12 に真値で確かめた)．
+# kinki_047 の和名は EasyOCR 43・yomitoku 42 だが，**合わせて 45**．
+
+def test_先の読み手が読めたセルはそのまま():
+    got = read_region.union([{1: 'あ', 2: 'い'}, {1: 'ア', 3: 'ウ'}])
+    assert got[1] == 'あ' and got[2] == 'い'
+
+
+def test_先が読めなかったセルを後が埋める():
+    got = read_region.union([{1: 'あ'}, {2: 'い'}, {3: 'う'}])
+    assert got == {1: 'あ', 2: 'い', 3: 'う'}
+
+
+def test_空の読みは埋めたことにしない():
+    got = read_region.union([{1: '  '}, {1: 'あ'}])
+    assert got == {1: 'あ'}
+
+
+def test_どこから来たかを返せる():
+    got, src = read_region.union([{1: 'あ'}, {2: 'い'}], names=['easy', 'yomi'],
+                                 with_source=True)
+    assert got == {1: 'あ', 2: 'い'}
+    assert src == {1: 'easy', 2: 'yomi'}
+
+
+def test_食い違いを数えられる():
+    """同じセルを両方が読んで中身が違うものは，目視に回す手がかりになる"""
+    assert read_region.disagree([{1: 'あ', 2: 'い'}, {1: 'ア', 2: 'い'}]) == {1}
+
+
+# --- 読みを「質で選ぶ」--------------------------------------------------
+#
+# `union` は「先の読み手が何か読めていれば採る」ので，**読めてはいるが間違って
+# いる**セルを後の読み手が直せない (実測: 真値との一致が EasyOCR 単独と同じ
+# 13・11 のまま．yomitoku 単独は 24・31)．**質で選ぶ**必要がある．
+
+def _ok(text):
+    """「あ」で始まるものを「通る読み」とみなす偽の判定"""
+    return (text or '').startswith('あ')
+
+
+def test_辞書に当たる方を採る():
+    got = read_region.best([{1: 'ア'}, {1: 'あい'}], ok=_ok)
+    assert got == {1: 'あい'}
+
+
+def test_どちらも通らなければ先を採る():
+    got = read_region.best([{1: 'ア'}, {1: 'イ'}], ok=_ok)
+    assert got == {1: 'ア'}
+
+
+def test_先が通れば後は見ない():
+    got = read_region.best([{1: 'あ'}, {1: 'あいう'}], ok=_ok)
+    assert got == {1: 'あ'}
+
+
+def test_先が読めなければ後で埋める():
+    got = read_region.best([{}, {1: 'イ'}], ok=_ok)
+    assert got == {1: 'イ'}
+
+
+def test_どこから採ったかを返せる():
+    got, src = read_region.best([{1: 'ア', 2: 'あ'}, {1: 'あい'}], ok=_ok,
+                                names=['easy', 'yomi'], with_source=True)
+    assert got == {1: 'あい', 2: 'あ'}
+    assert src == {1: 'yomi', 2: 'easy'}
+
+
+def test_判定が無ければ先勝ち():
+    got = read_region.best([{1: 'ア'}, {1: 'あい'}])
+    assert got == {1: 'ア'}
+
+
+# --- クラスごとに，信頼する読み手の順を変える ----------------------------
+#
+# **クラスごとに得意な読み手が違う** (2026-09-12 に真値で確認)．
+#   学名 … EasyOCR 11・13 に対し yomitoku 31・24
+#   和名 … EasyOCR 42・23 に対し yomitoku 41・27 (ほぼ互角，EasyOCR がやや上)
+
+def test_学名は_yomitoku_を先に見る():
+    assert read_region.order('sname')[0] == 'yomi'
+
+
+def test_和名は_easyocr_を先に見る():
+    assert read_region.order('species_col')[0] == 'easy'
+
+
+def test_知らないクラスは_easyocr_を先に見る():
+    assert read_region.order('comp')[0] == 'easy'
+
+
+def test_順にそって読みを並べ替える():
+    maps = {'easy': {1: 'ア'}, 'yomi': {1: 'あ'}}
+    got = read_region.pick(maps, 'sname', ok=lambda t: True)
+    assert got == {1: 'あ'}                      # 学名は yomitoku が先
+    got = read_region.pick(maps, 'species_col', ok=lambda t: True)
+    assert got == {1: 'ア'}                      # 和名は EasyOCR が先
+
+
+def test_無い読み手は飛ばす():
+    maps = {'easy': {1: 'ア'}}
+    assert read_region.pick(maps, 'sname', ok=lambda t: True) == {1: 'ア'}

@@ -95,3 +95,121 @@ def read_cells(img, cells, reader, pad=PAD):
     except Exception:                           # noqa: BLE001  読めなくても進む
         return {}
     return assign(cells, found)
+
+
+def union(maps, names=None, with_source=False):
+    """複数の読み手の結果を重ねる (**先に来たものを優先**)
+
+    **読み手ごとに落とすセルが違う**ので，重ねると読めるセルが増えます
+    (2026-09-12 に真値で確認: kinki_047 の和名は EasyOCR 43・yomitoku 42 に
+    対し**合わせて 45**，学名は 3 つ合わせて 32)．
+
+    Args:
+        maps: {cell_id: 文字列} の並び．**信頼する順**に渡す
+        names: それぞれの読み手の名前 (`with_source` のときに使う)
+        with_source: (結果, {cell_id: 読み手の名前}) を返す
+    """
+    out, src = {}, {}
+    for i, m in enumerate(maps or []):
+        name = (names[i] if names and i < len(names) else str(i))
+        for cid, v in (m or {}).items():
+            if not (v or '').strip():
+                continue
+            if cid not in out:
+                out[cid] = v
+                src[cid] = name
+    return (out, src) if with_source else out
+
+
+def disagree(maps):
+    """**どの読み手も読めたが，中身が食い違う**セル
+
+    目視に回す手がかりになります (既存の `--reader both` と同じ考え方)．
+    """
+    seen = {}
+    for m in (maps or []):
+        for cid, v in (m or {}).items():
+            t = (v or '').strip()
+            if t:
+                seen.setdefault(cid, set()).add(t)
+    return {cid for cid, vs in seen.items() if len(vs) > 1}
+
+
+def best(maps, ok=None, names=None, with_source=False):
+    """複数の読みから，**質の通るもの**を選ぶ
+
+    `union` は「先の読み手が何か読めていれば採る」ので，**読めてはいるが
+    間違っている**セルを後の読み手が直せません (2026-09-12 に真値で確認:
+    一致が EasyOCR 単独と同じ 13・11 のまま．yomitoku 単独は 24・31)．
+
+    Args:
+        maps: {cell_id: 文字列} の並び．**信頼する順**に渡す
+        ok: `ok(text)` が True なら「通る読み」．辞書に当たるか，
+            `correct_text` の補正が通るかを渡す．省くと先勝ち (`union` と同じ)
+    Returns:
+        {cell_id: 文字列}．`with_source` なら (結果, {cell_id: 読み手の名前})
+
+    決め方は 3 段:
+      1. **通る読みのうち，いちばん先の読み手**のもの
+      2. 通る読みが無ければ，**読めたもののうち先の読み手**のもの
+      3. どれも読めなければ入れない
+    """
+    cells = set()
+    for m in (maps or []):
+        cells |= set(m or {})
+    out, src = {}, {}
+    for cid in cells:
+        first = None
+        for i, m in enumerate(maps or []):
+            t = ((m or {}).get(cid) or '').strip()
+            if not t:
+                continue
+            name = (names[i] if names and i < len(names) else str(i))
+            if first is None:
+                first = (t, name)
+            if ok is not None and ok(t):
+                out[cid], src[cid] = t, name
+                break
+        else:
+            if first is not None:
+                out[cid], src[cid] = first
+    return (out, src) if with_source else out
+
+
+# **クラスごとに，信頼する読み手の順**を変えます (2026-09-12 に実データで決めた)．
+#
+# 真値 (人が書き起こした 2 表) との一致数 (kinki_010-1 / kinki_047):
+#   学名 sname        EasyOCR 13 / 11   yomitoku 24 / 31
+#   和名 species_col  EasyOCR 23 / 42   yomitoku 27 / 41
+#
+# 真値は 2 表しかないので，**和名の辞書 (27,127 件) にそのまま当たるか**を
+# 物差しに，本のページ 6 表 + 折込 6 表 (1,269 セル) で確かめた．
+# 誤読が実在の和名に当たることは稀なので，強い代理になる．
+#
+#   和名 … EasyOCR 277・yomitoku 374 → **EasyOCR が先 428** / yomi 先 420
+#   学名 … EasyOCR 462・yomitoku 397 → easy 先 529 / **yomitoku が先 548**
+#
+# **折込でも同じ傾向**なので，紙面の種類では分けない．
+# どちらの組み合わせも**単独の最良を上回る** (和名 374 → 428，学名 462 → 548)．
+ORDER = {
+    'sname': ('yomi', 'easy', 'ndl'),
+}
+DEFAULT_ORDER = ('easy', 'yomi', 'ndl')
+
+
+def order(cls):
+    """そのクラスで，信頼する読み手の順"""
+    return ORDER.get(cls, DEFAULT_ORDER)
+
+
+def pick(maps, cls, ok=None, with_source=False):
+    """読み手ごとの結果 `{名前: {cell_id: 文字列}}` から，クラスの順で選ぶ
+
+    Args:
+        maps: {読み手の名前: {cell_id: 文字列}}
+        cls: `obj_name` (sname・species_col・comp…)
+        ok: 「通る読み」の判定 (`best` に渡す)
+    """
+    names = [n for n in order(cls) if n in (maps or {})]
+    return best([maps[n] for n in names], ok=ok, names=names,
+                with_source=with_source)
