@@ -225,3 +225,59 @@ def test_順にそって読みを並べ替える():
 def test_無い読み手は飛ばす():
     maps = {'easy': {1: 'ア'}}
     assert read_region.pick(maps, 'sname', ok=lambda t: True) == {1: 'ア'}
+
+
+# --- 領域が大きければ分割して読む ----------------------------------------
+#
+# **折込の領域をそのまま読み手に渡すと，縮小されて読みが崩れる**
+# (s01115_16_p2 の 7012x9214 は辞書に当たる和名が 1 個だった．3000 px に
+# 分けると 188 個)．`comptea.tiles` に渡して分割して読む．
+
+class _CountReader:
+    """呼ばれた箱を覚える読み手"""
+
+    def __init__(self):
+        self.boxes = []
+
+    def read_boxes(self, img, box=None):
+        self.boxes.append(box)
+        return []
+
+
+def test_小さい領域はそのまま読む():
+    PIL = pytest.importorskip('PIL')
+    from PIL import Image
+    cells = _cells([(1, 0, 0, 100, 50)])
+    r = _CountReader()
+    read_region.read_cells(Image.new('RGB', (200, 200)), cells, r, tile=3000)
+    assert len(r.boxes) == 1
+
+
+def test_大きい領域は分割して読む():
+    PIL = pytest.importorskip('PIL')
+    from PIL import Image
+    cells = _cells([(1, 0, 0, 5000, 4000)])
+    r = _CountReader()
+    read_region.read_cells(Image.new('RGB', (5200, 4200)), cells, r, tile=2000)
+    assert len(r.boxes) >= 4                      # 分けて読んだ
+
+
+def test_分割しない指定もできる():
+    PIL = pytest.importorskip('PIL')
+    from PIL import Image
+    cells = _cells([(1, 0, 0, 5000, 4000)])
+    r = _CountReader()
+    read_region.read_cells(Image.new('RGB', (5200, 4200)), cells, r, tile=0)
+    assert len(r.boxes) == 1
+
+
+def test_確信度つきの読みも受ける():
+    """分割して読む経路 (`tiles.read_tiled`) は (箱, 文字列, 確信度) を返す"""
+    cells = _cells([(1, 0, 0, 100, 50)])
+    found = [((10, 10, 60, 40), '通し番号', 0.9)]
+    assert read_region.assign(cells, found) == {1: '通し番号'}
+
+
+def test_箱だけの読みは捨てる():
+    cells = _cells([(1, 0, 0, 100, 50)])
+    assert read_region.assign(cells, [((10, 10, 60, 40),)]) == {}

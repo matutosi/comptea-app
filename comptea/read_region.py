@@ -43,7 +43,11 @@ def assign(cells, found, split=True):
         (「調査地」と「(県名)」が別の読みになる)
     """
     hit = {}
-    for idx, (box, text) in enumerate(found or []):
+    for idx, item in enumerate(found or []):
+        # 読み手によって (箱, 文字列) と (箱, 文字列, 確信度) の両方が来る
+        if not item or len(item) < 2:
+            continue
+        box, text = item[0], item[1]
         t = (text or '').strip()
         if not t:
             continue
@@ -81,20 +85,34 @@ def assign(cells, found, split=True):
     return out
 
 
-def read_cells(img, cells, reader, pad=PAD):
-    """セルを囲む領域を**1 回だけ**読んで，読みを割り当てる
+TILE = 3000             # 領域がこれより大きければ分割して読む (px)．
+                        # 折込をそのまま渡すと縮小されて読みが崩れる
+                        # (7012x9214 は辞書に当たる和名が 1 個．3000 px に
+                        # 分けると 188 個．2026-09-13 に実測)
 
-    読み手が落ちても止めません (空を返す)．読みは補助で，無ければ従来どおり
-    セルごとの読みに任せます．
+
+def read_cells(img, cells, reader, pad=PAD, split_text=True, tile=TILE):
+    """セルを囲む領域を読んで，読みを割り当てる
+
+    **領域が `tile` より大きければ分割して読み**，元の座標へ戻します
+    (`comptea.tiles`)．読み手が落ちても止めません (空を返す)．読みは補助で，
+    無ければ従来どおりセルごとの読みに任せます．
     """
     box = region_box(cells, pad=pad)
     if box is None:
         return {}
     try:
-        found = reader.read_boxes(img, box)
+        if tile and (box[2] - box[0] > tile or box[3] - box[1] > tile):
+            from . import tiles
+            crop = img.crop((int(box[0]), int(box[1]),
+                             int(box[2]), int(box[3])))
+            got = tiles.read_tiled(crop, reader, size=tile)
+            found = tiles.shift(got, (box[0], box[1]))
+        else:
+            found = reader.read_boxes(img, box)
     except Exception:                           # noqa: BLE001  読めなくても進む
         return {}
-    return assign(cells, found)
+    return assign(cells, found, split=split_text)
 
 
 def union(maps, names=None, with_source=False):

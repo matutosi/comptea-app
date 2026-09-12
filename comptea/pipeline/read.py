@@ -75,13 +75,10 @@ def blend(img, read, readers, ok=None):
             continue
         maps = {'easy': {c.cell_id: c.text for c in cells.itertuples()
                          if isinstance(c.text, str) and c.text.strip()}}
-        box = read_region.region_box(cells)
         for tag, r in use.items():
-            try:
-                maps[tag] = read_region.assign(cells, r.read_boxes(img, box),
-                                               split=True)
-            except Exception:                           # noqa: BLE001
-                maps[tag] = {}
+            # **領域が大きければ分割して読む** (折込をそのまま渡すと縮小されて
+            # 読みが崩れる．7012x9214 は辞書に当たる和名が 1 個だった)
+            maps[tag] = read_region.read_cells(img, cells, r)
         got, src = read_region.pick(maps, cls, ok=ok, with_source=True)
         for cid, text in got.items():
             m = out['cell_id'] == cid
