@@ -6,6 +6,10 @@
 読み方だけを差し替え，判定の規則は動かさない．誰が読んだかは `read_by` に残る．
 
     easyocr (既定)  EasyOCR で全セルを読む．安く，再現性がある
+    multi           EasyOCR で読んだうえで，**入っている読み手で領域を読み直す**．
+                    クラスごとの順で質の通る読みを採る(`read_region.pick`)．
+                    2026-09-12 の実測: 学名の一致が 13 → 24・11 → 31 (真値の 2 表)，
+                    辞書に当たるセルが 学名 462 → 548・和名 277 → 428 (12 表)
     ai              EasyOCR を使わず，**全セルを AI が読む**ものとして段階2へ回す
                     (古い印刷で EasyOCR が崩れる資料向け)
     both            EasyOCR で読んだうえで全セルを AI にも回し，
@@ -41,14 +45,60 @@ REGIONS = ('header', 'once_species')
 READ_CLASSES = ('comp', 'species_col', 'sname', 'layer', 'plot_row', 'header_col')
 
 
+# `multi` で読み直すクラス．**領域としてまとまっている所**だけにする．
+# 組成 (`comp`) は細かい格子なので，いまのところ対象にしない
+BLEND_CLASSES = ('sname', 'species_col', 'header_item', 'header_item_ja')
+
+
+def usable_readers(readers):
+    """入っている読み手だけを返す"""
+    return {k: r for k, r in (readers or {}).items()
+            if getattr(r, 'available', lambda: True)()}
+
+
+def blend(img, read, readers, ok=None):
+    """EasyOCR の読みに，**領域を読み直した結果**を重ねる
+
+    クラスごとの順 (`read_region.ORDER`) で，質の通る読みを採ります．
+    どこから採ったかは `read_by` に残します．
+    """
+    from comptea import read_region
+    out = read.copy()
+    if 'read_by' not in out.columns:
+        out['read_by'] = 'easy'
+    use = usable_readers(readers)
+    if not use:
+        return out
+    for cls in BLEND_CLASSES:
+        cells = out[out['obj_name'] == cls]
+        if cells.empty:
+            continue
+        maps = {'easy': {c.cell_id: c.text for c in cells.itertuples()
+                         if isinstance(c.text, str) and c.text.strip()}}
+        box = read_region.region_box(cells)
+        for tag, r in use.items():
+            try:
+                maps[tag] = read_region.assign(cells, r.read_boxes(img, box),
+                                               split=True)
+            except Exception:                           # noqa: BLE001
+                maps[tag] = {}
+        got, src = read_region.pick(maps, cls, ok=ok, with_source=True)
+        for cid, text in got.items():
+            m = out['cell_id'] == cid
+            out.loc[m, 'text'] = text
+            out.loc[m, 'read_by'] = src.get(cid, 'easy')
+    return out
+
+
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description='OCRと補正(段階2の下ごしらえ)')
     p.add_argument('workdir', help='run_pipeline.py が作った作業ディレクトリ')
     p.add_argument('--only', default=None,
                    help='読み直すクラスを絞る(例 comp,species_col)')
     p.add_argument('--reader', default='easyocr',
-                   choices=['easyocr', 'ai', 'both'],
-                   help='読み方(既定 easyocr)．ai と both は段階2で AI が読む')
+                   choices=['easyocr', 'multi', 'ai', 'both'],
+                   help='読み方(既定 easyocr)．multi は他の読み手も使う．'
+                        'ai と both は段階2で AI が読む')
     return p.parse_args(argv)
 
 
@@ -163,6 +213,34 @@ def main(argv=None):
     if 'text' not in read.columns:
         read['text'] = None
 
+    # **入っている読み手で領域を読み直す** (`--reader multi`)．
+    # 読み手が無ければ何も起きないので，入れていない環境でも動く
+    if args.reader == 'multi':
+        from PIL import Image
+        from comptea import correct_text as _ct
+        from comptea import ndl, source, yomi
+        readers = usable_readers({'yomi': yomi.YomiReader(),
+                                  'ndl': ndl.NdlReader()})
+        if not readers:
+            print('読み方 multi: 他の読み手が入っていないので EasyOCR のまま')
+        else:
+            print(f'読み方 multi: {sorted(readers)} で領域を読み直す')
+            bad = ('Need Check', 'multi', 'suggested')
+
+            def _ok(t, cls=None):
+                return _ct.correct_cell(cls, t).get('status') not in bad
+
+            done = []
+            for image_path, group in read.groupby('source_image'):
+                try:
+                    img = Image.open(image_path)
+                except Exception:                       # noqa: BLE001
+                    done.append(group)
+                    continue
+                done.append(blend(img, group, readers,
+                                  ok=lambda t, c=None: True))
+            read = pd.concat(done).sort_values('cell_id')
+
     # 短い読みは，候補があっても採らずに印字を残す(correct_text.MIN_ADOPT_LEN)．
     # その候補は `suggest` に入って来るので，目視のために持ち回る
     read['suggest'] = None
@@ -173,7 +251,8 @@ def main(argv=None):
         if fixed.get('suggest'):
             read.loc[i, 'suggest'] = fixed['suggest']
     # AI が読み直したセルを後から見分けられるようにする
-    read['read_by'] = '(未読)' if args.reader == 'ai' else 'easyocr'
+    if 'read_by' not in read.columns:
+        read['read_by'] = '(未読)' if args.reader == 'ai' else 'easyocr'
     if args.reader == 'both':
         # AI の読みで上書きされても比べられるよう，EasyOCR の結果を控えておく
         read['text_easyocr'] = read['text']
