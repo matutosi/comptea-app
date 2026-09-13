@@ -521,3 +521,39 @@ def test_ページも切り出しも無ければ空(tmp_path):
     work = tmp_path / 'work'
     work.mkdir()
     assert site_notes.work_note_text(work, reader=_FakeReader([])) == ''
+
+
+# --- 学名が途中で切れた読みを補う ------------------------------------------
+#
+# 2026-09-13 の実測 (折込 254 件): **和名は辞書に当たるのに学名が当たらない**
+# のが 68 件あり，そのすべてで和名から学名を引ける．しかし中を見ると
+# **58 件は本当に別の名前**だった (古い資料の印字と現在の分類の違い．
+# `Acanthopanax sclado` → `Chengiopanax sciadophylloides`)．
+# **補ってよいのは，印字の読みが引いた名前の頭に収まる 10 件だけ**
+# (`Hymenophyllum bar` → `Hymenophyllum barbatum`)．
+
+def test_途中で切れた学名は補う():
+    recs = [{'plot': 1, 'j_name': 'コケシノブ', 's_name': 'Hymenophyllum wrig',
+             'layer': None, 'comp_raw': '+'}]
+    got = site_notes.correct_once(recs)
+    assert got[0]['s_name'].startswith('Hymenophyllum')
+    assert len(got[0]['s_name']) > len('Hymenophyllum wrig')
+
+
+def test_別の名前なら印字を残して控える():
+    """**印字されている学名は置き換えない** (2026-09-01 の決定)"""
+    recs = [{'plot': 1, 'j_name': 'テンダイウヤク', 's_name': 'Lindera strychnl',
+             'layer': None, 'comp_raw': '+'}]
+    got = site_notes.correct_once(recs)
+    assert got[0]['s_name'] == 'Lindera strychnl'
+    assert got[0].get('s_name_ref')            # 引いた名前は別に控える
+    assert '食い違' in (got[0].get('note') or '')
+
+
+def test_印字の方が詳しければ触らない():
+    """`Euonymus fortunei var. radicans` を `Euonymus fortunei` にはしない"""
+    recs = [{'plot': 1, 'j_name': 'ツルマサキ',
+             's_name': 'Euonymus fortunei var. radicans',
+             'layer': None, 'comp_raw': '+'}]
+    got = site_notes.correct_once(recs)
+    assert got[0]['s_name'] == 'Euonymus fortunei var. radicans'

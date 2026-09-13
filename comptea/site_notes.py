@@ -289,6 +289,43 @@ def once_species(paras, gap=GAP):
     return out
 
 
+def _letters(text):
+    return re.sub(r'[^a-z]', '', (text or '').lower())
+
+
+def _fill_sname(r, status, correct_text):
+    """学名を和名から補う (**印字は置き換えない**)
+
+    2026-09-13 の実測 (折込 254 件): 和名が辞書に当たるのに学名が当たらない
+    のが 68 件あり，そのすべてで和名から引ける．しかし **58 件は本当に
+    別の名前**だった (古い資料の印字と現在の分類の違い)．
+    補ってよいのは**印字の読みが引いた名前の頭に収まる**ものだけ．
+    """
+    j_name = (r.get('j_name') or '').strip()
+    printed = (r.get('s_name') or '').strip()
+    if not j_name:
+        return r
+    if printed and 'Need Check' not in status and 'suggested' not in status:
+        return r                            # 印字が辞書に当たっている
+    name, why = correct_text.sname_from_jname(j_name)
+    if why != 'ok':
+        return r
+    if not printed:
+        r['s_name'] = name
+        r['note'] = '学名は和名から引いた'
+        return r
+    a, b = _letters(printed), _letters(name)
+    if a and b.startswith(a):
+        # **読みが途中で切れている**．同じ名前なのでつなぐ
+        r['s_name'] = name
+        r['note'] = '学名は和名から補った (読みが途中で切れていた)'
+    elif a and not a.startswith(b):
+        # **別の名前**．印字を残し，引いた名前は別に控える
+        r['s_name_ref'] = name
+        r['note'] = '和名から引いた学名と食い違う (印字を残した)'
+    return r
+
+
 def correct_once(recs):
     """「1 回出現の種」の名前を辞書で直す
 
@@ -313,11 +350,7 @@ def correct_once(recs):
             if got:
                 r[key] = got['corrected']
                 status.append(got['status'])
-        if not (r.get('s_name') or '').strip() and r.get('j_name'):
-            name, why = correct_text.sname_from_jname(r['j_name'])
-            if why == 'ok':
-                r['s_name'] = name
-                r['note'] = '学名は和名から引いた'
+        r = _fill_sname(r, status, correct_text)
         # **いちばん確かでない方を採る** (どちらかが怪しければ目視に回す)
         for want in ('Need Check', 'suggested', 'OK'):
             if want in status:
