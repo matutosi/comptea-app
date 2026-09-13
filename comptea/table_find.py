@@ -923,6 +923,38 @@ def check_boxes(boxes, points, size, once=(), least=TABLE_LEAST):
     return out
 
 
+def recheck_boxes(im, boxes, points, size, once=(), reader=None,
+                  least=TABLE_LEAST, tile=TILE):
+    """検算で**表頭が無いと出た箱**だけ，切り出して読み直す
+
+    2026-09-13 の実測: 「表頭が無い」6 箱のうち **4 箱は本物の表**で，
+    格子には表頭項目が 11〜20 個あった．**紙面ぜんぶを読んだときに目印が
+    拾えなかっただけ**．小さく切り出すと読める (タイルや注記と同じ)．
+    """
+    got = check_boxes(boxes, points, size, once=once, least=least)
+    for g in got:
+        if g['heads']:
+            continue
+        x1, y1, x2, y2 = (int(v) for v in g['box'])
+        if x2 - x1 < 8 or y2 - y1 < 8:
+            continue
+        crop = im.crop((x1, y1, x2, y2))
+        # read_marks は (目印, 採った向き) を返す
+        marks, _how = read_marks(crop, reader=reader, tile=tile)
+        pts = [(float(m[1]) + x1, float(m[2]) + y1) for m in marks
+               if m[0] == 'item']
+        if not pts:
+            continue
+        w, h = size
+        groups = [c for c in _by_y(pts, h * ROW_GAP) if len(c) >= least]
+        if groups:
+            g['groups'] = groups
+            g['heads'] = len(groups)
+            g['ok'] = len(groups) == 1
+            g['why'] = '' if len(groups) == 1 else f'表頭が {len(groups)} つ入る'
+    return got
+
+
 def box_for(group, blobs, pad=PAD, max_frac=None, size=None):
     """まとまりの中心を含む塊の外接矩形．無ければ目印の外接矩形を広げる
 
