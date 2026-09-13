@@ -117,3 +117,59 @@ def test_読めるものは壊さない():
     got, n = cta.repair_split_values(_split_case("5;5", "4;2"))
     assert n == 0
     assert list(got["comp_raw"]) == ["5;5", "4;2"]
+
+
+# --- 流し込みの行に印を付ける ----------------------------------------------
+#
+# 2026-09-13 に全 147 表を通して分かった．17_p1 の要確認 591 件のうち
+# **278 件 (47%) が，格子の下端が「出現 1 回の種」の文章に食い込んだ 9 行**
+# だった．**欠落を避けるために残している行**なので落とさず，印を付けて
+# 後段で外せるようにする (2026-09-11 の方針どおり)．
+#
+# 判定は `row_kinds.looks_flow_ja` と同じ考え: **本物の行は和名より右に
+# ラテン語が無い**．画像でなく，読み終えた文字列に当てる．
+
+def test_和名にラテン語が並ぶ行は流し込み():
+    df = pd.DataFrame([
+        {'row_no': 1, 'j_name': 'ススキ', 's_name': 'Miscanthus sinensis',
+         'note': None},
+        {'row_no': 2, 'j_name': 'In 5: Tsuga diversifolia ツガ K-t, Vlola',
+         's_name': None, 'note': None},
+    ])
+    got = cta.mark_flow(df)
+    assert 'flow' not in str(got.loc[0, 'note'] or '')
+    assert 'flow' in str(got.loc[1, 'note'])
+
+
+def test_見出しの語でも流し込みとみなす():
+    df = pd.DataFrame([{'row_no': 1, 'j_name': '出現1回の種 Außerdem je einmal',
+                        's_name': None, 'note': None}])
+    assert 'flow' in str(cta.mark_flow(df).loc[0, 'note'])
+
+
+def test_本物の行には付けない():
+    df = pd.DataFrame([
+        {'row_no': 1, 'j_name': 'コナラ', 's_name': 'Quercus serrata',
+         'note': None},
+        {'row_no': 2, 'j_name': 'ヤマザクラ', 's_name': 'Prunus jamasakura',
+         'note': 'y_fitted'},
+    ])
+    got = cta.mark_flow(df)
+    assert all('flow' not in str(v) for v in got['note'])
+
+
+def test_同じ行のセルには同じ印():
+    df = pd.DataFrame([
+        {'row_no': 7, 'j_name': 'In 5: Tsuga diversifolia ツガ', 's_name': None,
+         'note': None},
+        {'row_no': 7, 'j_name': None, 's_name': None, 'note': 'y_fitted'},
+    ])
+    got = cta.mark_flow(df)
+    assert all('flow' in str(v) for v in got['note'])
+
+
+def test_元の印は残す():
+    df = pd.DataFrame([{'row_no': 1, 'j_name': 'In 5: Tsuga diversifolia ツガ',
+                        's_name': None, 'note': 'y_fitted'}])
+    got = cta.mark_flow(df)
+    assert 'y_fitted' in str(got.loc[0, 'note'])

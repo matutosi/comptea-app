@@ -35,6 +35,53 @@ CLASS_COMP = 'comp'
 CONSTANCY_MIN = 0.2
 
 
+FLOW_LATIN = 2          # 和名の欄にラテン語がこれだけあれば流し込み
+
+
+def mark_flow(df, col_row='row_no', col_j='j_name', col_s='s_name',
+              col_note='note', least=FLOW_LATIN):
+    """**流し込みの行**に `flow` の印を付ける (行は落とさない)
+
+    格子の下端は「学名・和名・組成の欠落は絶対に避ける」方針で多めに取るので
+    (2026-09-11 のユーザ指示)，「出現 1 回の種」の文章が行として入ることがある．
+    17_p1 では要確認 591 件のうち **278 件 (47%) がその 9 行**だった．
+    **落とさず，印を付けて後段で外せるようにする**．
+
+    判定は `row_kinds.looks_flow_ja` と同じ考え: **本物の行は和名より右に
+    ラテン語が無い**．画像ではなく，読み終えた文字列に当てる．
+    """
+    from . import row_kinds
+
+    if not len(df) or col_row not in df.columns:
+        return df
+    out = df.copy()
+    flow = set()
+    for row_no, g in out.groupby(col_row):
+        texts = []
+        for c in (col_j, col_s):
+            if c in g.columns:
+                texts += [str(v) for v in g[c] if isinstance(v, str)]
+        text = ' '.join(texts)
+        if not text.strip():
+            continue
+        if row_kinds.kind_of_text(text) in ('once', 'note'):
+            flow.add(row_no)
+            continue
+        # **和名の欄にラテン語が並ぶ** = 文章が欄を突き抜けている
+        ja = ' '.join(str(v) for v in g.get(col_j, []) if isinstance(v, str))
+        if len(row_kinds.latin_words(ja)) >= least:
+            flow.add(row_no)
+    if not flow:
+        return out
+    if col_note not in out.columns:
+        out[col_note] = None
+    hit = out[col_row].isin(flow)
+    out.loc[hit, col_note] = [
+        'flow' if v is None or v != v or str(v) == '' else f'{v};flow'
+        for v in out.loc[hit, col_note]]
+    return out
+
+
 def split_comp(text, kind=None):
     """セルの文字列を被度と群度に分ける
 
