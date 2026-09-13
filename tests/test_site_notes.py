@@ -653,3 +653,25 @@ def test_壊れた日付が注記で入れ替わる():
     got = site_notes.merge_plots(df, recs)
     assert got.loc[0, 'date'] == 'Juni 1983'
     assert got.loc[0, 'locality'] == '六甲山'      # 地名はそのまま
+
+
+# --- 文の途中の括弧の日付も分ける ------------------------------------------
+#
+# 2026-09-13 に kinki_006 で工程を通して見つかった．地名が次の形で，
+# **括弧が末尾でない**ため日付が分けられず，地名に残っていた．
+#
+#   'Ha- masaka-cho. Mikata-gun,美方郡浜坂町釜屋(5. Juni 1983), in'
+
+def test_途中の括弧の日付を取り出す():
+    v = 'Hamasaka-cho, Mikata-gun 美方郡浜坂町釜屋(5. Juni 1983), in'
+    head, date = site_notes.split_date(v)
+    assert date == '5. Juni 1983'
+    assert '1983' not in head
+    assert head.endswith('釜屋')          # 末尾の 「, in」 も落とす
+
+
+def test_途中の括弧が日付でなければ残す():
+    v = '神戸市山田町 (北向きの斜面) の林'
+    head, date = site_notes.split_date(v)
+    assert date is None
+    assert '北向き' in head
