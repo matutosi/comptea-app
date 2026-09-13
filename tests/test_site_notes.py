@@ -586,3 +586,40 @@ def test_地点情報から頁番号が消える():
     recs = [{'plot': 1, 'field': 'source_ref', 'value': 'Original 原調査資料. 151'}]
     got = site_notes.with_dates(recs)
     assert got[0]['value'] == 'Original 原調査資料'
+
+
+# --- 表頭の値が壊れているときは，注記で埋める ------------------------------
+#
+# 2026-09-13 に工程を通して見つかった．kinki_002 の `locality` には表頭から
+# `26`・`20/N`・`nan/耳` が入っており (項目の取り違え)，**「表頭は上書き
+# しない」規則のせいで，注記の正しい地名が入れなかった**．
+# **値がその項目の形をしていなければ，空とみなす**．
+
+def test_地名の形をしていない値は空とみなす():
+    assert site_notes.usable_value('locality', '26') is False
+    assert site_notes.usable_value('locality', '20/N') is False
+    assert site_notes.usable_value('locality', 'nan') is False
+    assert site_notes.usable_value('locality', '日高郡龍神村') is True
+    assert site_notes.usable_value('locality', 'Ryujin-mura') is True
+
+
+def test_日付は数字があればよい():
+    assert site_notes.usable_value('date', "'83/6/8") is True
+    assert site_notes.usable_value('date', '6 Nov. 1973') is True
+    assert site_notes.usable_value('date', '-') is False
+
+
+def test_壊れた表頭の値は注記で埋める():
+    df = _plots([{'plot': 1, 'locality': '26', 'date': "'83/6"}])
+    recs = [{'plot': 1, 'field': 'locality', 'value': '日高郡龍神村'},
+            {'plot': 1, 'field': 'date', 'value': '6 Nov. 1973'}]
+    got = site_notes.merge_plots(df, recs)
+    assert got.loc[0, 'locality'] == '日高郡龍神村'      # 壊れていたので入る
+    assert got.loc[0, 'date'] == "'83/6"                # 形は正しいので残す
+
+
+def test_正しい表頭の値は残す():
+    df = _plots([{'plot': 1, 'locality': '六甲山'}])
+    recs = [{'plot': 1, 'field': 'locality', 'value': '日高郡龍神村'}]
+    got = site_notes.merge_plots(df, recs)
+    assert got.loc[0, 'locality'] == '六甲山'
