@@ -76,8 +76,8 @@ def once_text(work):
     if (work / 'once_block.png').is_file():
         from comptea import site_notes
 
-        got = site_notes.block_text(work, name='once_block.png',
-                                    kinds=('once',))
+        # **切り出しの中は全部が流し込み**なので，見出しを求めない
+        got = site_notes.block_text(work, name='once_block.png', kinds=None)
         if got:
             return got
     ocred = work / 'ocred.csv'
