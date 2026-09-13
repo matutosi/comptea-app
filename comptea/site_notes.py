@@ -215,6 +215,22 @@ STRIP = 0.2
 NOTE_SUFFIX = '_note.png'
 NOTE_BLOCK = 'note_block.png'
 CACHE_SUFFIX = '.layout.txt'
+# **細い切り出しは白を足してから読む**．高さが 1〜2 行しかないと
+# レイアウト解析が段落を返さない (2026-09-13: 061-2 は 1909x120 で 0 段落，
+# 白を足すと 2 段落．081-2 は 1405x68 で 0 段落 → 1 段落)
+PAD_LEAST = 400
+
+
+def _pad_short(im, least=PAD_LEAST):
+    """高さの足りない画像に白を足して，紙面の形にする"""
+    from PIL import Image
+
+    w, h = im.size
+    if h >= least:
+        return im
+    out = Image.new('RGB', (w, least), 'white')
+    out.paste(im, (0, (least - h) // 2))
+    return out
 
 
 def _join(paras, kinds, gap):
@@ -259,7 +275,7 @@ def block_text(work, name=NOTE_BLOCK, kinds=('note',), reader=None,
 
     Image.MAX_IMAGE_PIXELS = None
     with Image.open(img) as im:
-        paras = reader.read_paragraphs(im.convert('RGB'))
+        paras = reader.read_paragraphs(_pad_short(im.convert('RGB')))
     text = _join(paras, kinds, gap)
     if cache:
         with open(keep, 'w', encoding='utf-8') as f:
