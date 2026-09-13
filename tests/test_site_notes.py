@@ -557,3 +557,32 @@ def test_印字の方が詳しければ触らない():
              'layer': None, 'comp_raw': '+'}]
     got = site_notes.correct_once(recs)
     assert got[0]['s_name'] == 'Euonymus fortunei var. radicans'
+
+
+# --- 値の末尾の頁番号を落とす ----------------------------------------------
+#
+# 注記は紙面のいちばん下にあり，**その下の頁番号まで一緒に読まれる**
+# (`Original 原調査資料. 151`・`12. Mai, 1983. 113`)．
+
+def test_末尾の頁番号を落とす():
+    assert site_notes.drop_page_no('Original 原調査資料. 151') == 'Original 原調査資料'
+    assert site_notes.drop_page_no('12. Mai, 1983. 113') == '12. Mai, 1983'
+
+
+def test_年は落とさない():
+    assert site_notes.drop_page_no('6 Nov. 1973') == '6 Nov. 1973'
+    assert site_notes.drop_page_no('Juni 1983') == 'Juni 1983'
+
+
+def test_地名の中の数字は落とさない():
+    assert site_notes.drop_page_no('山田町2丁目') == '山田町2丁目'
+
+
+def test_数字だけなら残す():
+    assert site_notes.drop_page_no('151') == '151'
+
+
+def test_地点情報から頁番号が消える():
+    recs = [{'plot': 1, 'field': 'source_ref', 'value': 'Original 原調査資料. 151'}]
+    got = site_notes.with_dates(recs)
+    assert got[0]['value'] == 'Original 原調査資料'

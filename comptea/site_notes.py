@@ -122,6 +122,20 @@ _DATE = re.compile(
 DATE_MAX = 24          # 日付はこの字数まで (長いものは種名の列挙などの巻き添え)
 
 
+# 注記は紙面のいちばん下にあり，**その下の頁番号まで一緒に読まれる**．
+# 年 (4 桁) と見分けるため，落とすのは 3 桁までの数字だけにする．
+_PAGE_NO = re.compile(r'[,，.．]\s*\d{1,3}\s*$')
+
+
+def drop_page_no(value):
+    """値の末尾の頁番号を落とす (`Original 原調査資料. 151`)"""
+    s = (value or '').strip()
+    m = _PAGE_NO.search(s)
+    if not m or not s[:m.start()].strip():
+        return s
+    return s[:m.start()].strip(' .．,，')
+
+
 def split_date(value):
     """調査地の文を (地名, 日付) に分ける．日付が無ければ (そのまま, None)
 
@@ -156,6 +170,7 @@ def with_dates(recs):
     has = {r.get('plot') for r in (recs or []) if r.get('field') == 'date'}
     out = []
     for r in (recs or []):
+        r = dict(r, value=drop_page_no(r.get('value')))
         if r.get('field') != 'locality':
             out.append(r)
             continue
