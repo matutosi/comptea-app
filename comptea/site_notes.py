@@ -94,4 +94,73 @@ def site_info(paras, gap=GAP):
     notes = pick(paras, kinds=('note',), gap=gap)
     if not notes:
         return []
-    return parse_text.parse_site_notes('\n'.join(notes))
+    recs = parse_text.parse_site_notes('\n'.join(notes))
+    # **長すぎる日付は日付でない**．「調査年月日」の見出しの下に「出現 1 回の種」の
+    # 段落が続く紙面があり (s01115_09_p1)，種の列挙が丸ごと値になっていた．
+    recs = [r for r in recs
+            if r.get('field') != 'date' or len(r.get('value') or '') <= DATE_MAX]
+    return with_dates(recs)
+
+
+# 日付は「調査地」の文の中に**括弧付きで**書かれるのが普通で，独立した
+# 「調査年月日」の見出しは少ない (注記画像 10 枚で `date` は 4 件だけだった)．
+#   「Berg Kikusui, Shimada-cho, Stadt Kobe 神戸市山田町菊水山 (23. Juni 1983)」
+# 既存の `parse_text.parse_site_notes` は**見出しで場を分ける**作りなので，
+# 値に埋もれた日付はここで分ける (既存の解析には手を入れない)．
+
+MONTH = (r'Jan|Feb|M(?:ä|a)r|Apr|Mai|May|Jun|Jul|Aug|Sep|Okt|Oct|Nov|Dez|Dec'
+         r'|[1１][0-2０-２]?月|[1-9１-９]月')
+# (日) 月 年 / 月 年 / 年 だけ．年は 4 桁か「'83」
+_DATE = re.compile(
+    r'(?P<date>'
+    r'(?:\d{1,2}\s*[.,、]?\s*)?(?:' + MONTH + r')[a-zé]*\.?\s*[,，]?\s*'
+    r"(?:\d{4}|'\d{2})"
+    r'|(?:\d{1,2}\s*[.,、]?\s*)?(?:' + MONTH + r')[a-zé]*\.?'
+    r"|(?:19|20)\d{2}|'\d{2}"
+    r')\s*[).．]*\s*$')
+DATE_MAX = 24          # 日付はこの字数まで (長いものは種名の列挙などの巻き添え)
+
+
+def split_date(value):
+    """調査地の文を (地名, 日付) に分ける．日付が無ければ (そのまま, None)
+
+    末尾の括弧や「6 Nov. 1973」のような並びを日付とみなします．
+    地名の中の数字 (「2 丁目」) は日付にしません — 月か 4 桁の年が要ります．
+    """
+    s = (value or '').strip()
+    if not s:
+        return s, None
+    body = s.rstrip(' .．,，')
+    # 末尾の括弧を先に見る
+    m = re.search(r'[(（]\s*(?P<in>[^()（）]*)\s*[)）]\s*[.．]?\s*$', body)
+    if m:
+        inner = m.group('in').strip()
+        if len(inner) <= DATE_MAX and _DATE.search(inner + ' '):
+            return body[:m.start()].strip(' .,，'), inner.strip(' .,，')
+        # 括弧の中が日付でなければ，**その中は見ない** (中の年号を拾わない)
+        body = body[:m.start()].rstrip(' .．,，')
+    m = _DATE.search(body)
+    if m:
+        head = body[:m.start()].strip(' .,，([（')
+        if head and len(m.group('date')) <= DATE_MAX:
+            return head, m.group('date').strip(' .,，')
+    return s.strip(' .,，'), None
+
+
+def with_dates(recs):
+    """地点情報の `locality` から日付を分け，`date` として足す
+
+    **すでにその地点に日付があれば足しません** (見出しから取れたものを優先)．
+    """
+    has = {r.get('plot') for r in (recs or []) if r.get('field') == 'date'}
+    out = []
+    for r in (recs or []):
+        if r.get('field') != 'locality':
+            out.append(r)
+            continue
+        head, date = split_date(r.get('value'))
+        out.append(dict(r, value=head))
+        if date and r.get('plot') not in has:
+            out.append({'plot': r.get('plot'), 'field': 'date', 'value': date})
+            has.add(r.get('plot'))
+    return out

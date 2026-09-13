@@ -62,3 +62,57 @@ def test_地点ごとの情報にする():
     fields = {r['field'] for r in got}
     assert 'locality' in fields
     assert any(r['plot'] == 1 for r in got)
+
+
+# --- 調査地の文に埋もれた日付を分ける ------------------------------------
+#
+# 日付は「調査地」の文の中に**括弧付きで**書かれるのが普通で，独立した
+# 「調査年月日」の見出しは少ない (注記画像 10 枚で date は 4 件しか出なかった)．
+#   「Berg Kikusui, Shimada-cho, Stadt Kobe 神戸市山田町菊水山 (23. Juni 1983)」
+
+def test_括弧の中の日付を取り出す():
+    got = site_notes.split_date('神戸市山田町菊水山 (23. Juni 1983)')
+    assert got == ('神戸市山田町菊水山', '23. Juni 1983')
+
+
+def test_括弧が無くても末尾の日付を取り出す():
+    got = site_notes.split_date('日高郡龍神村 6 Nov. 1973')
+    assert got == ('日高郡龍神村', '6 Nov. 1973')
+
+
+def test_日付が無ければそのまま():
+    assert site_notes.split_date('日高郡龍神村') == ('日高郡龍神村', None)
+
+
+def test_年だけでも日付とみなす():
+    got = site_notes.split_date('滋賀県 1978')
+    assert got == ('滋賀県', '1978')
+
+
+def test_地名の中の数字は日付にしない():
+    """「2 丁目」のような数字を日付と取らない"""
+    assert site_notes.split_date('山田町2丁目')[1] is None
+
+
+def test_地点情報の日付を分けて足す():
+    recs = [{'plot': 1, 'field': 'locality', 'value': '神戸市山田町 (23. Juni 1983)'}]
+    got = site_notes.with_dates(recs)
+    loc = [r for r in got if r['field'] == 'locality'][0]
+    dates = [r for r in got if r['field'] == 'date']
+    assert loc['value'] == '神戸市山田町'
+    assert len(dates) == 1 and dates[0]['plot'] == 1
+    assert dates[0]['value'] == '23. Juni 1983'
+
+
+def test_すでに日付がある地点には足さない():
+    recs = [{'plot': 1, 'field': 'locality', 'value': '神戸市 (23. Juni 1983)'},
+            {'plot': 1, 'field': 'date', 'value': '6 Nov. 1973'}]
+    got = site_notes.with_dates(recs)
+    assert len([r for r in got if r['field'] == 'date']) == 1
+
+
+def test_長すぎるものは日付にしない():
+    """「出現 1 回の種」の列挙が巻き添えで日付になるのを防ぐ"""
+    v = ('神戸市 (Microstegium vimineum ++2, Polygomum nodosum オオイヌタデ +, '
+         'Galium kikunugura キクムグラ + 1983)')
+    assert site_notes.split_date(v)[1] is None
