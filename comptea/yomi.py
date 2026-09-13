@@ -21,7 +21,7 @@ import subprocess
 import tempfile
 
 ENV_PY = 'COMPTEA_YOMI_PY'
-DEFAULT_DEVICE = 'cuda'
+# **GPU があるとは限らない**．`comptea.device` が決める (`COMPTEA_DEVICE`)
 
 WORKER = '''
 import json
@@ -87,9 +87,11 @@ def find_python():
 class YomiReader:
     """`read_boxes(img, box)` で読む (`read_region` が使う形)"""
 
-    def __init__(self, python=None, device=DEFAULT_DEVICE):
+    def __init__(self, python=None, device=None):
+        from . import device as _device
+
         self.python = python or find_python()
-        self.device = device
+        self.device = _device.pick(device)
         self.calls = 0
 
     def available(self):

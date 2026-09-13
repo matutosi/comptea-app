@@ -57,10 +57,13 @@ class NdlReader:
         device: 'cpu' か 'cuda'．既定は cpu (GPU が要らないのが取り柄)
     """
 
-    def __init__(self, ndl_dir=None, python=None, device='cpu'):
+    def __init__(self, ndl_dir=None, python=None, device=None):
         self.dir = ndl_dir or find_dir()
         self.python = python or sys.executable
-        self.device = device
+        from . import device as _device
+
+        # ONNX なので **cpu でも速い**．指定が無ければ環境に合わせる
+        self.device = _device.pick(device)
         self.calls = 0
 
     def available(self):

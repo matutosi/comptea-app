@@ -125,3 +125,24 @@ def test_段落も切り出しの座標を元に戻す(monkeypatch, tmp_path):
 def test_入っていなければ段落も読まない(monkeypatch):
     monkeypatch.delenv(yomi.ENV_PY, raising=False)
     assert yomi.YomiReader().read_paragraphs(None) == []
+
+
+# --- 装置 (CPU / GPU) ------------------------------------------------------
+
+def test_装置は環境に合わせる(monkeypatch):
+    """**GPU があるとは限らない**．既定を cuda に固定しない"""
+    from comptea import device
+
+    device.forget()
+    monkeypatch.setenv(device.ENV, 'cpu')
+    assert yomi.YomiReader(python='x').device == 'cpu'
+    monkeypatch.setenv(device.ENV, 'cuda')
+    assert yomi.YomiReader(python='x').device == 'cuda'
+    device.forget()
+
+
+def test_指した装置が優先(monkeypatch):
+    from comptea import device
+
+    monkeypatch.setenv(device.ENV, 'cuda')
+    assert yomi.YomiReader(python='x', device='cpu').device == 'cpu'
