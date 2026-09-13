@@ -217,6 +217,21 @@ NOTE_BLOCK = 'note_block.png'
 CACHE_SUFFIX = '.layout.txt'
 
 
+def _join(paras, kinds, gap):
+    """段落から文字列を作る
+
+    `kinds` が `None` なら**見出しを求めず，全部つなぐ**．
+    切り出し (`once_block.png`) は**その領域だけを切ったもの**なので，
+    見出しは前のページ側にあることがある (2026-09-13 に `link_pages` で
+    見つけた: 9 枚中 8 枚が空になっていた)．
+    """
+    if kinds is None:
+        items = sorted(((_box(p), _text(p)) for p in (paras or [])
+                        if _text(p).strip()), key=lambda z: (z[0][1], z[0][0]))
+        return '\n'.join(t.strip() for _b, t in items).strip()
+    return '\n'.join(pick(paras, kinds=kinds, gap=gap)).strip()
+
+
 def block_text(work, name=NOTE_BLOCK, kinds=('note',), reader=None,
                use_yomi=True, gap=GAP, cache=True):
     """置き場の切り出し画像をレイアウト解析で読み，選んだ文をつないで返す
@@ -245,7 +260,7 @@ def block_text(work, name=NOTE_BLOCK, kinds=('note',), reader=None,
     Image.MAX_IMAGE_PIXELS = None
     with Image.open(img) as im:
         paras = reader.read_paragraphs(im.convert('RGB'))
-    text = '\n'.join(pick(paras, kinds=kinds, gap=gap)).strip()
+    text = _join(paras, kinds, gap)
     if cache:
         with open(keep, 'w', encoding='utf-8') as f:
             f.write(text)

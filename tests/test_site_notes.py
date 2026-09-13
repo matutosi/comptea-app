@@ -808,3 +808,31 @@ def test_注記の値も検査する():
     recs = [{'plot': 1, 'field': 'locality', 'value': 'd. Autn'}]
     got = site_notes.merge_plots(df, recs)
     assert got.loc[0, 'locality'] is None          # 入れない
+
+
+# --- 切り出しの中は全部が対象 ----------------------------------------------
+#
+# 2026-09-13 に `cli/link_pages.py` を通して見つかった．続きのページの
+# `once_block.png` は**流し込みだけを切り出したもの**なのに，見出しを
+# 求めていたので 9 枚中 8 枚が空になった (見出しは前のページ側にある)．
+# **切り出しには見出しを求めない** (`kinds=None`)．
+
+def test_切り出しは見出しを求めない(tmp_path):
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    Image.new('RGB', (60, 40), 'white').save(tmp_path / 'once_block.png')
+    reader = _FakeReader([_p(0, 'Acer palmatum イロハモミジ K +,'),
+                          _p(45, 'Ilex crenata イヌツゲ S +')])
+    got = site_notes.block_text(tmp_path, name='once_block.png', kinds=None,
+                                reader=reader)
+    assert 'イロハモミジ' in got and 'イヌツゲ' in got
+
+
+def test_見出しを求める形も残る(tmp_path):
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    Image.new('RGB', (60, 40), 'white').save(tmp_path / 'note_block.png')
+    reader = _FakeReader([_p(0, 'この群落は海岸砂丘に成立している。')])
+    assert site_notes.block_text(tmp_path, kinds=('note',), reader=reader) == ''
