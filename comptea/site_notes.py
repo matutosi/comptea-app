@@ -122,6 +122,20 @@ _DATE = re.compile(
 DATE_MAX = 24          # 日付はこの字数まで (長いものは種名の列挙などの巻き添え)
 
 
+# 注記は紙面のいちばん下にあり，**その下の頁番号まで一緒に読まれる**．
+# 年 (4 桁) と見分けるため，落とすのは 3 桁までの数字だけにする．
+_PAGE_NO = re.compile(r'[,，.．]\s*\d{1,3}\s*$')
+
+
+def drop_page_no(value):
+    """値の末尾の頁番号を落とす (`Original 原調査資料. 151`)"""
+    s = (value or '').strip()
+    m = _PAGE_NO.search(s)
+    if not m or not s[:m.start()].strip():
+        return s
+    return s[:m.start()].strip(' .．,，')
+
+
 def split_date(value):
     """調査地の文を (地名, 日付) に分ける．日付が無ければ (そのまま, None)
 
@@ -156,6 +170,7 @@ def with_dates(recs):
     has = {r.get('plot') for r in (recs or []) if r.get('field') == 'date'}
     out = []
     for r in (recs or []):
+        r = dict(r, value=drop_page_no(r.get('value')))
         if r.get('field') != 'locality':
             out.append(r)
             continue
@@ -209,6 +224,60 @@ def block_text(work, name=NOTE_BLOCK, kinds=('note',), reader=None,
     return text
 
 
+PAGE_CACHE = 'page_note.layout.txt'
+
+
+def source_image(work):
+    """その置き場の格子が使った画像 (`located.csv` の `source_image`)"""
+    f = os.path.join(str(work), 'located.csv')
+    if not os.path.isfile(f):
+        return None
+    import pandas as pd
+
+    try:
+        df = pd.read_csv(f, usecols=['source_image'])
+    except Exception:
+        return None
+    got = df['source_image'].dropna()
+    return str(got.iloc[0]) if len(got) else None
+
+
+def work_note_text(work, reader=None, use_yomi=True, gap=GAP, page=True):
+    """その置き場の注記の文字列 (切り出しが無ければページ自身を読む)
+
+    枝番 `-2` の注記は**文の途中から始まる続き**のことがあり
+    (010-2 は「4-6 : Kumihama-cho …」で始まる)，見出しは表のページ側に
+    あります．`link_pages` が両方をつなげるよう，**表のページも読みます**．
+
+    **1 枚に 2 表ある紙面では読みません** (どちらの表の注記か分けられない)．
+    """
+    got = block_text(work, reader=reader, use_yomi=use_yomi, gap=gap)
+    if got or not page:
+        return got
+    if os.path.isfile(os.path.join(str(work), 'table.txt')):
+        return ''
+    keep = os.path.join(str(work), PAGE_CACHE)
+    if os.path.isfile(keep):
+        with open(keep, encoding='utf-8') as f:
+            return f.read().strip()
+    img = source_image(work)
+    if not img or not os.path.isfile(img):
+        return ''
+    if reader is None and use_yomi:
+        reader = _yomi_or_none()
+    if reader is None:
+        return ''
+    from PIL import Image
+
+    Image.MAX_IMAGE_PIXELS = None
+    with Image.open(img) as im:
+        paras = reader.read_paragraphs(im.convert('RGB'))
+    text = '\n'.join(pick(paras, kinds=('note',), gap=gap)).strip()
+    with open(keep, 'w', encoding='utf-8') as f:
+        f.write(text)
+    return text
+
+
 def once_species(paras, gap=GAP):
     """注記から「1 回出現の種」を取る
 
@@ -235,6 +304,43 @@ def once_species(paras, gap=GAP):
     return out
 
 
+def _letters(text):
+    return re.sub(r'[^a-z]', '', (text or '').lower())
+
+
+def _fill_sname(r, status, correct_text):
+    """学名を和名から補う (**印字は置き換えない**)
+
+    2026-09-13 の実測 (折込 254 件): 和名が辞書に当たるのに学名が当たらない
+    のが 68 件あり，そのすべてで和名から引ける．しかし **58 件は本当に
+    別の名前**だった (古い資料の印字と現在の分類の違い)．
+    補ってよいのは**印字の読みが引いた名前の頭に収まる**ものだけ．
+    """
+    j_name = (r.get('j_name') or '').strip()
+    printed = (r.get('s_name') or '').strip()
+    if not j_name:
+        return r
+    if printed and 'Need Check' not in status and 'suggested' not in status:
+        return r                            # 印字が辞書に当たっている
+    name, why = correct_text.sname_from_jname(j_name)
+    if why != 'ok':
+        return r
+    if not printed:
+        r['s_name'] = name
+        r['note'] = '学名は和名から引いた'
+        return r
+    a, b = _letters(printed), _letters(name)
+    if a and b.startswith(a):
+        # **読みが途中で切れている**．同じ名前なのでつなぐ
+        r['s_name'] = name
+        r['note'] = '学名は和名から補った (読みが途中で切れていた)'
+    elif a and not a.startswith(b):
+        # **別の名前**．印字を残し，引いた名前は別に控える
+        r['s_name_ref'] = name
+        r['note'] = '和名から引いた学名と食い違う (印字を残した)'
+    return r
+
+
 def correct_once(recs):
     """「1 回出現の種」の名前を辞書で直す
 
@@ -259,11 +365,7 @@ def correct_once(recs):
             if got:
                 r[key] = got['corrected']
                 status.append(got['status'])
-        if not (r.get('s_name') or '').strip() and r.get('j_name'):
-            name, why = correct_text.sname_from_jname(r['j_name'])
-            if why == 'ok':
-                r['s_name'] = name
-                r['note'] = '学名は和名から引いた'
+        r = _fill_sname(r, status, correct_text)
         # **いちばん確かでない方を採る** (どちらかが怪しければ目視に回す)
         for want in ('Need Check', 'suggested', 'OK'):
             if want in status:
