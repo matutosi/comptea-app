@@ -56,6 +56,54 @@ def usable_readers(readers):
             if getattr(r, 'available', lambda: True)()}
 
 
+RETRY_CLASS = 'comp'
+
+
+def retry_cells(img, df, reader, cls=RETRY_CLASS, pad=3):
+    """**読めなかった組成のセルを，まとめて読み直す**
+
+    2026-09-14 の実測: 読めなかったセルは **NDLOCR-Lite がよく読む**
+    (22_p2 で 77%・17_p1 で 53%・05_p2 で 26%)．EasyOCR は 66 個中 5 個，
+    yomitoku は 0 個だった．**1 セル 1 画像でまとめて渡す**と 0.6 秒/セル
+    (1 セルずつ呼ぶと 15 秒．別プロセスの起動と模型の読み込みのため)．
+
+    領域をまとめて読む形は駄目だった (488 セル中 53 個しか割り当たらない)．
+    """
+    from comptea import correct_text
+
+    if df is None or not len(df) or reader is None:
+        return df
+    if not getattr(reader, 'available', lambda: True)():
+        return df
+    if not hasattr(reader, 'read_crops'):
+        return df
+    out = df.copy()
+    if 'status' not in out.columns:
+        return out
+    hit = (out['obj_name'] == cls) & (out['status'] == 'Need Check')
+    if not hit.any():
+        return out
+    sub = out[hit]
+    boxes = list(zip(sub['x1'], sub['y1'], sub['x2'], sub['y2']))
+    got = reader.read_crops(img, boxes, pad=pad) or []
+    n = 0
+    for i, text in zip(sub.index, got):
+        if not text:
+            continue
+        fixed = correct_text.correct_comp(str(text))
+        if not fixed or fixed.get('status') != 'OK':
+            continue
+        out.at[i, 'corrected'] = fixed['corrected']
+        out.at[i, 'status'] = 'OK'
+        now = str(out.at[i, 'note'] or '')
+        out.at[i, 'note'] = f'{now};ndl' if now else 'ndl'
+        n += 1
+    if n:
+        print(f'読み直し: 組成の {int(hit.sum())} セルのうち {n} セルが読めた'
+              ' (NDLOCR-Lite)')
+    return out
+
+
 def blend(img, read, readers, ok=None):
     """EasyOCR の読みに，**領域を読み直した結果**を重ねる
 
@@ -92,6 +140,8 @@ def parse_args(argv=None):
     p.add_argument('workdir', help='run_pipeline.py が作った作業ディレクトリ')
     p.add_argument('--only', default=None,
                    help='読み直すクラスを絞る(例 comp,species_col)')
+    p.add_argument('--no-retry', action='store_true',
+                   help='読めなかった組成のセルを読み直さない (既定は読み直す)')
     p.add_argument('--device', default=None, choices=['cpu', 'cuda'],
                    help='読み手を動かす装置(既定は環境から決める)．'
                         'GPU が無ければ cpu')
@@ -250,6 +300,19 @@ def main(argv=None):
         read.loc[i, 'status'] = fixed['status']
         if fixed.get('suggest'):
             read.loc[i, 'suggest'] = fixed['suggest']
+    # **読めなかった組成のセルを読み直す** (NDLOCR-Lite)．
+    # 2026-09-14 の実測で，EasyOCR が読めなかったセルの 26〜77% が読める
+    if not args.no_retry:
+        from comptea import ndl, source as _source
+
+        rd = ndl.NdlReader(device=args.device)
+        if rd.available():
+            try:
+                _img = _source.open_image(read, workdir=work)
+            except Exception:
+                _img = None
+            if _img is not None:
+                read = retry_cells(_img, read, rd)
     # AI が読み直したセルを後から見分けられるようにする
     if 'read_by' not in read.columns:
         read['read_by'] = '(未読)' if args.reader == 'ai' else 'easyocr'

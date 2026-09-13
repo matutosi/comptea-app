@@ -69,6 +69,59 @@ class NdlReader:
     def available(self):
         return self.dir is not None
 
+    def read_crops(self, img, boxes, pad=0):
+        """**セルをまとめて読む** (1 回のプロセスで)
+
+        2026-09-14 の実測: 読めなかった組成のセルは **66 個中 44 個 (67%)**
+        を NDLOCR-Lite が読めた (EasyOCR は 5 個)．ただし 1 セルずつ呼ぶと
+        **1 個 15 秒**かかる (別プロセスの起動と模型の読み込み)．
+        NDLOCR-Lite は**ディレクトリを丸ごと読む**ので，セルを 1 枚ずつ
+        画像にして並べれば 1 回で済む．
+
+        **領域をまとめて読む形は駄目だった** (488 セル中 53 個しか
+        割り当たらない)．縦や格子に並べた 1 枚も駄目．**1 セル 1 画像**が要る．
+
+        Returns:
+            箱と同じ並びの文字列 (読めなければ空文字)
+        """
+        boxes = list(boxes or [])
+        if not boxes:
+            return []
+        if not self.available():
+            return [''] * len(boxes)
+        self.calls += 1
+        with tempfile.TemporaryDirectory() as tmp:
+            src, dst = os.path.join(tmp, 'in'), os.path.join(tmp, 'out')
+            os.makedirs(src)
+            os.makedirs(dst)
+            names = []
+            for i, b in enumerate(boxes):
+                x1, y1 = int(b[0]) - pad, int(b[1]) - pad
+                x2, y2 = int(b[2]) + pad, int(b[3]) + pad
+                name = f'c{i:06d}'
+                names.append(name)
+                img.crop((max(0, x1), max(0, y1), x2, y2)).convert('RGB').save(
+                    os.path.join(src, name + '.png'))
+            subprocess.run(
+                [self.python, 'ocr.py', '--sourcedir', src, '--output', dst,
+                 '--device', self.device],
+                cwd=self.dir, capture_output=True, text=True,
+                encoding='utf-8', errors='replace')
+            out = []
+            for name in names:
+                f = os.path.join(dst, name + '.json')
+                if not os.path.isfile(f):
+                    out.append('')
+                    continue
+                try:
+                    with open(f, encoding='utf-8') as fh:
+                        doc = json.load(fh)
+                except Exception:
+                    out.append('')
+                    continue
+                out.append(''.join(t for _b, t, _c in parse(doc)))
+        return out
+
     def read_boxes(self, img, box=None):
         """`img` の `box` の範囲を読み，**元の画像の座標**で返す"""
         if not self.available():

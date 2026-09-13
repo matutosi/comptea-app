@@ -78,3 +78,71 @@ def test_読み手が無ければ何もしない():
     df = _df([(1, 'sname', 0, 0, 100, 50, 'アカマツ')])
     out = read_mod.blend(None, df, {}, ok=lambda t: True)
     assert out['text'].iloc[0] == 'アカマツ'
+
+
+# --- 読めなかった組成のセルを読み直す --------------------------------------
+#
+# 2026-09-14 の実測: **読めなかった組成のセルは NDLOCR-Lite がよく読む**
+# (22_p2 で 77%・17_p1 で 53%・05_p2 で 26%)．EasyOCR は 66 個中 5 個，
+# yomitoku は 0 個だった．**1 セル 1 画像でまとめて渡す**と 0.6 秒/セル
+# (1 セルずつ呼ぶと 15 秒)．
+
+class _Crops:
+    """まとめ読みの口だけを持つ偽の読み手"""
+
+    def __init__(self, texts):
+        self.texts = texts
+        self.calls = 0
+
+    def available(self):
+        return True
+
+    def read_crops(self, img, boxes, pad=0):
+        self.calls += 1
+        return list(self.texts)[:len(list(boxes))]
+
+
+def test_読めなかったセルだけ読み直す():
+    df = pd.DataFrame([
+        {'cell_id': 1, 'obj_name': 'comp', 'x1': 0, 'y1': 0, 'x2': 9, 'y2': 9,
+         'corrected': '1;a', 'status': 'Need Check', 'note': ''},
+        {'cell_id': 2, 'obj_name': 'comp', 'x1': 10, 'y1': 0, 'x2': 19, 'y2': 9,
+         'corrected': '1', 'status': 'OK', 'note': ''},
+    ])
+    r = _Crops(['2・2'])
+    got = read_mod.retry_cells(None, df, r)
+    assert r.calls == 1
+    assert got.loc[0, 'corrected'] == '2;2'
+    assert got.loc[0, 'status'] == 'OK'
+    assert 'ndl' in str(got.loc[0, 'note'])
+    assert got.loc[1, 'corrected'] == '1'      # 読めていたセルは触らない
+
+
+def test_読み直しても駄目なら元のまま():
+    df = pd.DataFrame([
+        {'cell_id': 1, 'obj_name': 'comp', 'x1': 0, 'y1': 0, 'x2': 9, 'y2': 9,
+         'corrected': '1;a', 'status': 'Need Check', 'note': ''},
+    ])
+    got = read_mod.retry_cells(None, df, _Crops(['のののの']))
+    assert got.loc[0, 'corrected'] == '1;a'
+    assert got.loc[0, 'status'] == 'Need Check'
+
+
+def test_組成のセルだけ読み直す():
+    df = pd.DataFrame([
+        {'cell_id': 1, 'obj_name': 'sname', 'x1': 0, 'y1': 0, 'x2': 9, 'y2': 9,
+         'corrected': 'Zzz', 'status': 'Need Check', 'note': ''},
+    ])
+    r = _Crops(['1'])
+    got = read_mod.retry_cells(None, df, r)
+    assert r.calls == 0
+    assert got.loc[0, 'corrected'] == 'Zzz'
+
+
+def test_読み手が無ければ何もしない():
+    df = pd.DataFrame([
+        {'cell_id': 1, 'obj_name': 'comp', 'x1': 0, 'y1': 0, 'x2': 9, 'y2': 9,
+         'corrected': '1;a', 'status': 'Need Check', 'note': ''},
+    ])
+    got = read_mod.retry_cells(None, df, None)
+    assert got.loc[0, 'corrected'] == '1;a'
