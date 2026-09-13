@@ -673,7 +673,86 @@ def _heads_in(col, points):
     return got
 
 
-def structure_boxes(points, size, once=(), least=TABLE_LEAST):
+def refine_columns(dark, bounds, spans):
+    """列の境を，**隣り合う表頭のあいだのいちばん広い白い隙間**へ寄せる
+
+    表頭は表の左端にあるので，**表頭の中間は左の表の本体の中**に落ちる
+    (2026-09-13 の実データ: 幅 2823 px の表に対し箱が 5627 px になった)．
+
+    Args:
+        dark: 紙面のインク (True が黒)
+        bounds: 列の境 (両端を含む)．`len(spans) + 1` 本
+        spans: 列ごとの表頭の x の範囲 [(x1, x2)]
+    Returns:
+        寄せた境 (両端は動かさない)
+    """
+    out = list(bounds)
+    if dark is None or len(out) < 3:
+        return out
+    col = dark.any(axis=0) if dark.ndim == 2 else dark
+    for i in range(1, len(out) - 1):
+        lo = int(spans[i - 1][1])           # 左の列の表頭の右端
+        hi = int(spans[i][0])               # 右の列の表頭の左端
+        lo, hi = max(0, lo), min(len(col), hi)
+        if hi - lo < 2:
+            continue
+        # いちばん長い「インクの無い」並びの中央へ
+        best = run = 0
+        end = -1
+        for x in range(lo, hi):
+            if not col[x]:
+                run += 1
+                if run > best:
+                    best, end = run, x
+            else:
+                run = 0
+        if best >= 2:
+            out[i] = end - best // 2
+    return out
+
+
+GUT_MIN_W = 0.02        # 表の境とみなす隙間の幅 (箱の幅に対する比)
+GUT_MIN_H = 0.80        # その隙間が箱の高さのこの割合以上つづくこと
+
+
+def split_at_gutters(dark, box, min_w=GUT_MIN_W, min_h=GUT_MIN_H):
+    """箱を，**縦に長い白い隙間**で左右に分ける
+
+    **表頭の見つからない表は列を作らない**ので，1 つの帯に 2 つの表が
+    横に並んだまま入ることがある (2026-09-13 の実データ)．
+    **折込に 2 段組は無い**ので，帯の中の縦に長い隙間は表と表の境とみなす．
+    """
+    keep = tuple(int(v) for v in box)
+    # **先にインクへ縮める**．そうしないと箱の外側の余白で切ってしまう
+    x1, y1, x2, y2 = shrink_to_ink(dark, box, pad=0)
+    if x2 - x1 < 3 or y2 - y1 < 3:
+        return [keep]
+    sub = dark[y1:y2, x1:x2]
+    # **その x にインクが無い画素行の割合**が高いところが隙間
+    empty = ((~sub).sum(axis=0) / float(y2 - y1)) >= min_h
+    least = max(2, int((x2 - x1) * min_w))
+    cuts = []
+    run = 0
+    for i, e in enumerate(list(empty) + [False]):
+        if e:
+            run += 1
+            continue
+        # **端に接する空白は余白**なので境にしない
+        if run >= least and i - run > 0 and i < len(empty):
+            cuts.append(x1 + i - run // 2)
+        run = 0
+    if not cuts:
+        return [keep]
+    out = []
+    edges = [keep[0]] + cuts + [keep[2]]
+    for a, b in zip(edges, edges[1:]):
+        if b - a > least:
+            out.append((a, keep[1], b, keep[3]))
+    return out or [keep]
+
+
+def structure_boxes(points, size, once=(), least=TABLE_LEAST, dark=None,
+                    split=False):
     """目印から**表の箱**を作る (基本構造にしたがう)
 
     基本構造 (2026-09-13 ユーザ):
@@ -694,10 +773,15 @@ def structure_boxes(points, size, once=(), least=TABLE_LEAST):
         return [(0, 0, int(w), int(h))]
 
     span = [(min(p[0] for p in c), max(p[0] for p in c)) for c in cols]
+    bounds = [0.0]
+    for i in range(1, len(cols)):
+        bounds.append((span[i - 1][1] + span[i][0]) / 2)
+    bounds.append(float(w))
+    # **境は白い隙間へ寄せる** (表頭の中間は左の表の本体の中に落ちる)
+    bounds = refine_columns(dark, bounds, span)
     out = []
     for i, col in enumerate(cols):
-        x1 = 0 if i == 0 else (span[i - 1][1] + span[i][0]) / 2
-        x2 = w if i == len(cols) - 1 else (span[i][1] + span[i + 1][0]) / 2
+        x1, x2 = bounds[i], bounds[i + 1]
         heads = _heads_in(col, pts)
         tops = [min(g, key=lambda p: p[1])[1]
                 for g in _by_y(heads, h * ROW_GAP) if len(g) >= least]
@@ -707,7 +791,11 @@ def structure_boxes(points, size, once=(), least=TABLE_LEAST):
         for j, top in enumerate(tops):
             y1 = 0 if j == 0 else top
             y2 = tops[j + 1] if j + 1 < len(tops) else h
-            out.append((int(x1), int(y1), int(x2), int(y2)))
+            box = (int(x1), int(y1), int(x2), int(y2))
+            # **隙間での分割は既定では使わない**．2026-09-13 の実測で，
+            # **紙面の 23 枚中 11 枚に端から端まで通る隙間が無い**
+            # (表が互い違いに並ぶため)．当てると分けすぎる (68 → 89 箱)
+            out += (split_at_gutters(dark, box) if split else [box])
     return out
 
 
@@ -736,6 +824,40 @@ def shrink_to_ink(dark, box, pad=SHRINK_PAD):
     c = min(w, x1 + int(cols[-1]) + 1 + pad)
     d = min(h, y1 + int(rows[-1]) + 1 + pad)
     return (a, b, c, d)
+
+
+def check_boxes(boxes, points, size, once=(), least=TABLE_LEAST):
+    """切り分けた箱を**目印で検算**する
+
+    2026-09-13 の実測で分かったこと: **目印だけで切り出しを作り直すのは無理**
+    (紙面 23 枚のうち 11 枚に端から端まで通る白い隙間が無く，表は互い違いに
+    並ぶ)．幾何の切り分け (21/23) を置き換えられない．
+    **そこで検算に使う**: 1 つの箱に**表頭のまとまりがちょうど 1 つ**入るか．
+
+    Returns:
+        箱ごとに {'box', 'heads', 'once', 'ok', 'why'}
+    """
+    w, h = size
+    groups = [g for c in columns(list(points), w)
+              for g in _by_y(c, h * ROW_GAP) if len(g) >= least]
+    out = []
+    for b in boxes:
+        x1, y1, x2, y2 = b
+        n = 0
+        for g in groups:
+            cx = sum(p[0] for p in g) / len(g)
+            cy = min(p[1] for p in g)
+            if x1 <= cx < x2 and y1 <= cy < y2:
+                n += 1
+        m = sum(1 for p in once if x1 <= p[0] < x2 and y1 <= p[1] < y2)
+        why = ''
+        if n > 1:
+            why = f'表頭が {n} つ入る (切り足りない)'
+        elif n == 0:
+            why = '表頭が無い (表でない切れ端か，表頭の読めない表)'
+        out.append({'box': tuple(b), 'heads': n, 'once': m,
+                    'ok': n == 1, 'why': why})
+    return out
 
 
 def box_for(group, blobs, pad=PAD, max_frac=None, size=None):
