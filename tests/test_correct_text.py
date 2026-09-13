@@ -240,3 +240,37 @@ def test_常在度の括弧は今までどおり():
 def test_片方だけの括弧も落とす():
     assert ct.correct_comp('(+').get('corrected') == '+'
     assert ct.correct_comp('+)').get('corrected') == '+'
+
+
+# --- 被度: 記法に無い字の読み違いを直す ------------------------------------
+#
+# 2026-09-14 に全 147 表を通して測った．本体の要確認 1,264 件のうち，
+# **1 文字の読み違いで読めるようになるものが 64 件 (5%)**．
+# ただし **`I` はローマ数字 (常在度) と紛らわしい**ので触らない
+# (`I;I` → `11` は，本当は `II` = 常在度 2 のことがある)．
+# **組成の記法に存在しない字だけ**を直す．
+
+def test_記法に無い字を直す():
+    assert ct.correct_comp('一')['corrected'] == '1'
+    assert ct.correct_comp('l')['corrected'] == '1'
+    assert ct.correct_comp('1z')['corrected'] == '1;2'
+    assert ct.correct_comp('t')['corrected'] == '+'
+
+
+def test_ローマ数字は触らない():
+    """`I` は常在度の記法にある字なので，`1` にしない"""
+    got = ct.correct_comp('II')
+    assert 'I' in got['corrected']
+    assert '1' not in got['corrected']
+
+
+def test_直した結果が読める():
+    for s in ('一', 'l', '1z', 'z3', 't'):
+        assert ct.correct_comp(s)['status'] == 'OK', s
+
+
+def test_元から読める値は変わらない():
+    for s in ('1', '+', 'r', '5', '1・2'):
+        got = ct.correct_comp(s)
+        assert got['status'] == 'OK'
+    assert ct.correct_comp('1・2')['corrected'] == '1;2'

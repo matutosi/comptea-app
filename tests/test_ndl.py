@@ -3,6 +3,7 @@
 外部プロセスを呼ぶ部分は実データ (slow) で，JSON の読み取りと座標の戻しは
 組み立てた値で確かめる．
 """
+import json
 import os
 
 import pytest
@@ -83,3 +84,72 @@ def test_装置は環境に合わせる(monkeypatch, tmp_path):
     monkeypatch.setenv(device.ENV, 'cuda')
     assert ndl.NdlReader(ndl_dir=str(tmp_path), python='x').device == 'cuda'
     device.forget()
+
+
+# --- セルをまとめて読む ----------------------------------------------------
+#
+# 2026-09-14 の実測: **読めなかった組成のセルは NDLOCR-Lite なら 66 個中
+# 44 個 (67%) 読める** (EasyOCR は 5 個，yomitoku は 0 個)．
+# ただし 1 セルずつ呼ぶと **1 個 15 秒** (別プロセスの起動と模型の読み込み)．
+# NDLOCR-Lite は**ディレクトリを丸ごと読む**ので，
+# セルを画像として並べれば **1 回のプロセスで全部読める**．
+#
+# 領域をまとめて読む形 (`read_region.read_cells`) は駄目だった
+# (488 セル中 53 個しか割り当たらない)．縦や格子に並べた 1 枚も駄目
+# (17_p1 で 0 個)．**1 セル 1 画像**が要る．
+
+def test_セルをまとめて読む(monkeypatch, tmp_path):
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        src = cmd[cmd.index('--sourcedir') + 1]
+        dst = cmd[cmd.index('--output') + 1]
+        names = sorted(os.listdir(src))
+        seen['n'] = seen.get('n', 0) + 1
+        seen['files'] = len(names)
+        for i, n in enumerate(names):
+            doc = {'contents': [[{'boundingBox': [[0, 0], [9, 0], [9, 9], [0, 9]],
+                                  'text': f'{i}', 'confidence': 0.9}]]}
+            with open(os.path.join(dst, n.rsplit('.', 1)[0] + '.json'), 'w',
+                      encoding='utf-8') as f:
+                json.dump(doc, f)
+
+        class R:
+            returncode = 0
+        return R()
+
+    monkeypatch.setattr(ndl.subprocess, 'run', fake_run)
+    r = ndl.NdlReader(ndl_dir=str(tmp_path))
+    img = Image.new('RGB', (200, 200), 'white')
+    got = r.read_crops(img, [(0, 0, 20, 20), (20, 20, 40, 40), (40, 40, 60, 60)])
+    assert got == ['0', '1', '2']
+    assert seen['n'] == 1                  # **1 回のプロセスで読む**
+    assert seen['files'] == 3
+
+
+def test_読めなかったセルは空(monkeypatch, tmp_path):
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    def fake_run(cmd, **kw):
+        class R:
+            returncode = 0
+        return R()                          # 何も書かない
+
+    monkeypatch.setattr(ndl.subprocess, 'run', fake_run)
+    r = ndl.NdlReader(ndl_dir=str(tmp_path))
+    got = r.read_crops(Image.new('RGB', (50, 50), 'white'), [(0, 0, 10, 10)])
+    assert got == ['']
+
+
+def test_入っていなければ空(monkeypatch):
+    monkeypatch.setenv(ndl.ENV, 'D:/no/such/place')
+    monkeypatch.setattr(ndl, 'DEFAULT_DIRS', ())
+    assert ndl.NdlReader().read_crops(None, [(0, 0, 1, 1)]) == ['']
+
+
+def test_箱が無ければ空():
+    assert ndl.NdlReader(ndl_dir='x').read_crops(None, []) == []
