@@ -836,3 +836,33 @@ def test_見出しを求める形も残る(tmp_path):
     Image.new('RGB', (60, 40), 'white').save(tmp_path / 'note_block.png')
     reader = _FakeReader([_p(0, 'この群落は海岸砂丘に成立している。')])
     assert site_notes.block_text(tmp_path, kinds=('note',), reader=reader) == ''
+
+
+# --- 細い切り出しは白を足してから読む --------------------------------------
+#
+# 2026-09-13 に `link_pages` の通しで見つかった．061-2 (1909x120) と
+# 081-2 (1405x68) の `once_block.png` は**高さ 1〜2 行**しかなく，
+# レイアウト解析が段落を 0 個しか返さない．**白を足して紙面の形にすると読める**
+# (081-2 は 1 段落，061-2 は 2 段落)．
+
+def test_細い切り出しは白を足す(tmp_path):
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    Image.new('RGB', (1900, 120), 'white').save(tmp_path / 'once_block.png')
+    reader = _SizeReader([_p(0, 'Rosa multiflora ノイバラ S +')])
+    got = site_notes.block_text(tmp_path, name='once_block.png', kinds=None,
+                                reader=reader)
+    assert reader.sizes[0][1] == site_notes.PAD_LEAST      # 高さが伸びている
+    assert reader.sizes[0][0] == 1900                      # 幅はそのまま
+    assert 'ノイバラ' in got
+
+
+def test_高さのある切り出しはそのまま(tmp_path):
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    Image.new('RGB', (1900, 800), 'white').save(tmp_path / 'note_block.png')
+    reader = _SizeReader([_p(0, '調査地 Lage: Lfd. Nr. 1: 神戸市山田町')])
+    site_notes.block_text(tmp_path, reader=reader)
+    assert reader.sizes[0] == (1900, 800)
