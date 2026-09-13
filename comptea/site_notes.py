@@ -209,6 +209,9 @@ def with_dates(recs):
 # 本のページは 3498〜3510 px (2026-09-13 に実測)．
 # 折込の注記は `<画像>_note.png` に切り出されているので，外しても困らない．
 PAGE_MAX = 4000
+# 大きい紙面で読む「下の帯」の割合 (高さに対して)．**注記は表の下にある**．
+# 2026-09-13 の実測: 切り出しの無い折込 4 枚の下 20% に，注記が 7〜54 件あった
+STRIP = 0.2
 NOTE_SUFFIX = '_note.png'
 NOTE_BLOCK = 'note_block.png'
 CACHE_SUFFIX = '.layout.txt'
@@ -432,6 +435,8 @@ def usable_value(field, value):
         return False
     if field == 'date':
         return bool(_DIGIT.search(s))
+    # **`nan` は数えない** (`nan/M` のように，読めなかった印が混じる)
+    s = re.sub(r'\bnan\b', ' ', s, flags=re.I)
     return len(_JA.findall(s)) >= 2 or len(_LATIN.findall(s)) >= 4
 
 
@@ -537,7 +542,7 @@ def _yomi_or_none():
     return r if r.available() else None
 
 
-def read_site_info(image, reader=None, use_yomi=True, gap=GAP):
+def read_site_info(image, reader=None, use_yomi=True, gap=GAP, strip=False):
     """注記の画像を**レイアウト解析で段落として**読み，地点情報にする
 
     読み手を入れていない環境では `[]` を返します (工程は今までどおり動く)．
@@ -550,7 +555,11 @@ def read_site_info(image, reader=None, use_yomi=True, gap=GAP):
 
     Image.MAX_IMAGE_PIXELS = None
     with Image.open(image) as im:
-        paras = reader.read_paragraphs(im.convert('RGB'))
+        im = im.convert('RGB')
+        if strip:
+            w, h = im.size
+            im = im.crop((0, h - int(h * STRIP), w, h))
+        paras = reader.read_paragraphs(im)
     return site_info(paras, gap=gap)
 
 
@@ -567,15 +576,18 @@ def apply_notes(df_plot, image=None, work=None, reader=None, use_yomi=True,
         (差し込んだ表, 報告の 1 行)．注記が無ければ (元の表, '')
     """
     path = find_note_image(image, work=work)
+    strip = False
     if not path and page and image and os.path.isfile(str(image)):
-        if _page_ok(image):
-            path = str(image)
+        path = str(image)
+        # **丸ごと渡すと縮小されて崩れる**ので，大きい紙面は下の帯だけ読む
+        strip = not _page_ok(image)
     if not path:
         return df_plot, ''
-    recs = read_site_info(path, reader=reader, use_yomi=use_yomi)
+    recs = read_site_info(path, reader=reader, use_yomi=use_yomi, strip=strip)
     if not recs:
         return df_plot, ''
     out = merge_plots(df_plot, recs)
     got = {f: sum(1 for r in recs if r.get('field') == f) for f in FIELDS}
     got = ', '.join(f'{k} {v}' for k, v in got.items() if v)
-    return out, f'[注記] {os.path.basename(path)} から {got}'
+    where = os.path.basename(path) + ('の下の帯' if strip else '')
+    return out, f'[注記] {where} から {got}'

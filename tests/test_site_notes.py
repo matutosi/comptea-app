@@ -597,6 +597,10 @@ def test_地点情報から頁番号が消える():
 
 def test_地名の形をしていない値は空とみなす():
     assert site_notes.usable_value('locality', '26') is False
+    # **`nan` が混じった値**も空とみなす (04_p3 の `nan/M`)．
+    # 字数だけで見ると `nan` の 3 字で通ってしまう
+    assert site_notes.usable_value('locality', 'nan/M') is False
+    assert site_notes.usable_value('locality', 'Nantan-cho 南丹市') is True
     assert site_notes.usable_value('locality', '20/N') is False
     assert site_notes.usable_value('locality', 'nan') is False
     assert site_notes.usable_value('locality', '日高郡龍神村') is True
@@ -685,16 +689,18 @@ def test_途中の括弧が日付でなければ残す():
 # **本のページは 3498〜3510 px** なので，4000 px を境にする．
 # 折込の注記は `<画像>_note.png` に切り出されているので，外しても困らない．
 
-def test_大きすぎる画像はページとして読まない(tmp_path):
+def test_大きすぎる画像は丸ごと読まない(tmp_path):
+    """**丸ごとは読まず，下の帯だけ読む** (2026-09-13 に方針を詰めた)
+
+    最初は「大きければ読まない」にしたが，実データを見ると**切り出しの無い
+    折込にも紙面の下に注記があった** (04_p3 で 12 件・19_p1 で 54 件)．
+    """
     pytest.importorskip('PIL')
     from PIL import Image
 
     img = tmp_path / 'huge.png'
     Image.new('RGB', (3000, 9000), 'white').save(img)
-    reader = _FakeReader([_p(0, '調査地 Lage: Lfd. Nr. 1: 神戸市')])
-    got, info = site_notes.apply_notes(_plots([{'plot': 1, 'locality': None}]),
-                                       image=str(img), reader=reader, page=True)
-    assert info == '' and reader.calls == 0
+    assert site_notes._page_ok(str(img)) is False
 
 
 def test_本のページの大きさなら読む(tmp_path):
@@ -720,4 +726,64 @@ def test_切り出した注記は大きくても読む(tmp_path):
     reader = _FakeReader([_p(0, '調査地 Lage: Lfd. Nr. 1: 神戸市山田町')])
     _got, info = site_notes.apply_notes(_plots([{'plot': 1, 'locality': None}]),
                                         image=str(img), reader=reader, page=True)
+    assert 'tab_note.png' in info
+
+
+# --- 大きい紙面は「下の帯」だけ読む ----------------------------------------
+#
+# 2026-09-13 に折込の通しで分かった．**注記の切り出しが無い表にも，
+# 紙面の下に注記がある** (04_p3 で 12 件・03_p1 で 27 件・19_p1 で 54 件)．
+# 丸ごと渡すと縮小されて崩れるが，**下の帯だけなら読める**
+# (高さが 1/5 になるので縮尺が戻る)．
+
+class _SizeReader(_FakeReader):
+    """渡された画像の大きさを憶える読み手"""
+
+    def __init__(self, paras):
+        super().__init__(paras)
+        self.sizes = []
+
+    def read_paragraphs(self, img, box=None):
+        self.sizes.append(img.size)
+        return super().read_paragraphs(img, box=box)
+
+
+def test_大きい紙面は下の帯だけ読む(tmp_path):
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    img = tmp_path / 'tall.png'
+    Image.new('RGB', (3000, 9000), 'white').save(img)
+    reader = _SizeReader([_p(0, '調査地 Lage: Lfd. Nr. 1: 神戸市山田町')])
+    got, info = site_notes.apply_notes(_plots([{'plot': 1, 'locality': None}]),
+                                       image=str(img), reader=reader, page=True)
+    assert reader.calls == 1
+    assert reader.sizes[0] == (3000, int(9000 * site_notes.STRIP))
+    assert '神戸市山田町' in str(got.loc[0, 'locality'])
+    assert '下の帯' in info
+
+
+def test_小さい紙面は丸ごと読む(tmp_path):
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    img = tmp_path / 'page.png'
+    Image.new('RGB', (2400, 3510), 'white').save(img)
+    reader = _SizeReader([_p(0, '調査地 Lage: Lfd. Nr. 1: 神戸市山田町')])
+    site_notes.apply_notes(_plots([{'plot': 1, 'locality': None}]),
+                           image=str(img), reader=reader, page=True)
+    assert reader.sizes[0] == (2400, 3510)
+
+
+def test_切り出しがあれば帯は読まない(tmp_path):
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    img = tmp_path / 'tab.png'
+    Image.new('RGB', (3000, 9000), 'white').save(img)
+    Image.new('RGB', (3000, 900), 'white').save(tmp_path / 'tab_note.png')
+    reader = _SizeReader([_p(0, '調査地 Lage: Lfd. Nr. 1: 神戸市山田町')])
+    _got, info = site_notes.apply_notes(_plots([{'plot': 1, 'locality': None}]),
+                                        image=str(img), reader=reader, page=True)
+    assert reader.sizes[0] == (3000, 900)
     assert 'tab_note.png' in info
