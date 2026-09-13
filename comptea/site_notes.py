@@ -410,6 +410,26 @@ def usable_value(field, value):
     return len(_JA.findall(s)) >= 2 or len(_LATIN.findall(s)) >= 4
 
 
+def better_date(new, old):
+    """注記の日付の方が確かか
+
+    2026-09-13 に折込 (19_p3) で工程を通して見つかった: 表頭の `date` に
+    **調査番号が混じった** `49/83/6`・`6o/83` が入っており，数字があるので
+    「使える」と見なされて注記の `Juni 1983` が入れなかった．
+
+    表頭の値が**日付として読めない** (`correct_text.correct_date` が
+    `OK` を返さない) とき，**注記に月か 4 桁の年があれば**注記を採る．
+    """
+    from . import correct_text
+
+    if _blank(new):
+        return False
+    got = correct_text.correct_date(old) if not _blank(old) else None
+    if got and got.get('status') == 'OK':
+        return False                        # 表頭が日付として読める
+    return bool(_DATE.search(str(new).strip() + ' '))
+
+
 def merge_plots(df_plot, recs):
     """注記から取った地点情報を `plot_table` へ差し込む
 
@@ -441,7 +461,10 @@ def merge_plots(df_plot, recs):
         # **地点の無い注記は全地点に当てる** (1 地点ぶんしか書かれていない紙面)
         rows = out.index if p is None else out.index[out['plot'] == p]
         for i in rows:
-            if not usable_value(field, out.at[i, field]):
+            now = out.at[i, field]
+            if not usable_value(field, now):
+                out.at[i, field] = value
+            elif field == 'date' and better_date(value, now):
                 out.at[i, field] = value
     return out
 
