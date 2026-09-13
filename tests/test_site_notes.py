@@ -610,12 +610,13 @@ def test_日付は数字があればよい():
 
 
 def test_壊れた表頭の値は注記で埋める():
-    df = _plots([{'plot': 1, 'locality': '26', 'date': "'83/6"}])
+    # 日付は**そろっている表頭を残す** ('83/6/8 は年月日がそろっている)
+    df = _plots([{'plot': 1, 'locality': '26', 'date': "'83/6/8"}])
     recs = [{'plot': 1, 'field': 'locality', 'value': '日高郡龍神村'},
             {'plot': 1, 'field': 'date', 'value': '6 Nov. 1973'}]
     got = site_notes.merge_plots(df, recs)
     assert got.loc[0, 'locality'] == '日高郡龍神村'      # 壊れていたので入る
-    assert got.loc[0, 'date'] == "'83/6"                # 形は正しいので残す
+    assert got.loc[0, 'date'] == "'83/6/8"              # そろっているので残す
 
 
 def test_正しい表頭の値は残す():
@@ -623,3 +624,32 @@ def test_正しい表頭の値は残す():
     recs = [{'plot': 1, 'field': 'locality', 'value': '日高郡龍神村'}]
     got = site_notes.merge_plots(df, recs)
     assert got.loc[0, 'locality'] == '六甲山'
+
+
+# --- 日付は「どちらが確かか」で選ぶ ----------------------------------------
+#
+# 2026-09-13 に折込 (19_p3) で工程を通して見つかった．表頭の `date` に
+# 調査番号が混じった `49/83/6`・`6o/83` が入っており，**数字があるので
+# 「使える」と見なされて**，注記の `Juni 1983` が入れなかった．
+# 表頭の値が**日付として読めない**とき，注記に月か 4 桁の年があれば，
+# 注記の方を採る．
+
+def test_日付として読めない表頭は注記で置き換える():
+    assert site_notes.better_date('Juni 1983', '49/83/6') is True
+    assert site_notes.better_date('Juni 1983', '6o/83') is True
+
+
+def test_日付として読める表頭は残す():
+    assert site_notes.better_date('Juni 1983', "'83/6/8") is False
+
+
+def test_注記に月も年も無ければ置き換えない():
+    assert site_notes.better_date('6', '49/83/6') is False
+
+
+def test_壊れた日付が注記で入れ替わる():
+    df = _plots([{'plot': 1, 'date': '49/83/6', 'locality': '六甲山'}])
+    recs = [{'plot': 1, 'field': 'date', 'value': 'Juni 1983'}]
+    got = site_notes.merge_plots(df, recs)
+    assert got.loc[0, 'date'] == 'Juni 1983'
+    assert got.loc[0, 'locality'] == '六甲山'      # 地名はそのまま
