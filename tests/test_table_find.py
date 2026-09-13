@@ -886,3 +886,63 @@ def test_3つの表頭なら3つに切る():
               [(500, 2000), (510, 2040), (500, 2080)],
               [(500, 4000), (510, 4040), (500, 4080)]]
     assert len(tf.split_between_heads(box, groups)) == 3
+
+
+# --- 表頭の無い箱は，切り出して読み直す ------------------------------------
+#
+# 2026-09-13 の検算で「表頭が無い」と出た 6 箱を調べると，
+#   2 箱は**紙面の表題** (`Tab.107 日本植生誌一近畿 付表`)．表ではない
+#   4 箱は**本物の表**で，格子には表頭項目が 11〜20 個ある
+# だった．**紙面ぜんぶを読んだときに目印が拾えなかっただけ**なので，
+# 箱を切り出して読み直す (小さくすると読める — タイルや注記と同じ)．
+
+class _MarkReader:
+    """切り出しを読むと目印を返す偽の読み手"""
+
+    def __init__(self, marks):
+        self.marks = marks
+        self.calls = 0
+
+    def readtext(self, *a, **kw):
+        self.calls += 1
+        return self.marks
+
+
+def test_表頭の無い箱だけ読み直す(monkeypatch):
+    im = Image.new('RGB', (2000, 2000), 'white')
+    pts = [(100, 100), (110, 140), (100, 180)]
+    seen = []
+
+    def fake(crop, reader=None, **kw):
+        seen.append(crop.size)
+        # `read_marks` は (目印, 採った向き) を返す
+        return ([('item', 50.0, 50.0, '通し番号'),
+                 ('item', 60.0, 90.0, '調査番号'),
+                 ('item', 50.0, 130.0, '調査地')], 'up')
+
+    monkeypatch.setattr(tf, 'read_marks', fake)
+    boxes = [(0, 0, 1000, 1000), (1000, 0, 2000, 1000)]
+    got = tf.recheck_boxes(im, boxes, pts, (2000, 2000))
+    assert len(seen) == 1                      # 表頭のある箱は読み直さない
+    assert got[0]['heads'] == 1 and got[1]['heads'] == 1
+
+
+def test_読み直しても見つからなければそのまま(monkeypatch):
+    im = Image.new('RGB', (2000, 2000), 'white')
+    monkeypatch.setattr(tf, 'read_marks', lambda *a, **k: ([], 'up'))
+    got = tf.recheck_boxes(im, [(0, 0, 1000, 1000)], [], (2000, 2000))
+    assert got[0]['heads'] == 0 and not got[0]['ok']
+
+
+def test_読み直した目印は元の座標に戻す(monkeypatch):
+    im = Image.new('RGB', (2000, 2000), 'white')
+
+    def fake(crop, reader=None, **kw):
+        return ([('item', 50.0, 50.0, '通し番号'),
+                 ('item', 60.0, 90.0, '調査番号'),
+                 ('item', 50.0, 130.0, '調査地')], 'up')
+
+    monkeypatch.setattr(tf, 'read_marks', fake)
+    got = tf.recheck_boxes(im, [(1000, 500, 2000, 1500)], [], (2000, 2000))
+    g = got[0]['groups'][0]
+    assert all(1000 <= p[0] < 2000 and 500 <= p[1] < 1500 for p in g)
