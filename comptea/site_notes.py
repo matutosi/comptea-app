@@ -268,13 +268,21 @@ def read_site_info(image, reader=None, use_yomi=True, gap=GAP):
     return site_info(paras, gap=gap)
 
 
-def apply_notes(df_plot, image=None, work=None, reader=None, use_yomi=True):
+def apply_notes(df_plot, image=None, work=None, reader=None, use_yomi=True,
+                page=False):
     """注記を読んで `plot_table` へ差し込む (工程から呼ぶ入口)
 
+    Args:
+        page: 切り出した注記が無いとき，**ページ自身**を読むか．
+            本のページ (s01114) は注記がページの下にあり切り出されていないので
+            これが要る．**1 枚に 2 表ある紙面では，どちらの表の注記か
+            分けられない**ので渡さないこと
     Returns:
         (差し込んだ表, 報告の 1 行)．注記が無ければ (元の表, '')
     """
     path = find_note_image(image, work=work)
+    if not path and page and image and os.path.isfile(str(image)):
+        path = str(image)
     if not path:
         return df_plot, ''
     recs = read_site_info(path, reader=reader, use_yomi=use_yomi)

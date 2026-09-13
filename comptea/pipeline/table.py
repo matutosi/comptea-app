@@ -119,6 +119,7 @@ def main(argv=None):
     # 表頭の値は上書きせず，空いている所だけ埋める．読み手 (yomitoku) を
     # 入れていない環境では何も起きない．
     note_info = ''
+    table_no = table_id(work)
     if not args.no_notes and len(df_plot):
         from comptea import site_notes
 
@@ -126,12 +127,14 @@ def main(argv=None):
         if 'source_image' in df.columns and len(df):
             got = df['source_image'].dropna()
             src = str(got.iloc[0]) if len(got) else None
-        df_plot, note_info = site_notes.apply_notes(df_plot, image=src, work=work)
+        # **本のページは注記が切り出されていない**ので，ページ自身を読む．
+        # ただし 1 枚に 2 表ある紙面は，どちらの表の注記か分けられない
+        df_plot, note_info = site_notes.apply_notes(
+            df_plot, image=src, work=work, page=table_no is None)
 
     # 1ページに表が2つ以上あるとき，どちらの表かを列に残す．
     # 画像のパスは同じで地点番号もそれぞれ 1 から振り直されるので，
     # これが無いと後で束ねたときに別の表の地点と衝突する
-    table_no = table_id(work)
     if table_no:
         for d in (df_long, df_plot):
             if len(d):

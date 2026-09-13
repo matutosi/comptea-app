@@ -265,3 +265,50 @@ def test_注記が無ければ表はそのまま(tmp_path):
     got, info = site_notes.apply_notes(df, image=str(tmp_path / 'none.png'))
     assert got.loc[0, 'locality'] is None
     assert info == ''
+
+
+# --- 本のページは注記が切り出されていない ----------------------------------
+#
+# 折込は `split_sheet.note_boxes` が `<画像>_note.png` を書き出すが，
+# **本のページ (s01114) は注記がページの下にあり，切り出されていない**．
+# 2026-09-13 の実測: 80 表のうち 68 表 (85%) の注記がページを読めば取れる．
+# ただし**1 枚に 2 表ある紙面では，どちらの表の注記か分けられない**ので使わない．
+
+def test_注記の画像が無ければページを読む(tmp_path):
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    img = tmp_path / 'kinki_002.png'
+    Image.new('RGB', (60, 40), 'white').save(img)
+    df = _plots([{'plot': 1, 'locality': None}])
+    reader = _FakeReader([_p(0, '調査地 Lage d. Aufn.: Lfd. Nr. 1: 日高郡龍神村')])
+    got, info = site_notes.apply_notes(df, image=str(img), reader=reader, page=True)
+    assert reader.calls == 1
+    assert '日高郡龍神村' in str(got.loc[0, 'locality'])
+    assert 'kinki_002' in info
+
+
+def test_ページは頼まれなければ読まない(tmp_path):
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    img = tmp_path / 'kinki_002.png'
+    Image.new('RGB', (60, 40), 'white').save(img)
+    reader = _FakeReader([_p(0, '調査地 Lage: Lfd. Nr. 1: 日高郡龍神村')])
+    got, info = site_notes.apply_notes(_plots([{'plot': 1, 'locality': None}]),
+                                       image=str(img), reader=reader)
+    assert reader.calls == 0 and info == ''
+
+
+def test_切り出した注記の方を先に使う(tmp_path):
+    """`_note.png` があればページは読まない (注記だけの方が確か)"""
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    img = tmp_path / 'tab.png'
+    Image.new('RGB', (60, 40), 'white').save(img)
+    Image.new('RGB', (60, 40), 'white').save(tmp_path / 'tab_note.png')
+    reader = _FakeReader([_p(0, '調査地 Lage: Lfd. Nr. 1: 日高郡龍神村')])
+    _got, info = site_notes.apply_notes(_plots([{'plot': 1, 'locality': None}]),
+                                        image=str(img), reader=reader, page=True)
+    assert 'tab_note.png' in info
