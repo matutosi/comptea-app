@@ -673,7 +673,45 @@ def _heads_in(col, points):
     return got
 
 
-def structure_boxes(points, size, once=(), least=TABLE_LEAST):
+def refine_columns(dark, bounds, spans):
+    """列の境を，**隣り合う表頭のあいだのいちばん広い白い隙間**へ寄せる
+
+    表頭は表の左端にあるので，**表頭の中間は左の表の本体の中**に落ちる
+    (2026-09-13 の実データ: 幅 2823 px の表に対し箱が 5627 px になった)．
+
+    Args:
+        dark: 紙面のインク (True が黒)
+        bounds: 列の境 (両端を含む)．`len(spans) + 1` 本
+        spans: 列ごとの表頭の x の範囲 [(x1, x2)]
+    Returns:
+        寄せた境 (両端は動かさない)
+    """
+    out = list(bounds)
+    if dark is None or len(out) < 3:
+        return out
+    col = dark.any(axis=0) if dark.ndim == 2 else dark
+    for i in range(1, len(out) - 1):
+        lo = int(spans[i - 1][1])           # 左の列の表頭の右端
+        hi = int(spans[i][0])               # 右の列の表頭の左端
+        lo, hi = max(0, lo), min(len(col), hi)
+        if hi - lo < 2:
+            continue
+        # いちばん長い「インクの無い」並びの中央へ
+        best = run = 0
+        end = -1
+        for x in range(lo, hi):
+            if not col[x]:
+                run += 1
+                if run > best:
+                    best, end = run, x
+            else:
+                run = 0
+        if best >= 2:
+            out[i] = end - best // 2
+    return out
+
+
+def structure_boxes(points, size, once=(), least=TABLE_LEAST, dark=None):
     """目印から**表の箱**を作る (基本構造にしたがう)
 
     基本構造 (2026-09-13 ユーザ):
@@ -694,10 +732,15 @@ def structure_boxes(points, size, once=(), least=TABLE_LEAST):
         return [(0, 0, int(w), int(h))]
 
     span = [(min(p[0] for p in c), max(p[0] for p in c)) for c in cols]
+    bounds = [0.0]
+    for i in range(1, len(cols)):
+        bounds.append((span[i - 1][1] + span[i][0]) / 2)
+    bounds.append(float(w))
+    # **境は白い隙間へ寄せる** (表頭の中間は左の表の本体の中に落ちる)
+    bounds = refine_columns(dark, bounds, span)
     out = []
     for i, col in enumerate(cols):
-        x1 = 0 if i == 0 else (span[i - 1][1] + span[i][0]) / 2
-        x2 = w if i == len(cols) - 1 else (span[i][1] + span[i + 1][0]) / 2
+        x1, x2 = bounds[i], bounds[i + 1]
         heads = _heads_in(col, pts)
         tops = [min(g, key=lambda p: p[1])[1]
                 for g in _by_y(heads, h * ROW_GAP) if len(g) >= least]
