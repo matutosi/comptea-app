@@ -204,6 +204,11 @@ def with_dates(recs):
 
 # 注記の切り出しの名前．折込は表の画像の隣 (`<画像>_note.png`)，
 # 続きのページは置き場の中 (`note_block.png`)
+# **ページとして読んでよい大きさ**の上限 (長辺)．折込は 1782〜12712 px
+# (中央 5872) と大きく，丸ごと渡すと縮小されて読みが崩れる．
+# 本のページは 3498〜3510 px (2026-09-13 に実測)．
+# 折込の注記は `<画像>_note.png` に切り出されているので，外しても困らない．
+PAGE_MAX = 4000
 NOTE_SUFFIX = '_note.png'
 NOTE_BLOCK = 'note_block.png'
 CACHE_SUFFIX = '.layout.txt'
@@ -281,7 +286,7 @@ def work_note_text(work, reader=None, use_yomi=True, gap=GAP, page=True):
         with open(keep, encoding='utf-8') as f:
             return f.read().strip()
     img = source_image(work)
-    if not img or not os.path.isfile(img):
+    if not img or not os.path.isfile(img) or not _page_ok(img):
         return ''
     if reader is None and use_yomi:
         reader = _yomi_or_none()
@@ -510,6 +515,18 @@ def find_note_image(image, work=None):
     return None
 
 
+def _page_ok(image, limit=PAGE_MAX):
+    """その画像は**ページとして丸ごと読んでよい大きさ**か"""
+    try:
+        from PIL import Image
+
+        Image.MAX_IMAGE_PIXELS = None
+        with Image.open(image) as im:
+            return max(im.size) <= limit
+    except Exception:
+        return False
+
+
 def _yomi_or_none():
     """yomitoku を入れてあれば読み手を返す (入れていなければ None)"""
     try:
@@ -551,7 +568,8 @@ def apply_notes(df_plot, image=None, work=None, reader=None, use_yomi=True,
     """
     path = find_note_image(image, work=work)
     if not path and page and image and os.path.isfile(str(image)):
-        path = str(image)
+        if _page_ok(image):
+            path = str(image)
     if not path:
         return df_plot, ''
     recs = read_site_info(path, reader=reader, use_yomi=use_yomi)
