@@ -350,3 +350,55 @@ def test_階層が違えば別の行():
 
 def test_注記が無ければ空():
     assert site_notes.once_species([_p(0, 'この群落は海岸砂丘に成立している。')]) == []
+
+
+# --- 続きのページの切り出しをレイアウト解析で読む --------------------------
+#
+# 枝番 `-1` のページは注記が次のページ (`-2`) にある (本のページ 80 表のうち
+# 12 表)．`cli/link_pages.py` がつないでいるが，読んでいるのは EasyOCR の
+# `note.txt` だった．**切り出した `note_block.png` をレイアウト解析で読む**．
+
+def _block(tmp_path, name):
+    from PIL import Image
+
+    Image.new('RGB', (60, 40), 'white').save(tmp_path / name)
+
+
+def test_置き場の注記の切り出しを読む(tmp_path):
+    pytest.importorskip('PIL')
+    _block(tmp_path, 'note_block.png')
+    # **近い段落は「続き」としてつなぐ**のが設計なので，本文は離して置く
+    reader = _FakeReader([_p(0, '調査地 Lage: Lfd. Nr. 1: 日高郡龍神村'),
+                          _p(600, 'この群落は海岸砂丘に成立している。')])
+    got = site_notes.block_text(tmp_path, reader=reader)
+    assert '日高郡龍神村' in got
+    assert '海岸砂丘' not in got          # 離れた本文は外す
+
+
+def test_読みは残して二度読まない(tmp_path):
+    pytest.importorskip('PIL')
+    _block(tmp_path, 'note_block.png')
+    reader = _FakeReader([_p(0, '調査地 Lage: Lfd. Nr. 1: 日高郡龍神村')])
+    a = site_notes.block_text(tmp_path, reader=reader)
+    b = site_notes.block_text(tmp_path, reader=reader)
+    assert a == b and reader.calls == 1
+
+
+def test_出現1回の切り出しも読める(tmp_path):
+    pytest.importorskip('PIL')
+    _block(tmp_path, 'once_block.png')
+    reader = _FakeReader([_p(0, '出現1回の種 Außerdem je einmal in Lfd. Nr. 3 : '
+                               'Asplenium oligophlebium カミガモシダ K +')])
+    got = site_notes.block_text(tmp_path, name='once_block.png',
+                                kinds=('once',), reader=reader)
+    assert 'カミガモシダ' in got
+
+
+def test_切り出しが無ければ空(tmp_path):
+    assert site_notes.block_text(tmp_path, reader=_FakeReader([])) == ''
+
+
+def test_読み手が無ければ空(tmp_path):
+    pytest.importorskip('PIL')
+    _block(tmp_path, 'note_block.png')
+    assert site_notes.block_text(tmp_path, reader=None, use_yomi=False) == ''
