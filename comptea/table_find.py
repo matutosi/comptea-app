@@ -826,6 +826,68 @@ def shrink_to_ink(dark, box, pad=SHRINK_PAD):
     return (a, b, c, d)
 
 
+def _gap_near(dark, lo, hi, x1, x2, axis):
+    """`lo`〜`hi` のあいだで，いちばん長いインクの無い並びの中央"""
+    if dark is None or hi - lo < 3:
+        return None
+    lo, hi = int(max(0, lo)), int(hi)
+    if axis == 'y':
+        sub = dark[lo:hi, int(x1):int(x2)]
+        empty = ~sub.any(axis=1)
+    else:
+        sub = dark[int(x1):int(x2), lo:hi]
+        empty = ~sub.any(axis=0)
+    best = run = 0
+    end = -1
+    for i, e in enumerate(list(empty) + [False]):
+        if e:
+            run += 1
+            if run > best:
+                best, end = run, i
+        else:
+            run = 0
+    return lo + end - best // 2 if best >= 2 else None
+
+
+def split_between_heads(box, groups, dark=None):
+    """**2 つ以上の表頭が入る箱**を，表頭のあいだで切る
+
+    2026-09-13 の検算で見つかった 3 箱を調べると，2 つの表頭は
+    **y だけ離れている** (縦に積まれている) ことが多かった．
+    紙面ぜんぶの隙間で切ると分けすぎる (箱 1 つが 15 分割) ので，
+    **2 つの表頭のあいだ**だけを見る．画像を渡すと白い隙間へ寄せる．
+    """
+    x1, y1, x2, y2 = (int(v) for v in box)
+    if len(groups) < 2:
+        return [(x1, y1, x2, y2)]
+    tops = sorted((min(p[1] for p in g), min(p[0] for p in g),
+                   max(p[0] for p in g)) for g in groups)
+    lefts = sorted((min(p[0] for p in g), min(p[1] for p in g)) for g in groups)
+    # **縦に積まれているか，横に並んでいるか**を，隔たりの大きい方で決める
+    dy = tops[-1][0] - tops[0][0]
+    dx = lefts[-1][0] - lefts[0][0]
+    out = []
+    if dy >= dx:
+        edges = [y1]
+        for a, b in zip(tops, tops[1:]):
+            mid = (a[0] + b[0]) / 2
+            got = _gap_near(dark, a[0], b[0], x1, x2, 'y')
+            edges.append(int(got if got is not None else mid))
+        edges.append(y2)
+        for a, b in zip(edges, edges[1:]):
+            out.append((x1, a, x2, b))
+    else:
+        edges = [x1]
+        for a, b in zip(lefts, lefts[1:]):
+            mid = (a[0] + b[0]) / 2
+            got = _gap_near(dark, a[0], b[0], y1, y2, 'x')
+            edges.append(int(got if got is not None else mid))
+        edges.append(x2)
+        for a, b in zip(edges, edges[1:]):
+            out.append((a, y1, b, y2))
+    return out
+
+
 def check_boxes(boxes, points, size, once=(), least=TABLE_LEAST):
     """切り分けた箱を**目印で検算**する
 
@@ -843,12 +905,13 @@ def check_boxes(boxes, points, size, once=(), least=TABLE_LEAST):
     out = []
     for b in boxes:
         x1, y1, x2, y2 = b
-        n = 0
+        inside = []
         for g in groups:
             cx = sum(p[0] for p in g) / len(g)
             cy = min(p[1] for p in g)
             if x1 <= cx < x2 and y1 <= cy < y2:
-                n += 1
+                inside.append(g)
+        n = len(inside)
         m = sum(1 for p in once if x1 <= p[0] < x2 and y1 <= p[1] < y2)
         why = ''
         if n > 1:
@@ -856,7 +919,7 @@ def check_boxes(boxes, points, size, once=(), least=TABLE_LEAST):
         elif n == 0:
             why = '表頭が無い (表でない切れ端か，表頭の読めない表)'
         out.append({'box': tuple(b), 'heads': n, 'once': m,
-                    'ok': n == 1, 'why': why})
+                    'ok': n == 1, 'why': why, 'groups': inside})
     return out
 
 
