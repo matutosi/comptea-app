@@ -70,6 +70,11 @@ def check(df_long, df_plot, out):
 
     # 4. 位置決めで気になった点が残っているセル
     note = df_long['note'].fillna('')
+    n_flow = int(note.str.contains('flow').sum())
+    if n_flow:
+        rows = df_long.loc[note.str.contains('flow'), 'row_no'].nunique()
+        out.append(f'[流し込み] {rows} 行 ({n_flow} セル) に flow の印'
+                   '(「出現 1 回の種」の文章が行に入っている．後段で外せる)')
     n_note = int((note != '').sum())
     out.append(f'[位置] note の付いた行 {n_note} 件'
                + ('(内挿・ずらしたセル．overlay で色が付いている)' if n_note else ''))
@@ -113,6 +118,9 @@ def main(argv=None):
 
     df = pd.read_csv(work / 'ocred.csv')
     df_long = comp_table.comp_table(df, keep_absent=args.keep_absent)
+    # **流し込みの行に印を付ける** (行は落とさない)．格子の下端は欠落を
+    # 避けるため多めに取るので，「出現 1 回の種」の文章が入ることがある
+    df_long = comp_table.mark_flow(df_long)
     df_plot = plot_table.plot_table(df)
 
     # **表頭に無い地点の情報は，表の下の注記にある** (2026-09-08 ユーザ指示)．
