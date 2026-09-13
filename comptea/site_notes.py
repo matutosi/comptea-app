@@ -18,6 +18,7 @@
 選ぶと日付が欠け，地名も途中で切れます．そこで**見出しの段落から始め，すぐ下に
 続く段落を，次の見出しか本文に当たるまでつなぎます**．
 """
+import os
 import re
 
 from . import parse_text, row_kinds
@@ -164,3 +165,130 @@ def with_dates(recs):
             out.append({'plot': r.get('plot'), 'field': 'date', 'value': date})
             has.add(r.get('plot'))
     return out
+
+
+# --- 表頭の表へ差し込む ----------------------------------------------------
+#
+# 表頭から取れる項目は紙面によって欠ける (**表頭の無い表もある**)．
+# 注記は**欠けた所を埋めるため**のものなので，**表頭の値は上書きしない**．
+# 出典 (`source_ref`) は表頭には無く，注記にしかない．
+
+FIELDS = ('locality', 'date', 'source_ref')
+
+
+def _blank(v):
+    return v is None or v != v or str(v).strip() == ''
+
+
+def merge_plots(df_plot, recs):
+    """注記から取った地点情報を `plot_table` へ差し込む
+
+    Args:
+        df_plot: `plot_table.plot_table` の返す表 (`plot` 列が要る)
+        recs: `site_info` の返す [{'plot', 'field', 'value'}]
+    Returns:
+        写しを返す．`attrs['warnings']` に，表に無い地点番号などを入れる
+    """
+    out = df_plot.copy()
+    warns = list(out.attrs.get('warnings', []))
+    out.attrs['warnings'] = warns
+    if not len(out) or not recs or 'plot' not in out.columns:
+        return out
+
+    plots = set(out['plot'])
+    unknown = sorted({r.get('plot') for r in recs
+                      if r.get('plot') is not None and r.get('plot') not in plots})
+    if unknown:
+        warns.append(f'注記の地点番号が表に無い: {unknown} (入れなかった)')
+
+    for r in recs:
+        field, value = r.get('field'), r.get('value')
+        if field not in FIELDS or _blank(value):
+            continue
+        if field not in out.columns:
+            out[field] = None
+        p = r.get('plot')
+        # **地点の無い注記は全地点に当てる** (1 地点ぶんしか書かれていない紙面)
+        rows = out.index if p is None else out.index[out['plot'] == p]
+        for i in rows:
+            if _blank(out.at[i, field]):
+                out.at[i, field] = value
+    return out
+
+
+# --- 工程につなぐ ----------------------------------------------------------
+#
+# 注記の画像は，表の画像の隣に `<表の画像>_note.png` として置かれる
+# (`split_sheet.note_boxes`．**表の画像に含めない**のは，画像が高くなると
+# 検出器の入力の縮尺が変わって列や階層の枠が動くため)．
+# 続きのページ (枝番 `-2`) では，置き場の `note_block.png`．
+
+NOTE_SUFFIX = '_note.png'
+NOTE_BLOCK = 'note_block.png'
+
+
+def find_note_image(image, work=None):
+    """この表の注記の画像．無ければ None"""
+    if image:
+        stem, _ext = os.path.splitext(str(image))
+        p = stem + NOTE_SUFFIX
+        if os.path.isfile(p):
+            return p
+    if work:
+        p = os.path.join(str(work), NOTE_BLOCK)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def _yomi_or_none():
+    """yomitoku を入れてあれば読み手を返す (入れていなければ None)"""
+    try:
+        from . import yomi
+    except Exception:
+        return None
+    r = yomi.YomiReader()
+    return r if r.available() else None
+
+
+def read_site_info(image, reader=None, use_yomi=True, gap=GAP):
+    """注記の画像を**レイアウト解析で段落として**読み，地点情報にする
+
+    読み手を入れていない環境では `[]` を返します (工程は今までどおり動く)．
+    """
+    if reader is None and use_yomi:
+        reader = _yomi_or_none()
+    if reader is None or not image or not os.path.isfile(str(image)):
+        return []
+    from PIL import Image
+
+    Image.MAX_IMAGE_PIXELS = None
+    with Image.open(image) as im:
+        paras = reader.read_paragraphs(im.convert('RGB'))
+    return site_info(paras, gap=gap)
+
+
+def apply_notes(df_plot, image=None, work=None, reader=None, use_yomi=True,
+                page=False):
+    """注記を読んで `plot_table` へ差し込む (工程から呼ぶ入口)
+
+    Args:
+        page: 切り出した注記が無いとき，**ページ自身**を読むか．
+            本のページ (s01114) は注記がページの下にあり切り出されていないので
+            これが要る．**1 枚に 2 表ある紙面では，どちらの表の注記か
+            分けられない**ので渡さないこと
+    Returns:
+        (差し込んだ表, 報告の 1 行)．注記が無ければ (元の表, '')
+    """
+    path = find_note_image(image, work=work)
+    if not path and page and image and os.path.isfile(str(image)):
+        path = str(image)
+    if not path:
+        return df_plot, ''
+    recs = read_site_info(path, reader=reader, use_yomi=use_yomi)
+    if not recs:
+        return df_plot, ''
+    out = merge_plots(df_plot, recs)
+    got = {f: sum(1 for r in recs if r.get('field') == f) for f in FIELDS}
+    got = ', '.join(f'{k} {v}' for k, v in got.items() if v)
+    return out, f'[注記] {os.path.basename(path)} から {got}'

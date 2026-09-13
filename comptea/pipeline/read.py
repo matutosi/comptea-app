@@ -92,6 +92,9 @@ def parse_args(argv=None):
     p.add_argument('workdir', help='run_pipeline.py が作った作業ディレクトリ')
     p.add_argument('--only', default=None,
                    help='読み直すクラスを絞る(例 comp,species_col)')
+    p.add_argument('--device', default=None, choices=['cpu', 'cuda'],
+                   help='読み手を動かす装置(既定は環境から決める)．'
+                        'GPU が無ければ cpu')
     p.add_argument('--reader', default='easyocr',
                    choices=['easyocr', 'multi', 'ai', 'both'],
                    help='読み方(既定 easyocr)．multi は他の読み手も使う．'
@@ -216,8 +219,8 @@ def main(argv=None):
         from PIL import Image
         from comptea import correct_text as _ct
         from comptea import ndl, source, yomi
-        readers = usable_readers({'yomi': yomi.YomiReader(),
-                                  'ndl': ndl.NdlReader()})
+        readers = usable_readers({'yomi': yomi.YomiReader(device=args.device),
+                                  'ndl': ndl.NdlReader(device=args.device)})
         if not readers:
             print('読み方 multi: 他の読み手が入っていないので EasyOCR のまま')
         else:

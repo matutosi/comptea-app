@@ -21,6 +21,8 @@ def parse_args(argv=None):
     p = argparse.ArgumentParser(description='縦持ちに組んで検査する')
     p.add_argument('workdir')
     p.add_argument('--keep-absent', action='store_true', help='非出現のセルも残す')
+    p.add_argument('--no-notes', action='store_true',
+                   help='表の下の注記を読まない (既定は読む)')
     return p.parse_args(argv)
 
 
@@ -113,10 +115,26 @@ def main(argv=None):
     df_long = comp_table.comp_table(df, keep_absent=args.keep_absent)
     df_plot = plot_table.plot_table(df)
 
+    # **表頭に無い地点の情報は，表の下の注記にある** (2026-09-08 ユーザ指示)．
+    # 表頭の値は上書きせず，空いている所だけ埋める．読み手 (yomitoku) を
+    # 入れていない環境では何も起きない．
+    note_info = ''
+    table_no = table_id(work)
+    if not args.no_notes and len(df_plot):
+        from comptea import site_notes
+
+        src = None
+        if 'source_image' in df.columns and len(df):
+            got = df['source_image'].dropna()
+            src = str(got.iloc[0]) if len(got) else None
+        # **本のページは注記が切り出されていない**ので，ページ自身を読む．
+        # ただし 1 枚に 2 表ある紙面は，どちらの表の注記か分けられない
+        df_plot, note_info = site_notes.apply_notes(
+            df_plot, image=src, work=work, page=table_no is None)
+
     # 1ページに表が2つ以上あるとき，どちらの表かを列に残す．
     # 画像のパスは同じで地点番号もそれぞれ 1 から振り直されるので，
     # これが無いと後で束ねたときに別の表の地点と衝突する
-    table_no = table_id(work)
     if table_no:
         for d in (df_long, df_plot):
             if len(d):
@@ -134,6 +152,8 @@ def main(argv=None):
         out.append(f'species: {df_long["row_no"].nunique()} 行')
         out.append('status : ' + ', '.join(
             f'{k}={v}' for k, v in df_long['status'].value_counts().items()))
+    if note_info:
+        out.append(note_info)
     out.append('--- 検査 ---')
     check(df_long, df_plot, out)
 

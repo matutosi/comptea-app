@@ -68,3 +68,81 @@ def test_読めなければ空(monkeypatch, tmp_path):
     r = yomi.YomiReader(python=str(p))
     assert r.read_boxes(Image.new('RGB', (50, 50), 'white'),
                         (0, 0, 50, 50)) == []
+
+
+# --- 段落で読む (レイアウト解析) -------------------------------------------
+#
+# 表の下の注記は**文章**なので，語ではなく段落で受け取る．
+# yomitoku の `DocumentAnalyzer` が段落を返す．
+
+PARAS = [[[10, 900, 800, 960], '調査地 Lage: Lfd. Nr.1: 神戸市山田町', 0.9],
+         [[10, 970, 800, 1020], '', 0.1]]        # 空は捨てる
+
+
+def test_段落を読む(monkeypatch, tmp_path):
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    def fake_run(cmd, **kw):
+        with open(cmd[3], 'w', encoding='utf-8') as f:
+            json.dump(PARAS, f)
+
+        class R:
+            returncode = 0
+        return R()
+
+    p = tmp_path / 'python.exe'
+    p.write_text('', encoding='utf-8')
+    monkeypatch.setattr(yomi.subprocess, 'run', fake_run)
+    r = yomi.YomiReader(python=str(p))
+    got = r.read_paragraphs(Image.new('RGB', (900, 1100), 'white'))
+    assert len(got) == 1
+    assert got[0]['text'].startswith('調査地')
+    assert got[0]['box'] == (10, 900, 800, 960)
+
+
+def test_段落も切り出しの座標を元に戻す(monkeypatch, tmp_path):
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    def fake_run(cmd, **kw):
+        with open(cmd[3], 'w', encoding='utf-8') as f:
+            json.dump([[[0, 0, 100, 50], '調査地 神戸市', 0.9]], f)
+
+        class R:
+            returncode = 0
+        return R()
+
+    p = tmp_path / 'python.exe'
+    p.write_text('', encoding='utf-8')
+    monkeypatch.setattr(yomi.subprocess, 'run', fake_run)
+    r = yomi.YomiReader(python=str(p))
+    got = r.read_paragraphs(Image.new('RGB', (400, 400), 'white'),
+                            box=(50, 300, 350, 400))
+    assert got[0]['box'] == (50, 300, 150, 350)
+
+
+def test_入っていなければ段落も読まない(monkeypatch):
+    monkeypatch.delenv(yomi.ENV_PY, raising=False)
+    assert yomi.YomiReader().read_paragraphs(None) == []
+
+
+# --- 装置 (CPU / GPU) ------------------------------------------------------
+
+def test_装置は環境に合わせる(monkeypatch):
+    """**GPU があるとは限らない**．既定を cuda に固定しない"""
+    from comptea import device
+
+    device.forget()
+    monkeypatch.setenv(device.ENV, 'cpu')
+    assert yomi.YomiReader(python='x').device == 'cpu'
+    monkeypatch.setenv(device.ENV, 'cuda')
+    assert yomi.YomiReader(python='x').device == 'cuda'
+    device.forget()
+
+
+def test_指した装置が優先(monkeypatch):
+    from comptea import device
+
+    monkeypatch.setenv(device.ENV, 'cuda')
+    assert yomi.YomiReader(python='x', device='cpu').device == 'cpu'

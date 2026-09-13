@@ -1529,3 +1529,29 @@ oligophlebium … K-+」のように**学名・和名・階層と被度の組・
 `plot_table` に結合できる．**必要な部品はすべて揃っている**
 (切り出し `split_sheet.note_boxes` → 読み `DocumentAnalyzer` → 選別
 `row_kinds.NOTE_RE` → 構文解析 `link_pages.parse_site_notes`)．
+
+
+## GPU があるとは限らない — 装置の選び方は 1 か所にまとめる (2026-09-13)
+
+**GPU のある環境で作ったので，既定が `cuda` に固定されていた** (`yomi.py` の
+`DEFAULT_DEVICE = 'cuda'`)．GPU の無い環境ではそのまま落ちる．
+`comptea/device.py` に集め，上から順に (1) 呼ぶ側の指定 (`--device`)
+(2) 環境変数 `COMPTEA_DEVICE` (3) 自動 で決める．
+
+**自動の判定は `torch` だけに頼れない**．読み手は**別の環境**に入れてあるので
+(主環境を汚さないため)，こちらに `torch` が無いことがある．そのときは
+`nvidia-smi` があるかで見る．**判定は一度だけ**にする (`torch` の読み込みは重い)．
+
+**GPU 無しでも読める．遅くなるだけ** (2026-09-13 の実測)．
+注記の画像 (2823x342) を yomitoku のレイアウト解析で読むと
+
+    cuda   約 5 秒
+    cpu    22.9 秒 (約 5 倍)
+
+で，**取れた中身は同じ** (locality 15・date 10)．
+**GPU の無い環境の本命は NDLOCR-Lite** (`comptea.ndl`)．ONNX なので
+GPU が要らず，表頭の切り出しを CPU で 1.6 秒で読んだ (2026-09-12)．
+EasyOCR は GPU が無ければ自分で CPU に落ちる．
+
+**試験で「一度だけ調べる」を入れると，的の順で答えが変わる**．
+`device.forget()` を用意し，的ごとにやり直す (autouse の fixture)．

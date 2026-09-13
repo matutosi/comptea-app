@@ -71,3 +71,15 @@ def test_読みの座標は元の画像に戻す(monkeypatch, tmp_path):
     got = r.read_boxes(Image.new('RGB', (400, 400), 'white'), (100, 200, 300, 380))
     assert calls['n'] == 1
     assert got[0] == ((110, 220, 160, 240), '通し番号')
+
+
+def test_装置は環境に合わせる(monkeypatch, tmp_path):
+    """NDLOCR-Lite は ONNX なので cpu でも速い (GPU の無い環境の本命)"""
+    from comptea import device
+
+    device.forget()
+    monkeypatch.setenv(device.ENV, 'cpu')
+    assert ndl.NdlReader(ndl_dir=str(tmp_path), python='x').device == 'cpu'
+    monkeypatch.setenv(device.ENV, 'cuda')
+    assert ndl.NdlReader(ndl_dir=str(tmp_path), python='x').device == 'cuda'
+    device.forget()
