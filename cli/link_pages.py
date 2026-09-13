@@ -72,6 +72,14 @@ def once_text(work):
     txt = work / 'once_text.txt'
     if txt.is_file():
         return txt.read_text(encoding='utf-8').strip()
+    # 続きのページは，切り出し (`once_block.png`) をレイアウト解析で読む
+    if (work / 'once_block.png').is_file():
+        from comptea import site_notes
+
+        got = site_notes.block_text(work, name='once_block.png',
+                                    kinds=('once',))
+        if got:
+            return got
     ocred = work / 'ocred.csv'
     if not ocred.is_file():
         return ''
@@ -86,8 +94,18 @@ def once_text(work):
     return ' '.join(vals).strip()
 
 
-def note_text(work):
-    """その置き場の注記(調査地・調査年月日・出典)"""
+def note_text(work, layout=True):
+    """その置き場の注記(調査地・調査年月日・出典)
+
+    **切り出し (`note_block.png`) をレイアウト解析で読む方がよく取れる**
+    (2026-09-13 の実測)．読めなければ EasyOCR が置いた `note.txt` を使う．
+    """
+    if layout:
+        from comptea import site_notes
+
+        got = site_notes.block_text(work)
+        if got:
+            return got
     p = work / 'note.txt'
     return p.read_text(encoding='utf-8').strip() if p.is_file() else ''
 

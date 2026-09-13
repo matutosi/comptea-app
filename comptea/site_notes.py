@@ -167,6 +167,48 @@ def with_dates(recs):
     return out
 
 
+# 注記の切り出しの名前．折込は表の画像の隣 (`<画像>_note.png`)，
+# 続きのページは置き場の中 (`note_block.png`)
+NOTE_SUFFIX = '_note.png'
+NOTE_BLOCK = 'note_block.png'
+CACHE_SUFFIX = '.layout.txt'
+
+
+def block_text(work, name=NOTE_BLOCK, kinds=('note',), reader=None,
+               use_yomi=True, gap=GAP, cache=True):
+    """置き場の切り出し画像をレイアウト解析で読み，選んだ文をつないで返す
+
+    枝番 `-1` のページは注記が次のページ (`-2`) にあり，
+    `cli/link_pages.py` がつなぎます．そこが読んでいたのは EasyOCR の
+    `note.txt` でした．**切り出しをレイアウト解析で読む方がよく取れます**
+    (2026-09-13 の実測．本のページ 80 表で注記が取れた表 68)．
+
+    読みは `<画像>.layout.txt` に残し，2 度目からは読み直しません
+    (1 枚 12〜20 秒かかるため)．
+    """
+    img = os.path.join(str(work), name)
+    keep = img + CACHE_SUFFIX
+    if cache and os.path.isfile(keep):
+        with open(keep, encoding='utf-8') as f:
+            return f.read().strip()
+    if not os.path.isfile(img):
+        return ''
+    if reader is None and use_yomi:
+        reader = _yomi_or_none()
+    if reader is None:
+        return ''
+    from PIL import Image
+
+    Image.MAX_IMAGE_PIXELS = None
+    with Image.open(img) as im:
+        paras = reader.read_paragraphs(im.convert('RGB'))
+    text = '\n'.join(pick(paras, kinds=kinds, gap=gap)).strip()
+    if cache:
+        with open(keep, 'w', encoding='utf-8') as f:
+            f.write(text)
+    return text
+
+
 def once_species(paras, gap=GAP):
     """注記から「1 回出現の種」を取る
 
@@ -190,6 +232,44 @@ def once_species(paras, gap=GAP):
                 continue
             seen.add(key)
             out.append(r)
+    return out
+
+
+def correct_once(recs):
+    """「1 回出現の種」の名前を辞書で直す
+
+    2026-09-13 の実測 (折込 10 枚・254 件): **形が整っているのは 241 件 (95%)**
+    で，崩れは 13 件しかない．**弱点は形でなく字の読み違い**
+    (`ASPlenium oligophlebium`・`Lindera strychnl`)なので，工程の本体と
+    同じ `correct_text.correct_name` に通します．
+
+    **印字されている学名は置き換えません** (2026-09-01 の決定)．
+    和名から引けるのは**いまの分類の名前**で，古い資料の印字とは食い違う
+    (イタドリ: 印字 `Polygonum cuspidatum` / 引くと `Fallopia japonica`)．
+    空のときだけ埋め，`note` にそう書きます．
+    """
+    from . import correct_text
+
+    out = []
+    for r in (recs or []):
+        r = dict(r)
+        status = []
+        for key, target in (('j_name', 'j_name'), ('s_name', 's_name')):
+            got = correct_text.correct_name(r.get(key), target=target)
+            if got:
+                r[key] = got['corrected']
+                status.append(got['status'])
+        if not (r.get('s_name') or '').strip() and r.get('j_name'):
+            name, why = correct_text.sname_from_jname(r['j_name'])
+            if why == 'ok':
+                r['s_name'] = name
+                r['note'] = '学名は和名から引いた'
+        # **いちばん確かでない方を採る** (どちらかが怪しければ目視に回す)
+        for want in ('Need Check', 'suggested', 'OK'):
+            if want in status:
+                r['status'] = want
+                break
+        out.append(r)
     return out
 
 
@@ -248,10 +328,6 @@ def merge_plots(df_plot, recs):
 # (`split_sheet.note_boxes`．**表の画像に含めない**のは，画像が高くなると
 # 検出器の入力の縮尺が変わって列や階層の枠が動くため)．
 # 続きのページ (枝番 `-2`) では，置き場の `note_block.png`．
-
-NOTE_SUFFIX = '_note.png'
-NOTE_BLOCK = 'note_block.png'
-
 
 def find_note_image(image, work=None):
     """この表の注記の画像．無ければ None"""

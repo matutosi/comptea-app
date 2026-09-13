@@ -350,3 +350,110 @@ def test_階層が違えば別の行():
 
 def test_注記が無ければ空():
     assert site_notes.once_species([_p(0, 'この群落は海岸砂丘に成立している。')]) == []
+
+
+# --- 続きのページの切り出しをレイアウト解析で読む --------------------------
+#
+# 枝番 `-1` のページは注記が次のページ (`-2`) にある (本のページ 80 表のうち
+# 12 表)．`cli/link_pages.py` がつないでいるが，読んでいるのは EasyOCR の
+# `note.txt` だった．**切り出した `note_block.png` をレイアウト解析で読む**．
+
+def _block(tmp_path, name):
+    from PIL import Image
+
+    Image.new('RGB', (60, 40), 'white').save(tmp_path / name)
+
+
+def test_置き場の注記の切り出しを読む(tmp_path):
+    pytest.importorskip('PIL')
+    _block(tmp_path, 'note_block.png')
+    # **近い段落は「続き」としてつなぐ**のが設計なので，本文は離して置く
+    reader = _FakeReader([_p(0, '調査地 Lage: Lfd. Nr. 1: 日高郡龍神村'),
+                          _p(600, 'この群落は海岸砂丘に成立している。')])
+    got = site_notes.block_text(tmp_path, reader=reader)
+    assert '日高郡龍神村' in got
+    assert '海岸砂丘' not in got          # 離れた本文は外す
+
+
+def test_読みは残して二度読まない(tmp_path):
+    pytest.importorskip('PIL')
+    _block(tmp_path, 'note_block.png')
+    reader = _FakeReader([_p(0, '調査地 Lage: Lfd. Nr. 1: 日高郡龍神村')])
+    a = site_notes.block_text(tmp_path, reader=reader)
+    b = site_notes.block_text(tmp_path, reader=reader)
+    assert a == b and reader.calls == 1
+
+
+def test_出現1回の切り出しも読める(tmp_path):
+    pytest.importorskip('PIL')
+    _block(tmp_path, 'once_block.png')
+    reader = _FakeReader([_p(0, '出現1回の種 Außerdem je einmal in Lfd. Nr. 3 : '
+                               'Asplenium oligophlebium カミガモシダ K +')])
+    got = site_notes.block_text(tmp_path, name='once_block.png',
+                                kinds=('once',), reader=reader)
+    assert 'カミガモシダ' in got
+
+
+def test_切り出しが無ければ空(tmp_path):
+    assert site_notes.block_text(tmp_path, reader=_FakeReader([])) == ''
+
+
+def test_読み手が無ければ空(tmp_path):
+    pytest.importorskip('PIL')
+    _block(tmp_path, 'note_block.png')
+    assert site_notes.block_text(tmp_path, reader=None, use_yomi=False) == ''
+
+
+# --- 「1 回出現の種」の名前を辞書で直す ------------------------------------
+#
+# 2026-09-13 の実測 (折込 10 枚・254 件): 形が整っているのは 241 件 (95%) で，
+# 崩れは 13 件しかない．**弱点は形でなく字の読み違い**
+# (`ASPlenium oligophlebium`・`Lindera strychnl`)．
+# 工程の本体と同じ `correct_text.correct_name` に通す．
+
+def test_和名を辞書で直す():
+    recs = [{'plot': 1, 'j_name': 'ススキ', 's_name': 'Miscanthus sinensis',
+             'layer': 'K', 'comp_raw': '+'}]
+    got = site_notes.correct_once(recs)
+    assert got[0]['j_name'] == 'ススキ'
+    assert got[0]['status'] == 'OK'
+
+
+def test_読み違いは候補に直す():
+    """`correct_name` が当てられるものは直る"""
+    recs = [{'plot': 1, 'j_name': 'スス キ', 's_name': '', 'layer': None,
+             'comp_raw': '+'}]
+    got = site_notes.correct_once(recs)
+    assert got[0]['j_name'] == 'ススキ'
+
+
+def test_学名が空なら和名から引く():
+    """**印字されている学名は置き換えない** (2026-09-01 の決定)"""
+    recs = [{'plot': 1, 'j_name': 'ススキ', 's_name': '', 'layer': None,
+             'comp_raw': '+'}]
+    got = site_notes.correct_once(recs)
+    assert got[0]['s_name']
+    assert got[0].get('note') == '学名は和名から引いた'
+
+
+def test_印字された学名は置き換えない():
+    recs = [{'plot': 1, 'j_name': 'イタドリ', 's_name': 'Polygonum cuspidatum',
+             'layer': None, 'comp_raw': '+'}]
+    got = site_notes.correct_once(recs)
+    assert got[0]['s_name'].startswith('Polygonum')
+
+
+def test_直せないものは印字を残す():
+    recs = [{'plot': 1, 'j_name': 'ヌヌヌヌヌヌ', 's_name': 'Zzzxx qqqvvv',
+             'layer': None, 'comp_raw': '+'}]
+    got = site_notes.correct_once(recs)
+    assert got[0]['j_name'] == 'ヌヌヌヌヌヌ'
+    assert got[0]['status'] == 'Need Check'
+
+
+def test_元の項目は残る():
+    recs = [{'plot': 3, 'j_name': 'ススキ', 's_name': '', 'layer': 'K',
+             'comp_raw': '+', 'constancy': None}]
+    got = site_notes.correct_once(recs)
+    assert got[0]['plot'] == 3 and got[0]['layer'] == 'K'
+    assert got[0]['comp_raw'] == '+'
