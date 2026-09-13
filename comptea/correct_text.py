@@ -180,7 +180,14 @@ def correct_comp(str):
     # **`;` も区切りとして落とす**(2026-09-03)．最後に 1 文字ずつ `;` で
     # 繋ぐので，読む人が約束どおり `5;5` と書くと `5;;;5` になっていた
     # (`references/reading-guide.md` は区切りを `;` と書くよう求めている)
-    corrected = re.sub('[-_*･・., ;]', '', corrected)
+    # **中点 `・` の読み違いも区切りとして落とす** (2026-09-13)．
+    # 全 147 表で要確認 1,927 件のうち 1,561 件が「区切りが 2 つ以上」で，
+    # その多くが `3;';3`・`+;。;2` のように**中点が 1 文字の語になった**もの．
+    # 1 文字ずつ `;` でつなぐ作りなので，落とし損ねた 1 文字が語になる
+    corrected = re.sub("[-_*･・., ;'`´¨^~:。゜°\"\u0300-\u036f]", '', corrected)
+    # **括弧の付いた値** (`(+)`) は中身を採る．常在度の括弧は先に見ている
+    corrected = re.sub(r'^[(\[{｛（]+', '', corrected)
+    corrected = re.sub(r'[)\]}｝）]+$', '', corrected)
     corrected = re.sub('十', '+', corrected)
     corrected = re.sub('^{', '', corrected)
     corrected = re.sub('}$', '', corrected)

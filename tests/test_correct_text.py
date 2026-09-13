@@ -199,3 +199,44 @@ def test_読めなかったときは読んだままの字を返す():
     """繋いだ形(`S;S`)を返すと，直すときに「階層が 2 つ」と誤解する"""
     assert ct.correct_layer("Ss")["corrected"] == "SS"
     assert ct.correct_layer("So")["corrected"] == "SO"
+
+
+# --- 被度・群度: 中点の読み違いと括弧 --------------------------------------
+#
+# 2026-09-13 に全 147 表を通して分かった．要確認 1,927 件のうち **1,561 件が
+# 「区切りが 2 つ以上」**で，その中身は 2 つの型だった．
+#
+#   `3;';3`・`+;。;2`  印字の中点 `・` が `'` や `。` と読まれ，別の語になった
+#   `(;+;)`           括弧付きの値 `(+)`
+#
+# `correct_comp` は区切りを落としてから **1 文字ずつ `;` でつなぐ**ので，
+# 落とし損ねた 1 文字がそのまま語になる．
+
+def test_中点の読み違いを区切りとして落とす():
+    for s in ("3'3", '3。3', '3:3', '3`3', '3´3', '3˙3'):
+        got = ct.correct_comp(s)
+        assert got['corrected'] == '3;3', (s, got)
+        assert got['status'] == 'OK'
+
+
+def test_括弧の付いた値は中身を採る():
+    got = ct.correct_comp('(+)')
+    assert got['corrected'] == '+'
+    assert got['status'] == 'OK'
+
+
+def test_括弧の中が被度と群度でも通る():
+    got = ct.correct_comp('(1・2)')
+    assert got['corrected'] == '1;2'
+    assert got['status'] == 'OK'
+
+
+def test_常在度の括弧は今までどおり():
+    got = ct.correct_comp('IV(+-3)')
+    assert got['status'] == 'OK'
+    assert '(' in got['corrected']
+
+
+def test_片方だけの括弧も落とす():
+    assert ct.correct_comp('(+').get('corrected') == '+'
+    assert ct.correct_comp('+)').get('corrected') == '+'
