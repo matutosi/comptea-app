@@ -866,3 +866,48 @@ def test_高さのある切り出しはそのまま(tmp_path):
     reader = _SizeReader([_p(0, '調査地 Lage: Lfd. Nr. 1: 神戸市山田町')])
     site_notes.block_text(tmp_path, reader=reader)
     assert reader.sizes[0] == (1900, 800)
+
+
+# --- 注記の読みは取り置く --------------------------------------------------
+#
+# 2026-09-13 に全表の実行の時間を測って分かった: **1 表あたりの固定費 24 秒**の
+# うち **16 秒が注記のレイアウト解析** (別環境の python 起動 + torch + 模型)．
+# 読みを画像の隣に取り置けば，2 回目からは 0 になる．
+
+def test_注記の読みを取り置く(tmp_path):
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    img = tmp_path / 'a_note.png'
+    Image.new('RGB', (60, 40), 'white').save(img)
+    reader = _FakeReader([_p(0, '調査地 Lage: Lfd. Nr. 1: 日高郡龍神村')])
+    a = site_notes.read_site_info(str(img), reader=reader)
+    b = site_notes.read_site_info(str(img), reader=reader)
+    assert a == b
+    assert reader.calls == 1                      # 2 回目は読まない
+    assert (tmp_path / ('a_note.png' + site_notes.PARAS_SUFFIX)).is_file()
+
+
+def test_取り置きは切り出し方ごとに分ける(tmp_path):
+    """紙面を丸ごと読んだ写しと，下の帯だけの写しは別物"""
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    img = tmp_path / 'b.png'
+    Image.new('RGB', (60, 400), 'white').save(img)
+    reader = _FakeReader([_p(0, '調査地 Lage: Lfd. Nr. 1: 日高郡龍神村')])
+    site_notes.read_site_info(str(img), reader=reader)
+    site_notes.read_site_info(str(img), reader=reader, strip=True)
+    assert reader.calls == 2
+
+
+def test_取り置きを使わない形も残る(tmp_path):
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    img = tmp_path / 'c_note.png'
+    Image.new('RGB', (60, 40), 'white').save(img)
+    reader = _FakeReader([_p(0, '調査地 Lage: Lfd. Nr. 1: 日高郡龍神村')])
+    site_notes.read_site_info(str(img), reader=reader, cache=False)
+    site_notes.read_site_info(str(img), reader=reader, cache=False)
+    assert reader.calls == 2

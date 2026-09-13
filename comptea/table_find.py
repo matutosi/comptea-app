@@ -599,6 +599,72 @@ def read_marks(im, reader=None, tile=TILE, least=LEAST, orientations=ORIENTATION
 
 # --- 4. まとまりを含む塊を箱にする ---------------------------------------
 
+# --- 折込は表が横に並ぶ ----------------------------------------------------
+#
+# 2026-09-13 に実データで確かめた: **折込 23 枚のうち 19 枚で表が横に並ぶ**
+# (表頭のまとまりの x が 2 群以上に分かれる)．同じ列に縦に積まれた表の
+# x の差は 60〜100 px しかないので，**紙面の幅の 2 割以上離れた所**だけを
+# 列の切れ目とみなす．**2 段組は折込には無い** (ユーザ確認) ので，
+# 学名の列は 1 つの表に 1 本 = 横に並ぶ表の数だけある．
+COL_GAP = 0.20          # 列の切れ目とみなす x の隔たり (紙面の幅に対する比)
+ROW_GAP = 0.05          # 同じ表の表頭とみなす y の隔たり (紙面の高さに対する比)
+COL_X_TOL = 0.10        # 同じ列とみなす x の隔たり (同上，幅に対する比)
+TABLE_LEAST = 3         # 表頭とみなすのに要る項目名の数
+ONCE_GAP = 0.02         # 「1 回出現の種」を 1 か所とみなす y の隔たり
+
+
+def columns(points, width, gap=COL_GAP):
+    """目印を**横に並ぶ列**に分ける
+
+    Args:
+        points: (x, y) の並び
+        width: 紙面の幅
+    Returns:
+        列ごとの点の並び (x の順)
+    """
+    if not points:
+        return []
+    out = []
+    for p in sorted(points, key=lambda q: q[0]):
+        if out and p[0] - max(q[0] for q in out[-1]) <= width * gap:
+            out[-1].append(p)
+        else:
+            out.append([p])
+    return out
+
+
+def _by_y(points, gap):
+    """y の隔たりで切る"""
+    out = []
+    for p in sorted(points, key=lambda q: q[1]):
+        if out and p[1] - max(q[1] for q in out[-1]) <= gap:
+            out[-1].append(p)
+        else:
+            out.append([p])
+    return out
+
+
+def count_tables(points, size, once=(), least=TABLE_LEAST):
+    """紙面に表が何枚あるかを，目印だけから見積もる
+
+    **表頭のまとまりが表の上端，「1 回出現の種」が下端**という並びを使う
+    (ユーザの基本構造．2026-09-13)．**表頭は非必須**なので，
+    列ごとに**表頭と「1 回出現の種」の多い方**を採る．
+
+    実測 (折込 23 枚): 表頭だけ 18 枚・「1 回出現の種」だけ 17 枚・
+    **多い方 19 枚**が，いまの切り分けの枚数と一致した．
+    """
+    w, h = size
+    n = 0
+    for col in columns(list(points) + list(once), w):
+        heads = [p for p in col if p in set(points)]
+        ones = [p for p in col if p in set(once)]
+        a = len([g for g in _by_y(heads, h * ROW_GAP) if len(g) >= least])
+        b = len(_by_y(ones, h * ONCE_GAP))
+        n += max(a, b)
+    return max(n, 1)
+
+
 def box_for(group, blobs, pad=PAD, max_frac=None, size=None):
     """まとまりの中心を含む塊の外接矩形．無ければ目印の外接矩形を広げる
 
