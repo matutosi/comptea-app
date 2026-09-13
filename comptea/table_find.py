@@ -665,6 +665,79 @@ def count_tables(points, size, once=(), least=TABLE_LEAST):
     return max(n, 1)
 
 
+def _heads_in(col, points):
+    got = []
+    for p in col:
+        if any(p is q or p == q for q in points):
+            got.append(p)
+    return got
+
+
+def structure_boxes(points, size, once=(), least=TABLE_LEAST):
+    """目印から**表の箱**を作る (基本構造にしたがう)
+
+    基本構造 (2026-09-13 ユーザ):
+        表題 → 表頭項目+値 → 学名・和名・組成 → 1 回出現の種 → 地点情報
+
+    **表頭のまとまりが表の上端**，**同じ列の次の表頭の直前が下端**．
+    横は**列と列の中間**で分ける (折込 23 枚中 19 枚で表が横に並ぶ)．
+    **表頭は非必須**なので，表頭の無い列は紙面の上から下までを 1 つとする．
+
+    Returns:
+        [(x1, y1, x2, y2)]．x の順，同じ列では y の順
+    """
+    w, h = size
+    pts = list(points)
+    ones = list(once)
+    cols = columns(pts + ones, w)
+    if not cols:
+        return [(0, 0, int(w), int(h))]
+
+    span = [(min(p[0] for p in c), max(p[0] for p in c)) for c in cols]
+    out = []
+    for i, col in enumerate(cols):
+        x1 = 0 if i == 0 else (span[i - 1][1] + span[i][0]) / 2
+        x2 = w if i == len(cols) - 1 else (span[i][1] + span[i + 1][0]) / 2
+        heads = _heads_in(col, pts)
+        tops = [min(g, key=lambda p: p[1])[1]
+                for g in _by_y(heads, h * ROW_GAP) if len(g) >= least]
+        tops.sort()
+        if not tops:
+            tops = [0.0]                      # 表頭が無い列は紙面の上から
+        for j, top in enumerate(tops):
+            y1 = 0 if j == 0 else top
+            y2 = tops[j + 1] if j + 1 < len(tops) else h
+            out.append((int(x1), int(y1), int(x2), int(y2)))
+    return out
+
+
+SHRINK_PAD = 40         # 縮めたあとに付ける余白 (px)
+
+
+def shrink_to_ink(dark, box, pad=SHRINK_PAD):
+    """箱を**その中のインクの外接矩形**まで縮める
+
+    `structure_boxes` は紙面を隙間なく分けるので，そのままでは余白を含む．
+    切り出しに使うときはここで縮める．インクが無ければ元の箱のまま．
+    """
+    h, w = dark.shape[:2]
+    x1, y1, x2, y2 = (int(v) for v in box)
+    x1, y1 = max(0, x1), max(0, y1)
+    x2, y2 = min(w, x2), min(h, y2)
+    if x2 <= x1 or y2 <= y1:
+        return (x1, y1, x2, y2)
+    sub = dark[y1:y2, x1:x2]
+    rows = np.flatnonzero(sub.any(axis=1))
+    cols = np.flatnonzero(sub.any(axis=0))
+    if not len(rows) or not len(cols):
+        return (x1, y1, x2, y2)
+    a = max(0, x1 + int(cols[0]) - pad)
+    b = max(0, y1 + int(rows[0]) - pad)
+    c = min(w, x1 + int(cols[-1]) + 1 + pad)
+    d = min(h, y1 + int(rows[-1]) + 1 + pad)
+    return (a, b, c, d)
+
+
 def box_for(group, blobs, pad=PAD, max_frac=None, size=None):
     """まとまりの中心を含む塊の外接矩形．無ければ目印の外接矩形を広げる
 

@@ -604,3 +604,105 @@ def test_表頭と出現1回の多い方を採る():
 
 def test_目印が無ければ_1():
     assert tf.count_tables([], (1000, 1000)) == 1
+
+
+# --- 基本構造から表の箱を作る ----------------------------------------------
+#
+# 基本構造 (2026-09-13 ユーザ):
+#   表題 → 表頭項目+値 → 学名・和名・組成 → 1 回出現の種 → 地点情報
+# **表頭が表の上端**，**次の表の表頭の直前がこの表の下端**．
+# 横は，**列と列の中間**で分ける (折込 23 枚中 19 枚で表が横に並ぶ)．
+
+def test_横に並ぶ表を箱にする():
+    w, h = 10000, 12000
+    pts = [(1000, 100), (1050, 200), (1000, 300),
+           (5000, 100), (5050, 200), (5000, 300)]
+    got = tf.structure_boxes(pts, (w, h))
+    assert len(got) == 2
+    left, right = sorted(got, key=lambda b: b[0])
+    assert left[0] == 0 and right[2] == w          # 紙面の端まで
+    assert left[2] == right[0]                     # 中間で接する
+    assert 1000 < left[2] < 5000
+
+
+def test_縦に積まれた表を上下に分ける():
+    w, h = 10000, 12000
+    pts = [(1000, 100), (1050, 200), (1000, 300),        # 上の表
+           (1000, 7000), (1050, 7100), (1000, 7200)]     # 下の表
+    got = sorted(tf.structure_boxes(pts, (w, h)), key=lambda b: b[1])
+    assert len(got) == 2
+    assert got[0][3] == got[1][1]                  # 上の下端 = 下の上端
+    assert got[0][1] < 100 and got[1][3] == h
+
+
+def test_表頭が無ければ紙面の上から():
+    """**表頭は非必須**．「1 回出現の種」しか無い列は，紙面の上から"""
+    w, h = 10000, 12000
+    got = tf.structure_boxes([], (w, h), once=[(1000, 6000)])
+    assert len(got) == 1
+    assert got[0][1] == 0 and got[0][3] == h
+
+
+def test_出現1回の種は同じ表に入れる():
+    """表の下端は，その表の「1 回出現の種」より下"""
+    w, h = 10000, 12000
+    pts = [(1000, 100), (1050, 200), (1000, 300),
+           (1000, 7000), (1050, 7100), (1000, 7200)]
+    once = [(1000, 6500)]                          # 上の表の下端
+    got = sorted(tf.structure_boxes(pts, (w, h), once=once), key=lambda b: b[1])
+    assert got[0][3] > 6500
+
+
+def test_目印が無ければ紙面ぜんぶ():
+    assert tf.structure_boxes([], (800, 600)) == [(0, 0, 800, 600)]
+
+
+def test_箱の数は数えた枚数と合う():
+    w, h = 10000, 12000
+    pts = [(1000, 100), (1050, 200), (1000, 300),
+           (1000, 7000), (1050, 7100), (1000, 7200),
+           (5000, 100), (5050, 200), (5000, 300)]
+    assert len(tf.structure_boxes(pts, (w, h))) == tf.count_tables(pts, (w, h))
+
+
+# --- 箱をインクに合わせて縮める --------------------------------------------
+#
+# `structure_boxes` は紙面を隙間なく分ける (覆い 1.00・重なり 0.00)．
+# 切り出しに使うには，**箱の中のインクの外接矩形**まで縮める．
+
+def _ink_sheet(w, h, marks):
+    """白地に黒い矩形を置いた紙面 (dark は True が黒)"""
+    im = Image.new('L', (w, h), 255)
+    d = ImageDraw.Draw(im)
+    for x1, y1, x2, y2 in marks:
+        d.rectangle([x1, y1, x2, y2], fill=0)
+    return np.array(im) < 128
+
+
+def test_インクの外接矩形まで縮める():
+    dark = _ink_sheet(1000, 800, [(100, 200, 400, 600)])
+    got = tf.shrink_to_ink(dark, (0, 0, 1000, 800), pad=0)
+    assert got == (100, 200, 401, 601)
+
+
+def test_余白を付けられる():
+    dark = _ink_sheet(1000, 800, [(100, 200, 400, 600)])
+    got = tf.shrink_to_ink(dark, (0, 0, 1000, 800), pad=10)
+    assert got == (90, 190, 411, 611)
+
+
+def test_紙面からはみ出さない():
+    dark = _ink_sheet(1000, 800, [(0, 0, 50, 50)])
+    got = tf.shrink_to_ink(dark, (0, 0, 1000, 800), pad=100)
+    assert got == (0, 0, 151, 151)
+
+
+def test_インクが無ければそのまま():
+    dark = _ink_sheet(1000, 800, [])
+    assert tf.shrink_to_ink(dark, (10, 20, 300, 400)) == (10, 20, 300, 400)
+
+
+def test_箱の外のインクは見ない():
+    dark = _ink_sheet(1000, 800, [(100, 100, 200, 200), (700, 600, 800, 700)])
+    got = tf.shrink_to_ink(dark, (0, 0, 500, 500), pad=0)
+    assert got == (100, 100, 201, 201)
