@@ -312,3 +312,41 @@ def test_切り出した注記の方を先に使う(tmp_path):
     _got, info = site_notes.apply_notes(_plots([{'plot': 1, 'locality': None}]),
                                         image=str(img), reader=reader, page=True)
     assert 'tab_note.png' in info
+
+
+# --- 「1 回出現の種」も同じ注記から取る ------------------------------------
+#
+# 折込の注記画像には，地点情報と「1 回出現の種」が並んでいる．
+# 2026-09-13 の実測 (注記画像 10 枚): 地点情報 370 件・出現 1 回の種 275 件．
+# **同じ (地点, 和名, 階層, 被度) が重なって出る** (長い文を解析するため)．
+
+ONCE = ('出現1回の種 Außerdem je einmal in Lfd. Nr. 3 : '
+        'Asplenium oligophlebium カミガモシダ K +, '
+        'Lindera strychnifolia テンダイウヤク K +')
+
+
+def test_出現1回の種を取る():
+    got = site_notes.once_species([_p(0, ONCE)])
+    names = [r['j_name'] for r in got]
+    assert 'カミガモシダ' in names and 'テンダイウヤク' in names
+    assert all(r['plot'] == 3 for r in got)
+
+
+def test_同じものは1件にする():
+    """同じ文が 2 つの段落に割れて読まれることがある"""
+    got = site_notes.once_species([_p(0, ONCE), _p(45, ONCE)])
+    key = [(r['plot'], r['j_name'], r['layer'], r['comp_raw']) for r in got]
+    assert len(key) == len(set(key))
+
+
+def test_階層が違えば別の行():
+    """同じ種が高木層と低木層に出るのは正しい"""
+    t = ('出現1回の種 Außerdem je einmal in Lfd. Nr. 2 : '
+         'Pterostyrax corymbosa アサガラ B2 2, '
+         'Pterostyrax corymbosa アサガラ S +')
+    got = site_notes.once_species([_p(0, t)])
+    assert len({(r['layer'], r['comp_raw']) for r in got}) == 2
+
+
+def test_注記が無ければ空():
+    assert site_notes.once_species([_p(0, 'この群落は海岸砂丘に成立している。')]) == []
