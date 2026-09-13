@@ -158,6 +158,14 @@ def correct_constancy(text):
     return f'{head}({inner})'
 
 
+# 組成の記法に無い字と，その正しい読み (`I`・`V`・`X` は常在度で使うので入れない)
+MISREAD = (
+    (r'[l|｜一ー]', '1'),
+    (r'[zZ]', '2'),
+    (r'[tT]', '+'),
+)
+
+
 def correct_comp(str):
     """
     被度・群度の文字列を修正
@@ -189,6 +197,12 @@ def correct_comp(str):
     corrected = re.sub(r'^[(\[{｛（]+', '', corrected)
     corrected = re.sub(r'[)\]}｝）]+$', '', corrected)
     corrected = re.sub('十', '+', corrected)
+    # **組成の記法に存在しない字だけ**を直す (2026-09-14)．
+    # 全 147 表の本体の要確認 1,264 件のうち，1 文字の読み違いで読める
+    # ようになるものが 64 件 (5%)．**`I` はローマ数字 (常在度) と
+    # 紛らわしいので触らない** (`I;I` → `11` は本当は `II` = 常在度 2)．
+    for pat, rep in MISREAD:
+        corrected = re.sub(pat, rep, corrected)
     corrected = re.sub('^{', '', corrected)
     corrected = re.sub('}$', '', corrected)
     corrected = ';'.join(corrected)
