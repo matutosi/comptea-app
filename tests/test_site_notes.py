@@ -675,3 +675,49 @@ def test_途中の括弧が日付でなければ残す():
     head, date = site_notes.split_date(v)
     assert date is None
     assert '北向き' in head
+
+
+# --- 大きすぎる紙面はページとして読まない ----------------------------------
+#
+# 2026-09-13 に折込 (09_p2) の通しで気づいた．注記の切り出しが無い表では
+# ページ自身を読むが，**折込は 1782〜12712 px (中央 5872) と大きく**，
+# 丸ごと渡すと縮小されて読みが崩れる (既知: A0 の紙面は「"ry AND 1000」)．
+# **本のページは 3498〜3510 px** なので，4000 px を境にする．
+# 折込の注記は `<画像>_note.png` に切り出されているので，外しても困らない．
+
+def test_大きすぎる画像はページとして読まない(tmp_path):
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    img = tmp_path / 'huge.png'
+    Image.new('RGB', (3000, 9000), 'white').save(img)
+    reader = _FakeReader([_p(0, '調査地 Lage: Lfd. Nr. 1: 神戸市')])
+    got, info = site_notes.apply_notes(_plots([{'plot': 1, 'locality': None}]),
+                                       image=str(img), reader=reader, page=True)
+    assert info == '' and reader.calls == 0
+
+
+def test_本のページの大きさなら読む(tmp_path):
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    img = tmp_path / 'page.png'
+    Image.new('RGB', (2400, 3510), 'white').save(img)   # 本のページの実寸
+    reader = _FakeReader([_p(0, '調査地 Lage: Lfd. Nr. 1: 神戸市山田町')])
+    got, _info = site_notes.apply_notes(_plots([{'plot': 1, 'locality': None}]),
+                                        image=str(img), reader=reader, page=True)
+    assert '神戸市山田町' in str(got.loc[0, 'locality'])
+
+
+def test_切り出した注記は大きくても読む(tmp_path):
+    """`_note.png` は注記だけを切り出したもの．大きさで外さない"""
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    img = tmp_path / 'tab.png'
+    Image.new('RGB', (3000, 9000), 'white').save(img)
+    Image.new('RGB', (3757, 1612), 'white').save(tmp_path / 'tab_note.png')
+    reader = _FakeReader([_p(0, '調査地 Lage: Lfd. Nr. 1: 神戸市山田町')])
+    _got, info = site_notes.apply_notes(_plots([{'plot': 1, 'locality': None}]),
+                                        image=str(img), reader=reader, page=True)
+    assert 'tab_note.png' in info
