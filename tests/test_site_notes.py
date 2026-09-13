@@ -8,6 +8,7 @@ s01115_19_p3 の注記は
 の 3 段落に割れていた．続きの段落には見出し語が無いので，見出しだけで選ぶと
 **日付が欠け，地名も途中で切れる**．
 """
+import pandas as pd
 import pytest
 
 from comptea import site_notes
@@ -116,3 +117,151 @@ def test_長すぎるものは日付にしない():
     v = ('神戸市 (Microstegium vimineum ++2, Polygomum nodosum オオイヌタデ +, '
          'Galium kikunugura キクムグラ + 1983)')
     assert site_notes.split_date(v)[1] is None
+
+
+# --- 表頭の表 (`plot_table`) へ差し込む ------------------------------------
+#
+# 表頭から取れる項目は紙面によって欠ける (表頭の無い表もある)．
+# **注記は欠けた所を埋めるためのもの**なので，**表頭の値は上書きしない**．
+
+def _plots(rows):
+    return pd.DataFrame(rows)
+
+
+def test_空いている項目を注記で埋める():
+    df = _plots([{'plot': 1, 'locality': None, 'date': None},
+                 {'plot': 2, 'locality': None, 'date': None}])
+    recs = [{'plot': 1, 'field': 'locality', 'value': '神戸市山田町'},
+            {'plot': 2, 'field': 'date', 'value': '6 Nov. 1973'}]
+    got = site_notes.merge_plots(df, recs)
+    assert got.loc[got['plot'] == 1, 'locality'].iloc[0] == '神戸市山田町'
+    assert got.loc[got['plot'] == 2, 'date'].iloc[0] == '6 Nov. 1973'
+
+
+def test_表頭の値は上書きしない():
+    df = _plots([{'plot': 1, 'locality': '六甲山', 'date': None}])
+    recs = [{'plot': 1, 'field': 'locality', 'value': '神戸市山田町'},
+            {'plot': 1, 'field': 'date', 'value': '6 Nov. 1973'}]
+    got = site_notes.merge_plots(df, recs)
+    assert got.loc[0, 'locality'] == '六甲山'          # 表頭が正
+    assert got.loc[0, 'date'] == '6 Nov. 1973'         # 空いていた所は埋まる
+
+
+def test_無い項目の列は足す():
+    """`source_ref` (出典) は表頭には無く，注記にしかない"""
+    df = _plots([{'plot': 1, 'locality': '六甲山'}])
+    recs = [{'plot': 1, 'field': 'source_ref', 'value': '原調査資料 Original'}]
+    got = site_notes.merge_plots(df, recs)
+    assert got.loc[0, 'source_ref'] == '原調査資料 Original'
+
+
+def test_表に無い地点は入れない():
+    """注記の地点番号の読み違いで，存在しない地点が増えるのを防ぐ"""
+    df = _plots([{'plot': 1, 'locality': None}])
+    recs = [{'plot': 9, 'field': 'locality', 'value': '神戸市'}]
+    got = site_notes.merge_plots(df, recs)
+    assert len(got) == 1
+    assert got.attrs['warnings']
+
+
+def test_地点の無い注記は全地点に当てる():
+    """1 地点ぶんしか書かれていない注記は `plot` が None になる"""
+    df = _plots([{'plot': 1, 'locality': None}, {'plot': 2, 'locality': None}])
+    recs = [{'plot': None, 'field': 'locality', 'value': '神戸市山田町'}]
+    got = site_notes.merge_plots(df, recs)
+    assert list(got['locality']) == ['神戸市山田町', '神戸市山田町']
+
+
+def test_空の表はそのまま():
+    df = _plots([])
+    assert len(site_notes.merge_plots(df, [{'plot': 1, 'field': 'date',
+                                            'value': '1983'}])) == 0
+
+
+def test_注記が無ければ何もしない():
+    df = _plots([{'plot': 1, 'locality': '六甲山'}])
+    got = site_notes.merge_plots(df, [])
+    assert got.loc[0, 'locality'] == '六甲山'
+
+
+# --- 工程につなぐ ----------------------------------------------------------
+#
+# 注記の画像は，表の画像の隣に `<表の画像>_note.png` として置かれる
+# (`split_sheet.note_boxes`)．続きのページでは置き場の `note_block.png`．
+
+class _FakeReader:
+    """段落を返すだけの読み手"""
+
+    def __init__(self, paras):
+        self.paras = paras
+        self.calls = 0
+
+    def available(self):
+        return True
+
+    def read_paragraphs(self, img, box=None):
+        self.calls += 1
+        return self.paras
+
+
+def test_表の画像の隣の注記の画像を見つける(tmp_path):
+    img = tmp_path / 's01115_02_p1.png'
+    img.write_bytes(b'')
+    note = tmp_path / 's01115_02_p1_note.png'
+    note.write_bytes(b'')
+    assert site_notes.find_note_image(str(img)) == str(note)
+
+
+def test_置き場の_note_block_も見る(tmp_path):
+    work = tmp_path / 'work'
+    work.mkdir()
+    note = work / 'note_block.png'
+    note.write_bytes(b'')
+    assert site_notes.find_note_image(None, work=str(work)) == str(note)
+
+
+def test_注記の画像が無ければ_None(tmp_path):
+    img = tmp_path / 'a.png'
+    img.write_bytes(b'')
+    assert site_notes.find_note_image(str(img), work=str(tmp_path)) is None
+
+
+def test_読み手が無ければ読まない(tmp_path):
+    img = tmp_path / 'a_note.png'
+    img.write_bytes(b'')
+    assert site_notes.read_site_info(str(img), reader=None, use_yomi=False) == []
+
+
+def test_注記の画像を読んで地点情報にする(tmp_path):
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    note = tmp_path / 'a_note.png'
+    Image.new('RGB', (60, 40), 'white').save(note)
+    reader = _FakeReader([_p(0, '調査地 Lage d. Aufn.: Lfd. Nr. 1,2: 日高郡龍神村'),
+                          _p(45, 'Datum d. Aufn. 調査年月日: 6 Nov. 1973.')])
+    got = site_notes.read_site_info(str(note), reader=reader)
+    assert reader.calls == 1
+    assert {r['field'] for r in got} >= {'locality'}
+
+
+def test_工程に差し込む(tmp_path):
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    img = tmp_path / 'tab.png'
+    Image.new('RGB', (60, 40), 'white').save(img)
+    Image.new('RGB', (60, 40), 'white').save(tmp_path / 'tab_note.png')
+    df = _plots([{'plot': 1, 'locality': None, 'date': None},
+                 {'plot': 2, 'locality': None, 'date': None}])
+    reader = _FakeReader([_p(0, '調査地 Lage d. Aufn.: Lfd. Nr. 1,2: 日高郡龍神村')])
+    got, info = site_notes.apply_notes(df, image=str(img), reader=reader)
+    assert '日高郡龍神村' in str(got.loc[0, 'locality'])
+    assert '注記' in info
+
+
+def test_注記が無ければ表はそのまま(tmp_path):
+    df = _plots([{'plot': 1, 'locality': None}])
+    got, info = site_notes.apply_notes(df, image=str(tmp_path / 'none.png'))
+    assert got.loc[0, 'locality'] is None
+    assert info == ''
