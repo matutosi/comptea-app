@@ -787,3 +787,24 @@ def test_切り出しがあれば帯は読まない(tmp_path):
                                         image=str(img), reader=reader, page=True)
     assert reader.sizes[0] == (3000, 900)
     assert 'tab_note.png' in info
+
+
+# --- 見出しの断片を地名にしない --------------------------------------------
+#
+# 2026-09-13 に kinki_014 (90 度回転の表) の通しで見つかった．
+# 見出し「Lage d. Aufn.」が崩れて読まれ，**`d. Autn` が地名として 14 地点に
+# 入っていた**．字数だけで見ると 5 字で通ってしまう．
+# **注記から来る値も検査する** (これまで差し込む先だけを見ていた)．
+
+def test_見出しの断片は地名にしない():
+    assert site_notes.usable_value('locality', 'd. Autn') is False
+    assert site_notes.usable_value('locality', 'Lage d. Aufn') is False
+    assert site_notes.usable_value('locality', 'Ryujin-mura') is True
+    assert site_notes.usable_value('locality', '龍神村') is True
+
+
+def test_注記の値も検査する():
+    df = _plots([{'plot': 1, 'locality': None}])
+    recs = [{'plot': 1, 'field': 'locality', 'value': 'd. Autn'}]
+    got = site_notes.merge_plots(df, recs)
+    assert got.loc[0, 'locality'] is None          # 入れない
