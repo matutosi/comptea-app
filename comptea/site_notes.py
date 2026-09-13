@@ -420,6 +420,10 @@ def _blank(v):
 _JA = re.compile(r'[\u3040-\u30ff\u3400-\u9fff]')
 _LATIN = re.compile(r'[A-Za-zÀ-ÿ]')
 _DIGIT = re.compile(r'\d')
+# 見出しに出る語 (崩れた読みも拾えるよう短く切る)
+_HEAD_WORD = re.compile(
+    r'\b(Lage|Auf\w*|Aut\w*|Datum|Nachweis|Fundort\w*|Vegetation\w*|'
+    r'Lfd|Nr|der|des|d|von|in)\b\.?', re.I)
 
 
 def usable_value(field, value):
@@ -437,7 +441,10 @@ def usable_value(field, value):
         return bool(_DIGIT.search(s))
     # **`nan` は数えない** (`nan/M` のように，読めなかった印が混じる)
     s = re.sub(r'\bnan\b', ' ', s, flags=re.I)
-    return len(_JA.findall(s)) >= 2 or len(_LATIN.findall(s)) >= 4
+    # **見出しの語は数えない**．見出しが崩れて読まれると，その断片が
+    # 値として残る (kinki_014 の `d. Autn` = 「Lage d. Aufn.」の断片)
+    s = _HEAD_WORD.sub(' ', s)
+    return len(_JA.findall(s)) >= 2 or len(_LATIN.findall(s)) >= 6
 
 
 def better_date(new, old):
@@ -483,7 +490,8 @@ def merge_plots(df_plot, recs):
 
     for r in recs:
         field, value = r.get('field'), r.get('value')
-        if field not in FIELDS or _blank(value):
+        # **注記から来る値も検査する** (見出しの断片が混じることがある)
+        if field not in FIELDS or not usable_value(field, value):
             continue
         if field not in out.columns:
             out[field] = None
