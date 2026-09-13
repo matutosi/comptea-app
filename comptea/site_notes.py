@@ -159,7 +159,27 @@ def split_date(value):
         head = body[:m.start()].strip(' .,，([（')
         if head and len(m.group('date')) <= DATE_MAX:
             return head, m.group('date').strip(' .,，')
-    return s.strip(' .,，'), None
+    # **括弧が末尾でないこともある** (2026-09-13 に kinki_006 で見つけた)．
+    #   'Hamasaka-cho, Mikata-gun 美方郡浜坂町釜屋(5. Juni 1983), in'
+    for m in re.finditer(r'[(（]\s*([^()（）]*)\s*[)）]', body):
+        inner = m.group(1).strip()
+        if len(inner) <= DATE_MAX and _DATE.search(inner + ' '):
+            rest = (body[:m.start()] + ' ' + body[m.end():])
+            return _tail_clean(rest), inner.strip(' .,，')
+    return _tail_clean(s), None
+
+
+# 文をつなぐ語だけが末尾に残ることがある (`…釜屋, in`)
+_TAIL = re.compile(r'[,，、]\s*(in|und|u\.|and|の)?\s*$', re.I)
+
+
+def _tail_clean(text):
+    s = ' '.join((text or '').split()).strip(' .．,，')
+    while True:
+        got = _TAIL.sub('', s).strip(' .．,，')
+        if got == s:
+            return s
+        s = got
 
 
 def with_dates(recs):
