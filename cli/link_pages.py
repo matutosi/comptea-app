@@ -103,7 +103,8 @@ def note_text(work, layout=True):
     if layout:
         from comptea import site_notes
 
-        got = site_notes.block_text(work)
+        # 切り出しが無ければページ自身を読む (表のページには切り出しが無い)
+        got = site_notes.work_note_text(work)
         if got:
             return got
     p = work / 'note.txt'

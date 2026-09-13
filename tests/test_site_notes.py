@@ -457,3 +457,67 @@ def test_元の項目は残る():
     got = site_notes.correct_once(recs)
     assert got[0]['plot'] == 3 and got[0]['layer'] == 'K'
     assert got[0]['comp_raw'] == '+'
+
+
+# --- 表のページ側の注記も読む ----------------------------------------------
+#
+# 枝番 `-2` の注記は**文の途中から始まる続き**のことがある (010-2 は
+# 「4-6 : Kumihama-cho …」で始まり，「調査地」の見出しは 010-1 側にある)．
+# `link_pages` が両方をつなぐには，**表のページ側の注記も読む**必要がある．
+# 表のページには `note_block.png` が無いので，ページ自身を読む．
+
+def _located(work, image):
+    (work / 'located.csv').write_text(
+        'obj_name,source_image\ncomp,' + str(image).replace('\\', '/') + '\n',
+        encoding='utf-8')
+
+
+def test_置き場に切り出しが無ければページを読む(tmp_path):
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    img = tmp_path / 'kinki_010-1.png'
+    Image.new('RGB', (60, 40), 'white').save(img)
+    work = tmp_path / 'work'
+    work.mkdir()
+    _located(work, img)
+    reader = _FakeReader([_p(0, '調査地 Lage: Lfd. Nr. 1-3: 神戸市山田町')])
+    got = site_notes.work_note_text(work, reader=reader)
+    assert '神戸市山田町' in got
+
+
+def test_切り出しがあればそちらを使う(tmp_path):
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    work = tmp_path / 'work'
+    work.mkdir()
+    Image.new('RGB', (60, 40), 'white').save(work / 'note_block.png')
+    img = tmp_path / 'kinki_010-2.png'
+    Image.new('RGB', (60, 40), 'white').save(img)
+    _located(work, img)
+    reader = _FakeReader([_p(0, '調査地 Lage: Lfd. Nr. 4-6: 久美浜町箱石')])
+    got = site_notes.work_note_text(work, reader=reader)
+    assert '久美浜町箱石' in got
+    assert reader.calls == 1              # ページは読まない
+
+
+def test_1枚に2表ある紙面ではページを読まない(tmp_path):
+    """どちらの表の注記か分けられない"""
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    img = tmp_path / 'kinki_037.png'
+    Image.new('RGB', (60, 40), 'white').save(img)
+    work = tmp_path / 'work'
+    work.mkdir()
+    _located(work, img)
+    (work / 'table.txt').write_text('1/2', encoding='utf-8')
+    reader = _FakeReader([_p(0, '調査地 Lage: Lfd. Nr. 1: 神戸市')])
+    assert site_notes.work_note_text(work, reader=reader) == ''
+
+
+def test_ページも切り出しも無ければ空(tmp_path):
+    work = tmp_path / 'work'
+    work.mkdir()
+    assert site_notes.work_note_text(work, reader=_FakeReader([])) == ''

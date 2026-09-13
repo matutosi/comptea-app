@@ -209,6 +209,60 @@ def block_text(work, name=NOTE_BLOCK, kinds=('note',), reader=None,
     return text
 
 
+PAGE_CACHE = 'page_note.layout.txt'
+
+
+def source_image(work):
+    """その置き場の格子が使った画像 (`located.csv` の `source_image`)"""
+    f = os.path.join(str(work), 'located.csv')
+    if not os.path.isfile(f):
+        return None
+    import pandas as pd
+
+    try:
+        df = pd.read_csv(f, usecols=['source_image'])
+    except Exception:
+        return None
+    got = df['source_image'].dropna()
+    return str(got.iloc[0]) if len(got) else None
+
+
+def work_note_text(work, reader=None, use_yomi=True, gap=GAP, page=True):
+    """その置き場の注記の文字列 (切り出しが無ければページ自身を読む)
+
+    枝番 `-2` の注記は**文の途中から始まる続き**のことがあり
+    (010-2 は「4-6 : Kumihama-cho …」で始まる)，見出しは表のページ側に
+    あります．`link_pages` が両方をつなげるよう，**表のページも読みます**．
+
+    **1 枚に 2 表ある紙面では読みません** (どちらの表の注記か分けられない)．
+    """
+    got = block_text(work, reader=reader, use_yomi=use_yomi, gap=gap)
+    if got or not page:
+        return got
+    if os.path.isfile(os.path.join(str(work), 'table.txt')):
+        return ''
+    keep = os.path.join(str(work), PAGE_CACHE)
+    if os.path.isfile(keep):
+        with open(keep, encoding='utf-8') as f:
+            return f.read().strip()
+    img = source_image(work)
+    if not img or not os.path.isfile(img):
+        return ''
+    if reader is None and use_yomi:
+        reader = _yomi_or_none()
+    if reader is None:
+        return ''
+    from PIL import Image
+
+    Image.MAX_IMAGE_PIXELS = None
+    with Image.open(img) as im:
+        paras = reader.read_paragraphs(im.convert('RGB'))
+    text = '\n'.join(pick(paras, kinds=('note',), gap=gap)).strip()
+    with open(keep, 'w', encoding='utf-8') as f:
+        f.write(text)
+    return text
+
+
 def once_species(paras, gap=GAP):
     """注記から「1 回出現の種」を取る
 
