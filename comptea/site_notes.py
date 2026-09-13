@@ -18,6 +18,7 @@
 選ぶと日付が欠け，地名も途中で切れます．そこで**見出しの段落から始め，すぐ下に
 続く段落を，次の見出しか本文に当たるまでつなぎます**．
 """
+import json
 import os
 import re
 
@@ -215,6 +216,7 @@ STRIP = 0.2
 NOTE_SUFFIX = '_note.png'
 NOTE_BLOCK = 'note_block.png'
 CACHE_SUFFIX = '.layout.txt'
+PARAS_SUFFIX = '.paras.json'
 # **細い切り出しは白を足してから読む**．高さが 1〜2 行しかないと
 # レイアウト解析が段落を返さない (2026-09-13: 061-2 は 1909x120 で 0 段落，
 # 白を足すと 2 段落．081-2 は 1405x68 で 0 段落 → 1 段落)
@@ -581,14 +583,23 @@ def _yomi_or_none():
     return r if r.available() else None
 
 
-def read_site_info(image, reader=None, use_yomi=True, gap=GAP, strip=False):
-    """注記の画像を**レイアウト解析で段落として**読み，地点情報にする
+def read_paras(image, reader=None, use_yomi=True, strip=False, cache=True):
+    """注記の画像を段落で読む．**読みは画像の隣に取り置く**
 
-    読み手を入れていない環境では `[]` を返します (工程は今までどおり動く)．
+    全表の実行では **1 表あたりの固定費 24 秒のうち 16 秒が，この読み**
+    (別環境の python 起動 + torch + 模型の読み込み)．
+    取り置けば 2 回目からは 0 になる (2026-09-13 に測った)．
     """
+    keep = str(image) + ('.strip' if strip else '') + PARAS_SUFFIX
+    if cache and os.path.isfile(keep):
+        try:
+            with open(keep, encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            pass
     if reader is None and use_yomi:
         reader = _yomi_or_none()
-    if reader is None or not image or not os.path.isfile(str(image)):
+    if reader is None:
         return []
     from PIL import Image
 
@@ -598,8 +609,28 @@ def read_site_info(image, reader=None, use_yomi=True, gap=GAP, strip=False):
         if strip:
             w, h = im.size
             im = im.crop((0, h - int(h * STRIP), w, h))
-        paras = reader.read_paragraphs(im)
-    return site_info(paras, gap=gap)
+        paras = [{'box': list(p['box']), 'text': p['text']}
+                 for p in reader.read_paragraphs(_pad_short(im))]
+    if cache:
+        try:
+            with open(keep, 'w', encoding='utf-8') as f:
+                json.dump(paras, f, ensure_ascii=False)
+        except Exception:
+            pass
+    return paras
+
+
+def read_site_info(image, reader=None, use_yomi=True, gap=GAP, strip=False,
+                   cache=True):
+    """注記の画像を**レイアウト解析で段落として**読み，地点情報にする
+
+    読み手を入れていない環境では `[]` を返します (工程は今までどおり動く)．
+    """
+    if not image or not os.path.isfile(str(image)):
+        return []
+    paras = read_paras(image, reader=reader, use_yomi=use_yomi, strip=strip,
+                       cache=cache)
+    return site_info(paras, gap=gap) if paras else []
 
 
 def apply_notes(df_plot, image=None, work=None, reader=None, use_yomi=True,
