@@ -402,3 +402,58 @@ def test_読み手が無ければ空(tmp_path):
     pytest.importorskip('PIL')
     _block(tmp_path, 'note_block.png')
     assert site_notes.block_text(tmp_path, reader=None, use_yomi=False) == ''
+
+
+# --- 「1 回出現の種」の名前を辞書で直す ------------------------------------
+#
+# 2026-09-13 の実測 (折込 10 枚・254 件): 形が整っているのは 241 件 (95%) で，
+# 崩れは 13 件しかない．**弱点は形でなく字の読み違い**
+# (`ASPlenium oligophlebium`・`Lindera strychnl`)．
+# 工程の本体と同じ `correct_text.correct_name` に通す．
+
+def test_和名を辞書で直す():
+    recs = [{'plot': 1, 'j_name': 'ススキ', 's_name': 'Miscanthus sinensis',
+             'layer': 'K', 'comp_raw': '+'}]
+    got = site_notes.correct_once(recs)
+    assert got[0]['j_name'] == 'ススキ'
+    assert got[0]['status'] == 'OK'
+
+
+def test_読み違いは候補に直す():
+    """`correct_name` が当てられるものは直る"""
+    recs = [{'plot': 1, 'j_name': 'スス キ', 's_name': '', 'layer': None,
+             'comp_raw': '+'}]
+    got = site_notes.correct_once(recs)
+    assert got[0]['j_name'] == 'ススキ'
+
+
+def test_学名が空なら和名から引く():
+    """**印字されている学名は置き換えない** (2026-09-01 の決定)"""
+    recs = [{'plot': 1, 'j_name': 'ススキ', 's_name': '', 'layer': None,
+             'comp_raw': '+'}]
+    got = site_notes.correct_once(recs)
+    assert got[0]['s_name']
+    assert got[0].get('note') == '学名は和名から引いた'
+
+
+def test_印字された学名は置き換えない():
+    recs = [{'plot': 1, 'j_name': 'イタドリ', 's_name': 'Polygonum cuspidatum',
+             'layer': None, 'comp_raw': '+'}]
+    got = site_notes.correct_once(recs)
+    assert got[0]['s_name'].startswith('Polygonum')
+
+
+def test_直せないものは印字を残す():
+    recs = [{'plot': 1, 'j_name': 'ヌヌヌヌヌヌ', 's_name': 'Zzzxx qqqvvv',
+             'layer': None, 'comp_raw': '+'}]
+    got = site_notes.correct_once(recs)
+    assert got[0]['j_name'] == 'ヌヌヌヌヌヌ'
+    assert got[0]['status'] == 'Need Check'
+
+
+def test_元の項目は残る():
+    recs = [{'plot': 3, 'j_name': 'ススキ', 's_name': '', 'layer': 'K',
+             'comp_raw': '+', 'constancy': None}]
+    got = site_notes.correct_once(recs)
+    assert got[0]['plot'] == 3 and got[0]['layer'] == 'K'
+    assert got[0]['comp_raw'] == '+'

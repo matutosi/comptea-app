@@ -235,6 +235,44 @@ def once_species(paras, gap=GAP):
     return out
 
 
+def correct_once(recs):
+    """「1 回出現の種」の名前を辞書で直す
+
+    2026-09-13 の実測 (折込 10 枚・254 件): **形が整っているのは 241 件 (95%)**
+    で，崩れは 13 件しかない．**弱点は形でなく字の読み違い**
+    (`ASPlenium oligophlebium`・`Lindera strychnl`)なので，工程の本体と
+    同じ `correct_text.correct_name` に通します．
+
+    **印字されている学名は置き換えません** (2026-09-01 の決定)．
+    和名から引けるのは**いまの分類の名前**で，古い資料の印字とは食い違う
+    (イタドリ: 印字 `Polygonum cuspidatum` / 引くと `Fallopia japonica`)．
+    空のときだけ埋め，`note` にそう書きます．
+    """
+    from . import correct_text
+
+    out = []
+    for r in (recs or []):
+        r = dict(r)
+        status = []
+        for key, target in (('j_name', 'j_name'), ('s_name', 's_name')):
+            got = correct_text.correct_name(r.get(key), target=target)
+            if got:
+                r[key] = got['corrected']
+                status.append(got['status'])
+        if not (r.get('s_name') or '').strip() and r.get('j_name'):
+            name, why = correct_text.sname_from_jname(r['j_name'])
+            if why == 'ok':
+                r['s_name'] = name
+                r['note'] = '学名は和名から引いた'
+        # **いちばん確かでない方を採る** (どちらかが怪しければ目視に回す)
+        for want in ('Need Check', 'suggested', 'OK'):
+            if want in status:
+                r['status'] = want
+                break
+        out.append(r)
+    return out
+
+
 # --- 表頭の表へ差し込む ----------------------------------------------------
 #
 # 表頭から取れる項目は紙面によって欠ける (**表頭の無い表もある**)．
