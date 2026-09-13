@@ -167,6 +167,32 @@ def with_dates(recs):
     return out
 
 
+def once_species(paras, gap=GAP):
+    """注記から「1 回出現の種」を取る
+
+    折込の注記画像には，地点情報と「1 回出現の種」が並んでいます．
+
+    **同じ (地点, 和名, 階層, 被度) が重なって出る**ので 1 件にします
+    (長い文を解析するため．2026-09-13 の実測で 50 件中 10 件・108 件中 10 件)．
+    **階層や被度が違えば別の行**として残します
+    (同じ種が高木層と低木層に出るのは紙面どおり)．
+    """
+    out, seen = [], set()
+    for text in pick(paras, kinds=('once',), gap=gap):
+        try:
+            got = parse_text.parse_once_species(text)
+        except Exception:
+            continue
+        for r in got:
+            key = (r.get('plot'), r.get('j_name'), r.get('s_name'),
+                   r.get('layer'), r.get('comp_raw'))
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(r)
+    return out
+
+
 # --- 表頭の表へ差し込む ----------------------------------------------------
 #
 # 表頭から取れる項目は紙面によって欠ける (**表頭の無い表もある**)．
