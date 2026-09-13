@@ -388,6 +388,28 @@ def _blank(v):
     return v is None or v != v or str(v).strip() == ''
 
 
+# 地名らしさ: 漢字か仮名が 2 字以上，またはラテン文字が 4 字以上
+_JA = re.compile(r'[\u3040-\u30ff\u3400-\u9fff]')
+_LATIN = re.compile(r'[A-Za-zÀ-ÿ]')
+_DIGIT = re.compile(r'\d')
+
+
+def usable_value(field, value):
+    """表頭から来たその値は，その項目として使えるか
+
+    2026-09-13 に工程を通して見つかった: kinki_002 の `locality` には
+    表頭から `26`・`20/N`・`nan/耳` が入っており (項目の取り違え)，
+    **「表頭は上書きしない」規則のせいで注記の正しい地名が入れなかった**．
+    **形をしていない値は空とみなし，注記で埋める**．
+    """
+    s = '' if _blank(value) else str(value).strip()
+    if not s or s.lower() in ('nan', 'none', '-', '−', '?', '？'):
+        return False
+    if field == 'date':
+        return bool(_DIGIT.search(s))
+    return len(_JA.findall(s)) >= 2 or len(_LATIN.findall(s)) >= 4
+
+
 def merge_plots(df_plot, recs):
     """注記から取った地点情報を `plot_table` へ差し込む
 
@@ -419,7 +441,7 @@ def merge_plots(df_plot, recs):
         # **地点の無い注記は全地点に当てる** (1 地点ぶんしか書かれていない紙面)
         rows = out.index if p is None else out.index[out['plot'] == p]
         for i in rows:
-            if _blank(out.at[i, field]):
+            if not usable_value(field, out.at[i, field]):
                 out.at[i, field] = value
     return out
 
