@@ -134,6 +134,20 @@ history; neither is included here.
 | 読み直し | `read.retry_cells` (組成のセルを NDLOCR-Lite で) | 既定で入る | `--no-retry` で切る．522 セルが読めた |
 | 装置 | `device.py`．`--device` → `COMPTEA_DEVICE` → 自動 | 自動 | 自動は torch，無ければ `nvidia-smi` |
 
+**外の読み手の入れ方** (どちらも**入っていなければ黙って飛ばす**ので，
+入れていない環境でも工程は動く)．
+
+| 読み手 | 置き場の決め方 | 入れ方 |
+|:--|:--|:--|
+| yomitoku (`yomi.py`) | `COMPTEA_YOMI_PY` → `yomi.DEFAULT_PYS` | `python -m venv --system-site-packages <置き場>/venv_yomi` して `pip install yomitoku==0.14.0`．**`--system-site-packages` は主環境の torch を使い回すため** (入れ直すと数 GB)．重みは初回の呼び出しで取りに行く |
+| NDLOCR-Lite (`ndl.py`) | `COMPTEA_NDLOCR` → `ndl.DEFAULT_DIRS` | repo を置いて `ordered-set` を足すだけ．**ONNX で GPU 不要** |
+
+**【正式導入 2026-09-14】yomitoku を決まった置き場に据えた**．それまでは
+セッションの一時ディレクトリに作った環境を `COMPTEA_YOMI_PY` で指しており，
+**ジョブを消すと読み手ごと消える**状態だった．`find_python()` が
+`DEFAULT_PYS` も見るようにしたので，**環境変数なしで使える**
+(環境変数は変わらず優先され，指した先が無ければ置き場へ落ちる)．
+
 #### 4. 後処理 (段階 3)
 
 ここは**版の選択ではなく段の重なり**で，分岐は `--no-notes`・`--keep-absent` だけ．

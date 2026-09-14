@@ -14,8 +14,19 @@ GOT = [[[10, 20, 60, 40], '通し番号', 0.92],
        [[10, 80, 20, 90], '   ', 0.1]]          # 空は捨てる
 
 
-def test_入っていなければ読まない(monkeypatch):
+def _no_yomi(monkeypatch):
+    """yomitoku がどこにも入っていない環境にする
+
+    2026-09-14 に**決まった置き場** (`DEFAULT_PYS`) を足したので，
+    環境変数を消すだけでは「入っていない」にならない
+    (入れてある PC ではそちらが見つかる)．
+    """
     monkeypatch.delenv(yomi.ENV_PY, raising=False)
+    monkeypatch.setattr(yomi, 'DEFAULT_PYS', ())
+
+
+def test_入っていなければ読まない(monkeypatch):
+    _no_yomi(monkeypatch)
     r = yomi.YomiReader()
     assert r.available() is False
     assert r.read_boxes(None, (0, 0, 10, 10)) == []
@@ -26,6 +37,39 @@ def test_環境変数で_python_を指せる(tmp_path, monkeypatch):
     p.write_text('', encoding='utf-8')
     monkeypatch.setenv(yomi.ENV_PY, str(p))
     assert yomi.find_python() == str(p)
+
+
+def test_決まった置き場にあれば環境変数は要らない(tmp_path, monkeypatch):
+    """2026-09-14 の正式導入．`DEFAULT_PYS` を見る"""
+    p = tmp_path / 'python.exe'
+    p.write_text('', encoding='utf-8')
+    monkeypatch.delenv(yomi.ENV_PY, raising=False)
+    monkeypatch.setattr(yomi, 'DEFAULT_PYS', (str(p),))
+    assert yomi.find_python() == str(p)
+
+
+def test_環境変数が決まった置き場より優先(tmp_path, monkeypatch):
+    env = tmp_path / 'env.exe'
+    std = tmp_path / 'std.exe'
+    for f in (env, std):
+        f.write_text('', encoding='utf-8')
+    monkeypatch.setenv(yomi.ENV_PY, str(env))
+    monkeypatch.setattr(yomi, 'DEFAULT_PYS', (str(std),))
+    assert yomi.find_python() == str(env)
+
+
+def test_指した先が無ければ置き場へ落ちる(tmp_path, monkeypatch):
+    """環境変数が**古い場所を指したまま**でも，置き場にあれば読める"""
+    std = tmp_path / 'std.exe'
+    std.write_text('', encoding='utf-8')
+    monkeypatch.setenv(yomi.ENV_PY, str(tmp_path / 'no_such.exe'))
+    monkeypatch.setattr(yomi, 'DEFAULT_PYS', (str(std),))
+    assert yomi.find_python() == str(std)
+
+
+def test_どこにも無ければ_None(monkeypatch):
+    _no_yomi(monkeypatch)
+    assert yomi.find_python() is None
 
 
 def test_読みの座標は元の画像に戻す(monkeypatch, tmp_path):
@@ -123,7 +167,7 @@ def test_段落も切り出しの座標を元に戻す(monkeypatch, tmp_path):
 
 
 def test_入っていなければ段落も読まない(monkeypatch):
-    monkeypatch.delenv(yomi.ENV_PY, raising=False)
+    _no_yomi(monkeypatch)
     assert yomi.YomiReader().read_paragraphs(None) == []
 
 
