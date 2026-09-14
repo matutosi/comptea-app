@@ -57,9 +57,19 @@ def usable_readers(readers):
 
 
 RETRY_CLASS = 'comp'
+# 読み直しに付ける余白 (px)．
+#
+# **広げる案は，測って取り下げた** (2026-09-14)．セル単位では効くように
+# 見える (余白 3 px で 0%・6 px で 14〜16%・10 px で 17〜18% が読める) のに，
+# **工程を通すと悪くなる**: 本体の要確認が 17_p1 で 114 → 132，
+# 05_p2 で 93 → 98 に増えた．広げた読みは `correct_comp` を通るが**隣の値**
+# のことがあり，そこから列の種類の判定 (`column_head_kinds`・
+# `constancy_share`) が動いて，他のセルが要確認に回る．
+# **セル単位の「読めた」と，工程の要確認の数は別物**．
+RETRY_PAD = 3
 
 
-def retry_cells(img, df, reader, cls=RETRY_CLASS, pad=3):
+def retry_cells(img, df, reader, cls=RETRY_CLASS, pad=RETRY_PAD):
     """**読めなかった組成のセルを，まとめて読み直す**
 
     2026-09-14 の実測: 読めなかったセルは **NDLOCR-Lite がよく読む**
