@@ -197,6 +197,116 @@ class TableFailed(Exception):
         self.warnings = list(warnings)
 
 
+def _clean_detections(image, df_det, work):
+    """検出から**組んではいけないもの**を外し，足りないものを黒画素から補う
+
+    `build_one` から切り出した段 (2026-09-14．中身は変えていない)．
+
+    Returns:
+        (検出, 警告のリスト)
+    """
+    # 表頭の外に散った項目行は，紙面全体の検出でも捨てる．残すと組成部の
+    # 行が表頭の値として二重に切られ，表頭の帯が全高に広がって
+    # 階層の列の判定(表頭が空)まで壊れる(s01115_18_p2．2026-09-04)
+    from comptea import table_split
+    from PIL import Image
+    df_det, stray_warn = table_split.drop_stray_plot_rows(df_det, heads=False)
+    # 表頭の中に出た種名の列は捨てる(段を 1 つ増やし，本体から和名が消える)
+    df_det, n_names = table_split.drop_stray_name_cols(df_det)
+    if n_names:
+        stray_warn.append(
+            f'表頭の中にあった種名の列の検出 {n_names} 本を捨てた'
+            '(凡例や表題の字を種名の列と見た誤検出．段が余分に増える)．')
+    # 種名の列が 1 つも検出されなければ，組成部の左の黒画素の帯から補う
+    # (s01115_08_p1・08_p2・18_p2．2026-09-04)
+    from comptea import name_col
+    df_det, name_warn = name_col.name_columns_from_ink(Image.open(image), df_det)
+    stray_warn += name_warn
+    df_det.to_csv(work / 'detect.csv', index=False)
+    # 1 調査区を左右 2 段に折り返した紙面では，地点の列が 1 本しかないので `col` の
+    # 検出が育たず，被度が丸ごと落ちる．段ごとに階層と被度の列を黒画素から作る
+    # (対策 G．2026-09-09)
+    from comptea import one_plot
+    df_det, one_warn = one_plot.columns_from_ink(Image.open(image), df_det)
+    stray_warn += one_warn
+
+    return df_det, stray_warn
+
+
+def _polish_grid(image, df_det, df_loc, args):
+    """できた格子の**列と行を仕上げ**，検査して，座標の傾きを直す
+
+    `build_one` から切り出した段 (2026-09-14．中身は変えていない)．
+    **順序に意味がある**: 列の組み直し → 検査 → 傾き → 拍の追従 →
+    和名と階層の境 → 階層の幅 → 行の種類 → 表頭の値の傾き．
+
+    Returns:
+        (格子, 警告のリスト)
+    """
+    from comptea import checks
+    from comptea import col_edges
+    from comptea import layer_col
+    from PIL import Image
+
+    warnings = []
+    # 行が決まったあとに，列の境だけを印字の隙間から組み直す(良いときだけ)
+    df_loc, edge_warn = col_edges.fix_column_edges(Image.open(image), df_loc)
+    warnings += edge_warn
+    # そのうえで，境が字を割らない位置へ数 px ずらす(列の数は変えない)
+    df_loc, cross_warn = col_edges.fix_edges_by_crossings(Image.open(image), df_loc)
+    warnings += cross_warn
+    # 表頭の列を本体に合わせる(本体で捨てた列が表頭に残ると，地点がずれる)
+    df_loc, align_warn = col_edges.align_header_columns(df_loc)
+    warnings += align_warn
+    warnings += checks.check_source_image(image, df_loc)
+    warnings += checks.check_grid_columns(image, df_loc)
+    # **行も測る**．列だけを見ていたので，行が9割落ちても黙って通っていた
+    warnings += checks.check_grid_rows(image, df_loc, df_det=df_det)
+    # 行の数・列の数が合っていても壊れている形がある(2026-09-03・04)
+    warnings += checks.check_row_heights(df_loc)
+    warnings += checks.check_header_rows(df_loc)
+    # **最後に，紙面の傾きをセルの座標だけで直す**(2026-09-09)．`deskew_page` は
+    # 画像を回して検出し直すため 146 表中 5 表にしか効かず，0.1〜0.8° が残って
+    # 組成部の左端の列でセルが切れていた(05_p2 は 22%)．格子と検査は水平のまま
+    # 済ませ，書き出す直前に各セルの y を x に応じてずらす(行番号は変えない)
+    from comptea import row_skew
+    df_loc, skew_warn = row_skew.fix_skew(Image.open(image), df_loc)
+    warnings += skew_warn
+    # 行を「単位の連なり」として追う (案 e の段階 1．2026-09-09)．拍で行数を検算し，
+    # 学名・和名・階層の列ごとに y のずれ (タイプ打ちの文字と「・」の 10 px) を中央値で
+    # 吸収する．行番号は共有のまま．傾きを除いた残りだけを測るので row_skew の後
+    from comptea import row_track
+    warnings += row_track.check_beats(Image.open(image), df_loc)
+    if not getattr(args, 'no_track', False):
+        df_loc, track_warn = row_track.fix_offsets(Image.open(image), df_loc)
+        warnings += track_warn
+    # 和名と階層の境を 1 本にする (2026-09-09 ユーザ提案)．階層は和名の右にあり，
+    # いまは 2 本の境が別々に決まるので字を割る．階層が無い段では和名の右端を字まで広げる
+    df_loc, nl_warn = col_edges.fix_name_layer_edge(Image.open(image), df_loc)
+    warnings += nl_warn
+
+    # 階層の列の幅を，記号の黒画素に合わせて決め直す (対策 E．2026-09-09)．
+    # 階層の列は地点の列の幅を引き継ぐので，記号が枠をはみ出す段がある．
+    # 直すのは**いまはみ出している段だけ** (全段に当てると良い段と悪い段が釣り合う)
+    df_loc, lw_warn = layer_col.refit_layer_width(Image.open(image), df_loc)
+    warnings += lw_warn
+
+    # 行の種類 (見出し・学名だけの行・凡例) を見分けて note に付ける (案 e の段階 3)．
+    # **行は落とさない**．落とすと真値との一致 (行の recall 1.000) が下がる
+    from comptea import header_lines, row_kinds
+    df_loc, kind_warn = row_kinds.mark_rows(Image.open(image), df_loc)
+    warnings += kind_warn
+
+    # **表頭の値の帯を，表頭で測った傾きで列ごとに上下させる** (2026-09-10)．
+    # 帯は表頭の領域の中央の座標で作ってあり，`row_skew` は表頭の帯には掛けない
+    # (組成部の傾きとは 2〜12 px 違う)．座標を変える処理の最後に置く
+    # (途中に置くと `align_header_columns` が列ごとの y を別の帯と数える)
+    df_loc, hs_warn = header_lines.shear_header_values(Image.open(image), df_loc)
+    warnings += hs_warn
+
+    return df_loc, warnings
+
+
 def build_one(image, df_det, work, args, table_no=None, n_tables=1):
     """表1つぶんの格子を作り，成果物を work へ書く
 
@@ -228,34 +338,9 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
             'この画像には表頭も種名の列も検出されない(切れ端とみなす)．'
             '表題や凡例だけの帯なら，これで正しい．'
             '表が写っているなら --conf を下げて試す', [])
-    # 表頭の外に散った項目行は，紙面全体の検出でも捨てる．残すと組成部の
-    # 行が表頭の値として二重に切られ，表頭の帯が全高に広がって
-    # 階層の列の判定(表頭が空)まで壊れる(s01115_18_p2．2026-09-04)
     from comptea import body_rows
-    from comptea import checks
-    from comptea import col_edges
-    from comptea import strips
-    from comptea import table_split
-    df_det, stray_warn = table_split.drop_stray_plot_rows(df_det, heads=False)
-    # 表頭の中に出た種名の列は捨てる(段を 1 つ増やし，本体から和名が消える)
-    df_det, n_names = table_split.drop_stray_name_cols(df_det)
-    if n_names:
-        stray_warn.append(
-            f'表頭の中にあった種名の列の検出 {n_names} 本を捨てた'
-            '(凡例や表題の字を種名の列と見た誤検出．段が余分に増える)．')
-    # 種名の列が 1 つも検出されなければ，組成部の左の黒画素の帯から補う
-    # (s01115_08_p1・08_p2・18_p2．2026-09-04)
-    from comptea import name_col
-    df_det, name_warn = name_col.name_columns_from_ink(Image.open(image), df_det)
-    stray_warn += name_warn
-    df_det.to_csv(work / 'detect.csv', index=False)
-    # 1 調査区を左右 2 段に折り返した紙面では，地点の列が 1 本しかないので `col` の
-    # 検出が育たず，被度が丸ごと落ちる．段ごとに階層と被度の列を黒画素から作る
-    # (対策 G．2026-09-09)
-    from comptea import one_plot
-    df_det, one_warn = one_plot.columns_from_ink(Image.open(image), df_det)
-    stray_warn += one_warn
 
+    df_det, stray_warn = _clean_detections(image, df_det, work)
     df_loc = locate.locate_items(
         df_det, threth_col=args.threth_col, threth_row=args.threth_row,
         image=image, snap=not args.no_snap)
@@ -318,61 +403,8 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
             f'右の段の下端が左の段より短かったので，左の段の行を写して {n_align} 行を足した'
             '(折り返した組み方では左右の行が同じ高さに並ぶ)．'
             '字の無い行は空のまま読まれる．段階1で右の段の下端を目で確かめる．')
-    # 行が決まったあとに，列の境だけを印字の隙間から組み直す(良いときだけ)
-    df_loc, edge_warn = col_edges.fix_column_edges(Image.open(image), df_loc)
-    warnings += edge_warn
-    # そのうえで，境が字を割らない位置へ数 px ずらす(列の数は変えない)
-    df_loc, cross_warn = col_edges.fix_edges_by_crossings(Image.open(image), df_loc)
-    warnings += cross_warn
-    # 表頭の列を本体に合わせる(本体で捨てた列が表頭に残ると，地点がずれる)
-    df_loc, align_warn = col_edges.align_header_columns(df_loc)
-    warnings += align_warn
-    warnings += checks.check_source_image(image, df_loc)
-    warnings += checks.check_grid_columns(image, df_loc)
-    # **行も測る**．列だけを見ていたので，行が9割落ちても黙って通っていた
-    warnings += checks.check_grid_rows(image, df_loc, df_det=df_det)
-    # 行の数・列の数が合っていても壊れている形がある(2026-09-03・04)
-    warnings += checks.check_row_heights(df_loc)
-    warnings += checks.check_header_rows(df_loc)
-    # **最後に，紙面の傾きをセルの座標だけで直す**(2026-09-09)．`deskew_page` は
-    # 画像を回して検出し直すため 146 表中 5 表にしか効かず，0.1〜0.8° が残って
-    # 組成部の左端の列でセルが切れていた(05_p2 は 22%)．格子と検査は水平のまま
-    # 済ませ，書き出す直前に各セルの y を x に応じてずらす(行番号は変えない)
-    from comptea import row_skew
-    df_loc, skew_warn = row_skew.fix_skew(Image.open(image), df_loc)
-    warnings += skew_warn
-    # 行を「単位の連なり」として追う (案 e の段階 1．2026-09-09)．拍で行数を検算し，
-    # 学名・和名・階層の列ごとに y のずれ (タイプ打ちの文字と「・」の 10 px) を中央値で
-    # 吸収する．行番号は共有のまま．傾きを除いた残りだけを測るので row_skew の後
-    from comptea import row_track
-    warnings += row_track.check_beats(Image.open(image), df_loc)
-    if not getattr(args, 'no_track', False):
-        df_loc, track_warn = row_track.fix_offsets(Image.open(image), df_loc)
-        warnings += track_warn
-    # 和名と階層の境を 1 本にする (2026-09-09 ユーザ提案)．階層は和名の右にあり，
-    # いまは 2 本の境が別々に決まるので字を割る．階層が無い段では和名の右端を字まで広げる
-    df_loc, nl_warn = col_edges.fix_name_layer_edge(Image.open(image), df_loc)
-    warnings += nl_warn
-
-    # 階層の列の幅を，記号の黒画素に合わせて決め直す (対策 E．2026-09-09)．
-    # 階層の列は地点の列の幅を引き継ぐので，記号が枠をはみ出す段がある．
-    # 直すのは**いまはみ出している段だけ** (全段に当てると良い段と悪い段が釣り合う)
-    df_loc, lw_warn = layer_col.refit_layer_width(Image.open(image), df_loc)
-    warnings += lw_warn
-
-    # 行の種類 (見出し・学名だけの行・凡例) を見分けて note に付ける (案 e の段階 3)．
-    # **行は落とさない**．落とすと真値との一致 (行の recall 1.000) が下がる
-    from comptea import header_lines, row_kinds
-    df_loc, kind_warn = row_kinds.mark_rows(Image.open(image), df_loc)
-    warnings += kind_warn
-
-    # **表頭の値の帯を，表頭で測った傾きで列ごとに上下させる** (2026-09-10)．
-    # 帯は表頭の領域の中央の座標で作ってあり，`row_skew` は表頭の帯には掛けない
-    # (組成部の傾きとは 2〜12 px 違う)．座標を変える処理の最後に置く
-    # (途中に置くと `align_header_columns` が列ごとの y を別の帯と数える)
-    df_loc, hs_warn = header_lines.shear_header_values(Image.open(image), df_loc)
-    warnings += hs_warn
-
+    df_loc, polish_warn = _polish_grid(image, df_det, df_loc, args)
+    warnings += polish_warn
     # 段階2で「このセルを読み直す」と指せるように通し番号を振る
     df_loc.insert(0, 'cell_id', range(1, len(df_loc) + 1))
     df_loc.to_csv(work / 'located.csv', index=False)
