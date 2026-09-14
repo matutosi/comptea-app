@@ -523,54 +523,21 @@ def _guess_header_col(dark, left, value_x, bands, pitch):
     return float(left), float(value_x)
 
 
-def _locate_block(df: pd.DataFrame, source_image: str, img, max_shift_ratio: float,
-                  threth_col: float = 0.8, threth_row: float = 0.8, x_max=None):
-    """
-    1つの段について格子を作る(locate_itemsから段ごとに呼ぶ)
+def _snap_block_edges(df, source_image, img, y_edges, y_interp,
+                      x_edges, x_interp, n_rows, ranges, x_max,
+                      max_shift_ratio, warnings):
+    """行・列の境を**文字の谷へずらし**，端の外の行と列を足す
 
-    重複の除去は**段に分けたあと**に行う．
-    行の重複判定はyの重なりだけを見てxを見ないため，
-    段をまたいで一括でかけると，右の段の行が左の段の行の重複として消える．
-
-    Args:
-        x_max: 右端の外の列を足すときの限界 (次の段の左端・画像の右端)
+    `_locate_block` から切り出した段 (2026-09-14．中身は変えていない)．
+    画像が無いときは何もしない (`img` は横の範囲が決められないときも None になる)．
 
     Returns:
-        (DataFrame または None, warningsのリスト)
+        (y_edges, y_interp, x_edges, x_interp, n_rows,
+         y_snapped, y_unresolved, x_snapped, x_unresolved)
     """
-    df = remove_dup_ranges(df, threth_col=threth_col, threth_row=threth_row)
-    class_spec  = "species_col"
-    class_layer = "layer"
-    class_cols  = "col"
-    class_rows  = "row"
-    class_sname = "sname"
-    class_comp  = "comp"
-    warnings = []
-    # itemごとにxかyの範囲を抽出(検出が無いときはNone)
-    spec_x_range  = locate_x_range(df, source_image, obj_name=class_spec)
-    sname_x_range = locate_x_range(df, source_image, obj_name=class_sname)
-    layer_x_range = locate_x_range(df, source_image, obj_name=class_layer)
-    comp_y_range  = locate_y_range(df, source_image, obj_name=class_rows)
-    # rowが無いと行の位置が決まらず，何も作れない
-    if comp_y_range is None:
-        warnings.append(
-            f"'{class_rows}' が1件も検出されなかったため，行の位置を決められない．"
-            "検出の閾値(conf)を下げるか，画像の前処理を見直す．")
-        return None, warnings
-    # 検出そのものから行・列の境界を組み立てる
-    y_edges, y_interp, y_warns = locate_edges(df, source_image, obj_name=class_rows, axis='y')
-    x_edges, x_interp, x_warns = locate_edges(df, source_image, obj_name=class_cols, axis='x')
-    warnings.extend(y_warns)
-    warnings.extend(x_warns)
-    if y_edges is None:
-        warnings.append(
-            f"'{class_rows}' が1件も検出されず，行の位置を決められない．"
-            '何も出力しない．')
-        return None, warnings
-    n_rows = len(y_edges) - 1
+    spec_x_range, sname_x_range, layer_x_range = ranges
     y_snapped = y_unresolved = None
     x_snapped = x_unresolved = None
-    # 文字に重なった境界を谷へずらす
     if img is not None:
         # 行の境界は表全体を横切るので，表側も含めた幅で見る
         attr_ranges = [r for r in [spec_x_range, sname_x_range, layer_x_range]
@@ -660,6 +627,61 @@ def _locate_block(df: pd.DataFrame, source_image: str, img, max_shift_ratio: flo
                 warnings.append(
                     f'列の境 {n_snap} 本を，印字の地点の隙間へ寄せた'
                     '(内挿の刻みがずれて積もっていた)．段階1で列の対応を目で確かめる．')
+    return (y_edges, y_interp, x_edges, x_interp, n_rows,
+            y_snapped, y_unresolved, x_snapped, x_unresolved)
+
+
+def _locate_block(df: pd.DataFrame, source_image: str, img, max_shift_ratio: float,
+                  threth_col: float = 0.8, threth_row: float = 0.8, x_max=None):
+    """
+    1つの段について格子を作る(locate_itemsから段ごとに呼ぶ)
+
+    重複の除去は**段に分けたあと**に行う．
+    行の重複判定はyの重なりだけを見てxを見ないため，
+    段をまたいで一括でかけると，右の段の行が左の段の行の重複として消える．
+
+    Args:
+        x_max: 右端の外の列を足すときの限界 (次の段の左端・画像の右端)
+
+    Returns:
+        (DataFrame または None, warningsのリスト)
+    """
+    df = remove_dup_ranges(df, threth_col=threth_col, threth_row=threth_row)
+    class_spec  = "species_col"
+    class_layer = "layer"
+    class_cols  = "col"
+    class_rows  = "row"
+    class_sname = "sname"
+    class_comp  = "comp"
+    warnings = []
+    # itemごとにxかyの範囲を抽出(検出が無いときはNone)
+    spec_x_range  = locate_x_range(df, source_image, obj_name=class_spec)
+    sname_x_range = locate_x_range(df, source_image, obj_name=class_sname)
+    layer_x_range = locate_x_range(df, source_image, obj_name=class_layer)
+    comp_y_range  = locate_y_range(df, source_image, obj_name=class_rows)
+    # rowが無いと行の位置が決まらず，何も作れない
+    if comp_y_range is None:
+        warnings.append(
+            f"'{class_rows}' が1件も検出されなかったため，行の位置を決められない．"
+            "検出の閾値(conf)を下げるか，画像の前処理を見直す．")
+        return None, warnings
+    # 検出そのものから行・列の境界を組み立てる
+    y_edges, y_interp, y_warns = locate_edges(df, source_image, obj_name=class_rows, axis='y')
+    x_edges, x_interp, x_warns = locate_edges(df, source_image, obj_name=class_cols, axis='x')
+    warnings.extend(y_warns)
+    warnings.extend(x_warns)
+    if y_edges is None:
+        warnings.append(
+            f"'{class_rows}' が1件も検出されず，行の位置を決められない．"
+            '何も出力しない．')
+        return None, warnings
+    n_rows = len(y_edges) - 1
+    # 文字に重なった境界を谷へずらす
+    (y_edges, y_interp, x_edges, x_interp, n_rows,
+     y_snapped, y_unresolved, x_snapped, x_unresolved) = _snap_block_edges(
+        df, source_image, img, y_edges, y_interp, x_edges, x_interp, n_rows,
+        (spec_x_range, sname_x_range, layer_x_range), x_max,
+        max_shift_ratio, warnings)
     if y_interp.any():
         warnings.append(
             f'行のうち {int(y_interp.sum())} 行は検出されず，前後の間隔から内挿した'
