@@ -46,6 +46,62 @@ history; neither is included here.
    they OCR more reliably
 9. **Table assembly** (`comp_table.py`): Builds the long-format table — one row per plot × species
 
+### 段ごとの版 (どれが正で，どれが控えか)
+
+同じ仕事に**複数の実装**がある段がある (検出器を使うもの・使わないもの，幾何で
+決めるもの・OCR の内容で決めるもの)．2026-09-14 に棚卸しした一覧．
+**「工程」の列が `正` のものだけが `cli/run_pipeline.py` から呼ばれる**．
+`控え` は import されていない (的だけがある)．
+
+#### 1. 折込の切り分け (A0 の紙面 → 表ごとの画像)
+
+| 版 | 実体 | 工程 | 実測の水準 |
+|:--|:--|:--|:--|
+| 幾何 (空白の帯 + 黒画素の塊) | `split_sheet.find_tables`・`blob_boxes`．`split_sheet.py` 自身が CLI を持ち，工程の**前**に回す | **正** | 23 枚中 **21 枚**で表の数が真値と一致 |
+| 検出の手掛かりで分ける | `blocks.split_tables` (縦に重なる表)・`table_split.split_side_by_side` (左右に並ぶ表)・`grid.resplit_parts` (部分画像に切り出してやり直す) | **正** | 表と表の仕切りが 23〜50 px の紙面は空白では切れない．幾何のあとに掛ける |
+| 目印 (OCR) から組み立てる | `table_find.find_by_marks`・`columns`・`count_tables`・`structure_boxes`・`split_between_heads`・`recheck_boxes` | 控え (**検算**) | 箱 73 のうち**表頭がちょうど 1 つ入る箱 69**．ただし 23 枚中 11 枚に端から端まで通る隙間が無く，**幾何を置き換えられない** (2026-09-14 の結論) |
+| 外部のレイアウト解析 | yomitoku の `LayoutAnalyzer`・DocLayout-YOLO | 不採用 | 折込は 12 枚・10 枚で自作に劣る (**本のページは 73・74 枚で勝つ**)．コードは置いていない |
+| 注記の切り出し | `split_sheet.note_boxes` → `<stem>_p<i>_note.png` | **正** | 表の画像には**含めない** (高さが変わると検出の縮尺が動く) |
+
+#### 2. 格子の作成
+
+| 版 | 実体 | 工程 | 備考 |
+|:--|:--|:--|:--|
+| 検出器 (YOLO) から | `detect.py` → `locate.py` | **正** | 学習データ 121 件はすべて活字．折込は 0 件 |
+| 検出器を使わない | `noyolo.py` (`guess_parts`・`guess_parts_v2`) | 控え | 工程では未使用．`table_find` が `guess_pitch` だけ借りている |
+| 1 調査区の 2 段組 | `one_plot.py` | **正**の分岐 | 段ごとに発動 (kinki_001・047・053・077 の 4 表) |
+| 地点が多く行が取れない表 | `strips.py` (短冊に分けて検出し直す) | **正**の分岐 | 手元の本のページ 88 枚は通らない |
+| 種名の列が検出されないとき | `name_col.py` (組成部の左の黒画素の帯) | **正**の補い | 検出が 1 件でもあれば何もしない |
+| 表頭の縦の境 | 検出枠 `header_col` の右端 → **`header_cols.py` (黒画素)** | **正** | 検出から黒画素へ移した例．境が字を横切る行 1016 → 167 |
+| 表頭の行 | OCR の箱 (`header_lines`) ／ 投影 (`locate._header_bands_from_names`) | **正**．箱が 3 行未満なら投影へ**戻す** | 対策 A |
+| 組成部の行 | 検出の内挿 (`locate.locate_edges`) → 黒画素の格子 (`row_heights`・`body_rows.lattice_rows`) → 列ごとのずれの吸収 (`row_track`) の 3 段重ね | **正** | `--no-snap`・`--no-track` で後ろ 2 段を切れる |
+
+#### 3. 読み取り (段階 2)
+
+`--reader` で選ぶ．**入れていない読み手は黙って飛ばす**ので，どの環境でも動く．
+
+| 版 | 実体 | 既定 | 備考 |
+|:--|:--|:--|:--|
+| `easyocr` | `ocr.py`．セルを 1 つずつ読む | **既定** | GPU があれば速い |
+| `multi` | `read_region.py` が領域を 1 回読み，`ndl.py` (NDLOCR-Lite．**GPU 不要**)・`yomi.py` (yomitoku) を重ねる．クラスごとの順で質の通る読みを採る | | 辞書に当たるセルが 和名 277 → **428**，学名 462 → **548** |
+| `ai`・`both` | 段階 2 で AI が読む | | |
+| 折込の分割読み | `tiles.py` (A3〜A4 に分けて読み，原点を足して戻す) | `multi` の中で自動 | 辞書に当たる語が 200 倍 |
+| 読み直し | `read.retry_cells` (組成のセルを NDLOCR-Lite で) | 既定で入る | `--no-retry` で切る．522 セルが読めた |
+| 装置 | `device.py`．`--device` → `COMPTEA_DEVICE` → 自動 | 自動 | 自動は torch，無ければ `nvidia-smi` |
+
+#### 4. 後処理 (段階 3)
+
+ここは**版の選択ではなく段の重なり**で，分岐は `--no-notes`・`--keep-absent` だけ．
+
+`correct_text` (読みの補正) → `row_kinds` (見出し・流し込みの印) →
+`comp_table` (縦持ち・`mark_flow`) → `plot_table` (表頭から地点の表) →
+`site_notes` (**表の下の注記**から地点情報を差し込む．読みは yomitoku．
+`<画像>.paras.json` に取り置く)．**表頭の値は上書きせず，空いた所だけ埋める**．
+
+#### 5. 使われていないもの
+
+- `crop_image.py` — repo のどこからも参照されていない (的も無い)．
+
 ### Object classes detected
 
 The 12 classes the detector was trained on (the labelled dataset itself is not
