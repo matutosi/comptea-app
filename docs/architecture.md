@@ -100,7 +100,9 @@ history; neither is included here.
 
 #### 5. 使われていないもの
 
-- `crop_image.py` — repo のどこからも参照されていない (的も無い)．
+いまのところ無い．**`crop_image.py` は 2026-09-14 に消した** (repo のどこからも
+参照されておらず，中身も `"images/example.jpg"` を直に書いた初期の下書きだった)．
+セルの切り出しは `cli/crop_cells.py` の `crop()` が行う．
 
 ### Object classes detected
 
@@ -491,7 +493,6 @@ shift.
   existing train/val split is preserved so before/after comparisons stay honest
 - `util_file.py`: File operations (timestamped names, zip, directory management)
 - `preprocess_image.py` / `preprocess_image_web.py`: Image preprocessing (deskew, grayscale, binarization, noise removal)
-- `crop_image.py`: Cuts the located regions out of the page image
 - `draw_rect.py`: Draws the boxes, colouring each by its `note` (`on_text` red /
   `snapped` orange / `interpolated` gold — darkest first, most worth looking at first)
 - `progress.py`: Redirects stdout into a Streamlit widget so long runs show progress
