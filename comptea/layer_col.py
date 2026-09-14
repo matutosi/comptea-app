@@ -135,54 +135,15 @@ def _merge_slivers(out, dark, body_min, sliver=SLIVER_RATIO):
     return out, warn
 
 
-def fix_columns(img, df_loc, ink_max=HEADER_INK_MAX, min_cols=MIN_COLS,
-                overlap=NAME_OVERLAP, body_min=BODY_INK_MIN):
-    """組成部の左端・右端に混ざった，組成部でない列を整理する(2026-09-03)
+def _column_ink(dark, cols, comp, head):
+    """列ごとの黒画素を，表頭と本体で測る
 
-    折り込み(s01115)の 66 表で，地点数より列が 2 つ多い表が 8 つあった．
-    実物を見ると，どれも**組成部の左端**に次のいずれかが付いていた．
-
-    - 種名の領域の上に出た `col`(15_p5 は 学名+和名 の 965 px が 1 列)．
-      **丸ごと捨ててはいけない**．その右端 1 列ぶんは地点 1 だった
-      (15_p5 で地点 1 が消えた)．右端を他の列の幅だけ残す
-    - 種名と組成部のあいだの**空の隙間**(05_p2・21_p4．表頭も本体も空)
-    - 階層の列(表頭は空だが本体に S・K の字がある．`find_layer_column()` は
-      先頭の 1 列しか見ないので，手前に空の列があると届かなかった)
-    - 幅 16-28 px の**細い切れ端**(05_p1_t2)．`_merge_slivers()` で先に片づける
-
-    **右端**には，表頭が空の**群の要約の列**(常在度．10_p2 の「調査区数 12」
-    「(30)」「II(+-2)」)が付くことがある．通し番号が無いだけの実在の列だが，
-    地点として下流に流すと常在度の文字列が被度になる．`summary` に変えて外す．
-
-    先頭から順に見て，種名・階層の箱と重なる列は右端を残し，
-    表頭が空(他の列の `ink_max` 未満)なら，本体も空の列は捨て，
-    字のある列は `layer` にする．表頭に字がある列に当たったら止める．
-    **階層の列は 1 本だけ**(字がいちばん多い列)．
+    `fix_columns` から切り出した段 (2026-09-14．中身は変えていない)．
 
     Returns:
-        (整理した格子, 警告のリスト)
+        (hy1, hy2, 表頭があるか, 列の幅, 本体の黒画素, 表頭の黒画素,
+         罫線を消した表頭の写し, その左端)
     """
-    comp = df_loc[df_loc['obj_name'] == 'comp']
-    if comp.empty or comp['col'].nunique() < min_cols:
-        return df_loc, []
-    dark = ink.binarize(img)
-    out, warnings = _merge_slivers(df_loc.copy(), dark, body_min)
-
-    comp = out[out['obj_name'] == 'comp']
-    head = out[out['obj_name'] == 'header_value']
-    cols = _col_table(comp)
-    names = out[out['obj_name'].isin(('sname', 'species_col', 'header_col'))]
-    spans = [(float(a), float(b)) for a, b in
-             names.groupby('col').agg(x1=('x1', 'min'), x2=('x2', 'max')).itertuples(index=False)] \
-        if len(names) else []
-    name_right = max([b for _, b in spans], default=0.0)
-    # **階層の検出枠は別に持つ** (2026-09-10 ユーザ目視 10 回目: 05_p2 は枠 1423-1637 が
-    # 組成の 1 列目 (1546-1637) を飲み込んでおり，種名と同じ扱いで捨てると 1 列目が
-    # 消える)．枠に重なる列でも**表頭に字があれば地点の列**として残し，枠の右端を
-    # その列の左端まで縮める
-    lay_cells = out[out['obj_name'] == 'layer']
-    lay_span = ((float(lay_cells['x1'].min()), float(lay_cells['x2'].max()))
-                if len(lay_cells) else None)
     hy1, hy2 = (float(head['y1'].min()), float(head['y2'].max())) if len(head) else (0, 0)
     # **表頭の黒画素は組成部より上だけで測る** (2026-09-10)．表頭の帯は組成部の
     # 最初の行に食い込むことがあり (kinki_007 は 57 px)，そこに階層の記号が入ると
@@ -195,7 +156,12 @@ def fix_columns(img, df_loc, ink_max=HEADER_INK_MAX, min_cols=MIN_COLS,
     # **表頭は罫線を消してから測る** (2026-09-10)．群落記号の枠の横線が帯の中に
     # 何本も入り，全部の列の黒画素を水増しする (22_p2 は表頭の上端を伸ばしたとき，
     # 右端の常在度の列が「表頭が空でない」と見えて落ちた)
-    hb = None
+    # **表頭が無いときも `hc`・`hx1` を返す** (切り出しのときに足した．2026-09-14)．
+    # 元は `if have_head:` の中でしか作らず，表頭の無い表 (11_p1 の総合表) では
+    # 変数そのものが無かった．使う側は `have_head` で守られているので，
+    # ここで None にしておけば中身は変わらない
+    hb = hc = None
+    hx1 = 0
     if have_head:
         pitch_h = float(np.median(comp['y2'] - comp['y1'])) if len(comp) else 0.0
         hx1, hx2 = int(cols['x1'].min()), int(cols['x2'].max())
@@ -207,6 +173,47 @@ def fix_columns(img, df_loc, ink_max=HEADER_INK_MAX, min_cols=MIN_COLS,
         else:
             hb = np.array([ink.text_ratio(dark, hy1, hy2, r.x1, r.x2)
                            for r in cols.itertuples()])
+    return hy1, hy2, have_head, widths, body, hb, hc, hx1
+
+
+def _mark_summary_columns(out, cols, hb, dropped, layered, n, ink_max):
+    """右端の「表頭が空の列」を，群の要約の列 (常在度など) として外す
+
+    `fix_columns` から切り出した段 (2026-09-14．中身は変えていない)．
+
+    Returns:
+        (格子, 要約にした列の番号)
+    """
+    # 右端: 表頭が空の列は群の要約の列
+    summary = []
+    if hb is not None:
+        for k in range(n - 1, max(n - 1 - MAX_LEADING, 0), -1):
+            c = cols.index[k]
+            if int(c) in dropped or int(c) in layered:
+                break
+            rest_head = float(np.median(hb[:k])) if k > 0 else 0.0
+            if rest_head <= 0 or hb[k] / rest_head >= ink_max:
+                break
+            hit = (out['obj_name'] == 'comp') & (out['col'] == c)
+            if not hit.any():
+                break
+            out.loc[hit, 'obj_name'] = 'summary'
+            summary.append(int(c))
+
+    return out, summary
+
+
+def _scan_left_columns(out, cols, dark, spans, name_right, lay_span,
+                       widths, body, hb, hc, hx1, hy1, hy2, have_head,
+                       ink_max, overlap, body_min):
+    """組成部の左端から順に見て，捨てる・縮める・階層にする を決める
+
+    `fix_columns` から切り出した段 (2026-09-14．中身は変えていない)．
+    **表頭に字がある列に当たったら止める** (そこから先は地点の列)．
+
+    Returns:
+        (格子, 捨てた列, 階層にした列, 縮めた列, 2 つに割った列)
+    """
     dropped, layered, trimmed = [], [], []
     split_col = None
     n = len(cols)
@@ -271,6 +278,63 @@ def fix_columns(img, df_loc, ink_max=HEADER_INK_MAX, min_cols=MIN_COLS,
             layered.append((int(c), float(body[k])))
             continue
         break
+    return out, dropped, layered, trimmed, split_col
+
+
+def fix_columns(img, df_loc, ink_max=HEADER_INK_MAX, min_cols=MIN_COLS,
+                overlap=NAME_OVERLAP, body_min=BODY_INK_MIN):
+    """組成部の左端・右端に混ざった，組成部でない列を整理する(2026-09-03)
+
+    折り込み(s01115)の 66 表で，地点数より列が 2 つ多い表が 8 つあった．
+    実物を見ると，どれも**組成部の左端**に次のいずれかが付いていた．
+
+    - 種名の領域の上に出た `col`(15_p5 は 学名+和名 の 965 px が 1 列)．
+      **丸ごと捨ててはいけない**．その右端 1 列ぶんは地点 1 だった
+      (15_p5 で地点 1 が消えた)．右端を他の列の幅だけ残す
+    - 種名と組成部のあいだの**空の隙間**(05_p2・21_p4．表頭も本体も空)
+    - 階層の列(表頭は空だが本体に S・K の字がある．`find_layer_column()` は
+      先頭の 1 列しか見ないので，手前に空の列があると届かなかった)
+    - 幅 16-28 px の**細い切れ端**(05_p1_t2)．`_merge_slivers()` で先に片づける
+
+    **右端**には，表頭が空の**群の要約の列**(常在度．10_p2 の「調査区数 12」
+    「(30)」「II(+-2)」)が付くことがある．通し番号が無いだけの実在の列だが，
+    地点として下流に流すと常在度の文字列が被度になる．`summary` に変えて外す．
+
+    先頭から順に見て，種名・階層の箱と重なる列は右端を残し，
+    表頭が空(他の列の `ink_max` 未満)なら，本体も空の列は捨て，
+    字のある列は `layer` にする．表頭に字がある列に当たったら止める．
+    **階層の列は 1 本だけ**(字がいちばん多い列)．
+
+    Returns:
+        (整理した格子, 警告のリスト)
+    """
+    comp = df_loc[df_loc['obj_name'] == 'comp']
+    if comp.empty or comp['col'].nunique() < min_cols:
+        return df_loc, []
+    dark = ink.binarize(img)
+    out, warnings = _merge_slivers(df_loc.copy(), dark, body_min)
+
+    comp = out[out['obj_name'] == 'comp']
+    head = out[out['obj_name'] == 'header_value']
+    cols = _col_table(comp)
+    names = out[out['obj_name'].isin(('sname', 'species_col', 'header_col'))]
+    spans = [(float(a), float(b)) for a, b in
+             names.groupby('col').agg(x1=('x1', 'min'), x2=('x2', 'max')).itertuples(index=False)] \
+        if len(names) else []
+    name_right = max([b for _, b in spans], default=0.0)
+    # **階層の検出枠は別に持つ** (2026-09-10 ユーザ目視 10 回目: 05_p2 は枠 1423-1637 が
+    # 組成の 1 列目 (1546-1637) を飲み込んでおり，種名と同じ扱いで捨てると 1 列目が
+    # 消える)．枠に重なる列でも**表頭に字があれば地点の列**として残し，枠の右端を
+    # その列の左端まで縮める
+    lay_cells = out[out['obj_name'] == 'layer']
+    lay_span = ((float(lay_cells['x1'].min()), float(lay_cells['x2'].max()))
+                if len(lay_cells) else None)
+    hy1, hy2, have_head, widths, body, hb, hc, hx1 = _column_ink(
+        dark, cols, comp, head)
+    n = len(cols)
+    out, dropped, layered, trimmed, split_col = _scan_left_columns(
+        out, cols, dark, spans, name_right, lay_span, widths, body, hb, hc,
+        hx1, hy1, hy2, have_head, ink_max, overlap, body_min)
     if split_col is not None:
         layered = [t for t in layered if t[0] != split_col]
     if layered:
@@ -288,22 +352,8 @@ def fix_columns(img, df_loc, ink_max=HEADER_INK_MAX, min_cols=MIN_COLS,
                 dropped.append(c)
         layered = [keep]
 
-    # 右端: 表頭が空の列は群の要約の列
-    summary = []
-    if hb is not None:
-        for k in range(n - 1, max(n - 1 - MAX_LEADING, 0), -1):
-            c = cols.index[k]
-            if int(c) in dropped or int(c) in layered:
-                break
-            rest_head = float(np.median(hb[:k])) if k > 0 else 0.0
-            if rest_head <= 0 or hb[k] / rest_head >= ink_max:
-                break
-            hit = (out['obj_name'] == 'comp') & (out['col'] == c)
-            if not hit.any():
-                break
-            out.loc[hit, 'obj_name'] = 'summary'
-            summary.append(int(c))
-
+    out, summary = _mark_summary_columns(out, cols, hb, dropped, layered,
+                                         n, ink_max)
     if trimmed:
         warnings.append(
             f'組成部の左端の列 {trimmed} は種名の領域にかかっていたので，右端 1 列ぶんだけを'

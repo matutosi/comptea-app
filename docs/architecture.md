@@ -28,6 +28,22 @@ history; neither is included here.
 
 ## Pipeline stages
 
+1. **Input** (`split_sheet.load_page`): a scanned page as an image, or a PDF — the
+   fold-out sheets (`s01115`, A0 at 300 dpi) come as one PDF page each, which is
+   rendered to an image before anything else. Everything downstream works on images
+2. **Orientation** (`split_sheet.check_rotation`, `grid.deskew_page`): a sheet set
+   sideways is turned upright **before detection**, since the detector never saw
+   rotated tables (of 157 pages only `kinki_014` needs it; the direction is decided
+   by detecting both ways and keeping the one with more `row`). The remaining tilt
+   (0.1–0.8°) is corrected on a copy (`<workdir>_deskew.png`), and **the grid records
+   which image it was built on** (`located.csv`'s `source_image`) — never assume the
+   original
+3. **Sheet splitting** (`split_sheet.find_tables`, `blocks.py`, `table_split.py`,
+   `strips.py`): an A0 sheet carries two to five separate tables, and feeding it whole
+   to the detector loses every row (a 9344 × 12873 page yields 0 `row`). The geometric
+   split cuts at the blank gutters, then the detections themselves separate tables
+   stacked vertically and set side by side (a divider can be narrower than a gap
+   *inside* one table). See **段ごとの版** below for what else was measured here
 4. **Detection** (`detect.py`): YOLO object detection. Confidence thresholds are per class (see `detect.filter_by_conf()`). The command-line path and the yardsticks all pass `--conf 30 --conf-col 20`: at 30 the `col` of a whole block is lost on some pages (kinki_047's left block scores 0.24), which drops every row in that block. `imgsz` defaults to `auto`, which scales it with
    the longest side so the page meets the detector at the scale it was trained on
    (long side 3300 px ↔ `imgsz` 1280): a book page still resolves to 1280, an
@@ -45,6 +61,128 @@ history; neither is included here.
    (plot number, date, altitude, …). Japanese item names win over the German ones:
    they OCR more reliably
 9. **Table assembly** (`comp_table.py`): Builds the long-format table — one row per plot × species
+
+### 段ごとの版 (どれが正で，どれが控えか)
+
+同じ仕事に**複数の実装**がある段がある (検出器を使うもの・使わないもの，幾何で
+決めるもの・OCR の内容で決めるもの)．2026-09-14 に棚卸しした一覧．
+**「工程」の列が `正` のものだけが `cli/run_pipeline.py` から呼ばれる**．
+`控え` は import されていない (的だけがある)．
+
+#### 1. 折込の切り分け (A0 の紙面 → 表ごとの画像)
+
+| 版 | 実体 | 工程 | 実測の水準 |
+|:--|:--|:--|:--|
+| 幾何 (空白の帯 + 黒画素の塊) | `split_sheet.find_tables`・`blob_boxes`．`split_sheet.py` 自身が CLI を持ち，工程の**前**に回す | **正** | 23 枚中 **21 枚**で箱の数が真値と一致．外す 2 枚は**余分な細い切れ端**なので，**格子ができた表で数えると 23/23** (下の「4 つを組み合わせると全部に対応できるか」) |
+| 検出の手掛かりで分ける | `blocks.split_tables` (縦に重なる表)・`table_split.split_side_by_side` (左右に並ぶ表)・`grid.resplit_parts` (部分画像に切り出してやり直す) | **正** | 表と表の仕切りが 23〜50 px の紙面は空白では切れない．幾何のあとに掛ける |
+| 目印 (OCR) から組み立てる | `table_find.find_by_marks`・`columns`・`count_tables`・`structure_boxes`・`split_between_heads`・`recheck_boxes` | 控え (**検算**) | 箱 73 のうち**表頭がちょうど 1 つ入る箱 69**．ただし 23 枚中 11 枚に端から端まで通る隙間が無く，**幾何を置き換えられない** (2026-09-14 の結論) |
+| 注記の切り出し | `split_sheet.note_boxes` → `<stem>_p<i>_note.png` | **正** | 表の画像には**含めない** (高さが変わると検出の縮尺が動く) |
+
+#### 1b. 切り分けは幾何と目印の 2 つだけにする (2026-09-14 ユーザ決定)
+
+**【決定 2026-09-14・ユーザ指示】折込の切り分けは幾何と目印の 2 つを残し，
+外部のレイアウト解析 (D yomitoku・E DocLayout-YOLO) は候補から外す**．
+下の実測で，**どちらも幾何・目印が外す紙面を 1 枚も救わない**と分かったため．
+以後この 2 つは切り分けの候補として検討しない (**本のページの表全体の検出**や
+**読み取り**での値打ちは別の話で，`yomi.py` の OCR は段階 2・3 で使い続ける)．
+
+- 工程にも repo にも**コードは入っていない** (`yomi.py` が使うのは `OCR` と
+  `DocumentAnalyzer` だけで，`LayoutAnalyzer` は呼んでいない)．消すものは無く，
+  この決定で候補から落ちる．
+- DocLayout-YOLO は読み手の別環境 (`tmp/venv_yomi`) に入れた `doclayout-yolo`
+  パッケージだけが残る．主環境は最初から触っていない．
+
+以下が根拠の実測．真値は隅の札を読んだ `s01115_tables.tsv` (23 枚・**68 表**)．
+
+| 手法 | 表の数が真値と一致 | 箱の合計 | 外す紙面 |
+|:--|--:|--:|:--|
+| A 幾何 `split_sheet.find_tables` | **21/23** (格子で数えると 23/23) | 70 | 16・21 (余分な細い切れ端) |
+| C 目印 `table_find` | **22/23** | 67 | 17 |
+| D yomitoku のレイアウト | 13/23 | 71 | 10 枚 |
+| E DocLayout-YOLO | 9/23 | 81 | 14 枚 |
+
+**答え: 対応できる．ただし要るのは 2 つ (A + C) だけで，実質は A でほぼ足りる**
+(この結果を受けて，上のとおり D・E を候補から外した)．
+
+- **A が外す 2 枚は「表が足りない」のではなく「余分」**．16_p1 (1782x656)・
+  21_p2 (3041x527) は表ではない切れ端で，格子ができないので工程には響かない．
+  **格子ができた表で数えると 23/23 枚**が真値と一致する．
+- **C が外すのは 17 の 1 枚だけ**．A0 1 枚が丸ごと 1 表で，表頭に**縦書きの
+  調査地名**が混じるため項目名が 6 個しか読めず，まとまりが作れない (箱 0)．
+  A はこの紙面を正しく 1 箱にする．
+- **D・E は 1 枚も救わない**．A が外す 16・21，C が外す 17 のどれも当てられず，
+  足しても覆う枚数は増えない (割りすぎる紙面が多い．E は横倒しの 04 が 0 箱)．
+- **組み合わせの値打ちは「切り分けの置き換え」ではなく「検算」**．A の 70 箱を
+  C の目印で検算すると (`table_find.check_boxes`)，**表頭がちょうど 1 つ 61 箱**，
+  **表頭 2 つ (切り足りない候補) 3 箱** (04・14・21)，**表頭 0 つ 6 箱** (うち 2 つは
+  上の細い切れ端で，これは正しい)．表頭 2 つは `split_between_heads`，
+  表頭 0 つは `recheck_boxes` で詰められる — **どちらも実装済みで，工程には
+  まだつないでいない**．
+
+**数え方の落とし穴**: 工程の成果物 (切り出した画像・格子) を数えると，
+切り分けの出来を見誤る．08 は「4 表しか無い」ように見えるが，これは
+2026-09-10 のユーザ指示で **08_p2 を切り分け後に削除**したためで，
+`find_tables` 自体は 5 箱を正しく出している．
+
+#### 2. 格子の作成
+
+| 版 | 実体 | 工程 | 備考 |
+|:--|:--|:--|:--|
+| 検出器 (YOLO) から | `detect.py` → `locate.py` | **正** | 学習データ 121 件はすべて活字．折込は 0 件 |
+| 検出器を使わない | `noyolo.py` (`guess_parts`・`guess_parts_v2`) | 控え | 工程では未使用．`table_find` が `guess_pitch` だけ借りている |
+| 1 調査区の 2 段組 | `one_plot.py` | **正**の分岐 | 段ごとに発動 (kinki_001・047・053・077 の 4 表) |
+| 地点が多く行が取れない表 | `strips.py` (短冊に分けて検出し直す) | **正**の分岐 | 手元の本のページ 88 枚は通らない |
+| 種名の列が検出されないとき | `name_col.py` (組成部の左の黒画素の帯) | **正**の補い | 検出が 1 件でもあれば何もしない |
+| 表頭の縦の境 | 検出枠 `header_col` の右端 → **`header_cols.py` (黒画素)** | **正** | 検出から黒画素へ移した例．境が字を横切る行 1016 → 167 |
+| 表頭の行 | OCR の箱 (`header_lines`) ／ 投影 (`locate._header_bands_from_names`) | **正**．箱が 3 行未満なら投影へ**戻す** | 対策 A |
+| (参考) 段階 1 の読み手 | **EasyOCR だけ** | — | yomitoku を足す 2 案を 2026-09-14 に測って取り下げた (lessons.md「格子と行の境に yomitoku は足さない」) |
+| 組成部の行 | 検出の内挿 (`axes.locate_edges`) → 黒画素の格子 (`row_heights`・`body_rows.lattice_rows`) → 列ごとのずれの吸収 (`row_track`) の 3 段重ね | **正** | `--no-snap`・`--no-track` で後ろ 2 段を切れる |
+
+#### 3. 読み取り (段階 2)
+
+`--reader` で選ぶ．**入れていない読み手は黙って飛ばす**ので，どの環境でも動く．
+
+| 版 | 実体 | 既定 | 備考 |
+|:--|:--|:--|:--|
+| `easyocr` | `ocr.py`．セルを 1 つずつ読む | **既定** | GPU があれば速い |
+| `multi` | `read_region.py` が領域を 1 回読み，`ndl.py` (NDLOCR-Lite．**GPU 不要**)・`yomi.py` (yomitoku) を重ねる．クラスごとの順で質の通る読みを採る | | 辞書に当たるセルが 和名 277 → **428**，学名 462 → **548** |
+| `ai`・`both` | 段階 2 で AI が読む | | |
+| 折込の分割読み | `tiles.py` (A3〜A4 に分けて読み，原点を足して戻す) | `multi` の中で自動 | 辞書に当たる語が 200 倍 |
+| 読み直し | `read.retry_cells` (組成のセルを NDLOCR-Lite で) | 既定で入る | `--no-retry` で切る．522 セルが読めた |
+| 装置 | `device.py`．`--device` → `COMPTEA_DEVICE` → 自動 | 自動 | 自動は torch，無ければ `nvidia-smi` |
+
+**外の読み手の入れ方** (どちらも**入っていなければ黙って飛ばす**ので，
+入れていない環境でも工程は動く)．
+
+| 読み手 | 置き場の決め方 | 入れ方 |
+|:--|:--|:--|
+| yomitoku (`yomi.py`) | 環境変数 `COMPTEA_YOMI_PY` | `python -m venv --system-site-packages <置き場>/venv_yomi` して `pip install yomitoku==0.14.0`．**`--system-site-packages` は主環境の torch を使い回すため** (入れ直すと数 GB)．重みは初回の呼び出しで取りに行く |
+| NDLOCR-Lite (`ndl.py`) | 環境変数 `COMPTEA_NDLOCR` | repo を置いて `ordered-set` を足すだけ．**ONNX で GPU 不要** |
+
+**【正式導入 2026-09-14】yomitoku を恒久の置き場に据えた**．それまでは
+セッションの一時ディレクトリに作った環境を指しており，**ジョブを消すと
+読み手ごと消える**状態だった．
+
+**置き場はコードに書かない** (2026-09-14 ユーザ決定)．公開リポジトリなので，
+手元の実際のパスを既定値に持たせず，**環境変数だけ**で決める
+(`yomi.DEFAULT_PYS`・`ndl.DEFAULT_DIRS` は空)．毎回指さずに済むよう，
+環境に登録しておく (`setx` など)．この規則は `tests/test_no_local_paths.py`
+が字面で見張る．
+
+#### 4. 後処理 (段階 3)
+
+ここは**版の選択ではなく段の重なり**で，分岐は `--no-notes`・`--keep-absent` だけ．
+
+`correct_text` (読みの補正) → `row_kinds` (見出し・流し込みの印) →
+`comp_table` (縦持ち・`mark_flow`) → `plot_table` (表頭から地点の表) →
+`site_notes` (**表の下の注記**から地点情報を差し込む．読みは yomitoku．
+`<画像>.paras.json` に取り置く)．**表頭の値は上書きせず，空いた所だけ埋める**．
+
+#### 5. 使われていないもの
+
+いまのところ無い．**`crop_image.py` は 2026-09-14 に消した** (repo のどこからも
+参照されておらず，中身も `"images/example.jpg"` を直に書いた初期の下書きだった)．
+セルの切り出しは `cli/crop_cells.py` の `crop()` が行う．
 
 ### Object classes detected
 
@@ -435,7 +573,6 @@ shift.
   existing train/val split is preserved so before/after comparisons stay honest
 - `util_file.py`: File operations (timestamped names, zip, directory management)
 - `preprocess_image.py` / `preprocess_image_web.py`: Image preprocessing (deskew, grayscale, binarization, noise removal)
-- `crop_image.py`: Cuts the located regions out of the page image
 - `draw_rect.py`: Draws the boxes, colouring each by its `note` (`on_text` red /
   `snapped` orange / `interpolated` gold — darkest first, most worth looking at first)
 - `progress.py`: Redirects stdout into a Streamlit widget so long runs show progress
@@ -447,7 +584,10 @@ shift.
 
 The same pipeline driven from the command line rather than Streamlit, for reading a
 table end to end in one go: `run_pipeline.py` (the whole run), `crop_cells.py`,
-`run_ocr.py`, `apply_text.py`, `build_table.py`, with `_common.py` shared between them.
+`run_ocr.py`, `apply_text.py`, `build_table.py`. They are thin wrappers: the stages
+themselves live in `comptea/pipeline/` (`grid.py`, `read.py`, `table.py`), with
+`comptea/pipeline/common.py` shared between them, so the CLI and the Streamlit apps
+run exactly the same code.
 `link_pages.py` joins the run-on blocks: the footnote under a table (the species that
 occurred once, the localities, the dates, the sources) spills onto the next page when
 it does not fit, and **the user marks the pair with a branch number in the file name**

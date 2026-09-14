@@ -2,7 +2,21 @@
 
 yomitoku (https://github.com/kotaro-kinoshita/yomitoku) を**外部プロセス**として
 呼びます．torch で動くので，**主環境を汚さないよう別の環境に入れて**そこの
-python を指します (`COMPTEA_YOMI_PY`)．
+python を指します．
+
+## 入れ方 (2026-09-14 に正式導入)
+
+    python -m venv --system-site-packages <置き場>/venv_yomi
+    <置き場>/venv_yomi/Scripts/pip install yomitoku==0.14.0
+
+`--system-site-packages` にするのは，**主環境の torch を使い回す**ためです
+(入れ直すと数 GB になる)．**置き場は環境変数 `COMPTEA_YOMI_PY` で指します**
+(`setx COMPTEA_YOMI_PY <置き場>\\venv_yomi\\Scripts\\python.exe` のように
+恒久設定しておけば，呼ぶたびに指す必要はありません)．
+**公開リポジトリなので，手元の実際のパスはここに書きません**．
+**入っていなければ黙って飛ばす**ので，入れていない環境でも工程は動きます
+(`--reader multi` が yomitoku を使わなくなるだけ)．
+重みは初回の呼び出しのときに取りに行きます (以後は使い回す)．
 
 NDLOCR-Lite (`comptea.ndl`) が**行単位**で返すのに対し，yomitoku は**語単位**で
 返すので，格子のセルに割り当てるのに向きます．
@@ -21,6 +35,13 @@ import subprocess
 import tempfile
 
 ENV_PY = 'COMPTEA_YOMI_PY'
+# 決まった置き場 (2026-09-14 に正式導入．NDLOCR-Lite の隣に置いた)．
+# `COMPTEA_YOMI_PY` を指していれば，そちらが優先される．
+# `ndl.DEFAULT_DIRS` と同じ考え方: **環境変数なしでも動くようにする**
+# **手元の実際の置き場は書かない** (公開リポジトリのため．2026-09-14 ユーザ決定)．
+# 場所は環境変数 `COMPTEA_YOMI_PY` で指す．ここは**自分の環境だけで**
+# 足したいときの逃げ道として残してある (足しても公開の repo には出さない)
+DEFAULT_PYS = ()
 # **GPU があるとは限らない**．`comptea.device` が決める (`COMPTEA_DEVICE`)
 
 WORKER = '''
@@ -79,9 +100,15 @@ json.dump(out, open(dst, "w", encoding="utf-8"), ensure_ascii=False)
 
 
 def find_python():
-    """yomitoku を入れた環境の python．無ければ None"""
-    p = os.environ.get(ENV_PY)
-    return p if p and os.path.isfile(p) else None
+    """yomitoku を入れた環境の python．無ければ None
+
+    (1) `COMPTEA_YOMI_PY` (2) `DEFAULT_PYS` の順に見ます．**環境変数を
+    指していなくても，決まった置き場にあれば使えます** (2026-09-14)．
+    """
+    for p in (os.environ.get(ENV_PY),) + DEFAULT_PYS:
+        if p and os.path.isfile(p):
+            return p
+    return None
 
 
 class YomiReader:

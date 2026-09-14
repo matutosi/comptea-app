@@ -46,6 +46,31 @@ python cli/link_pages.py work --out out                          # 表につな�
 `.[detect]` は検出 (torch・ultralytics)，`.[read]` は読み取り (easyocr)，
 `.[sheet]` は PDF (PyMuPDF)，`.[web]` は Streamlit です．
 
+**読み手を足す (任意)**．EasyOCR に加えて，外の読み手を重ねられます．
+**読み手ごとに落とすセルが違う**ので，重ねると読めるセルが増えます
+(和名 277 → 428，学名 462 → 548 のセルが辞書に当たるようになりました)．
+
+```bash
+python cli/run_ocr.py work/<名前> --reader multi     # 入っている読み手を重ねる
+python cli/run_ocr.py work/<名前> --device cpu       # GPU が無いとき (既定は自動)
+```
+
+- **yomitoku** — 語ごとに位置つきで返すので，格子のセルに割り当てるのに向きます．
+  主環境を汚さないよう別の環境に入れます
+  (`python -m venv --system-site-packages <置き場>/venv_yomi` して
+  `pip install yomitoku`)．場所は環境変数 `COMPTEA_YOMI_PY` でその python を
+  指します．
+- **NDLOCR-Lite** — **ONNX で GPU が要りません**．repo を置いて，場所を
+  環境変数 `COMPTEA_NDLOCR` で指します．
+
+置き場は**環境変数だけ**で決めます (コードに既定のパスは持ちません)．
+毎回指さなくて済むよう，環境に登録しておくと楽です
+(Windows は `setx COMPTEA_YOMI_PY <その python>`，
+POSIX は `~/.profile` などに `export`)．
+
+**どちらも，入っていなければ黙って飛ばします**．入れていない環境でも
+`--reader multi` は落ちず，EasyOCR だけで読みます．
+
 ### ライブラリとして
 
 ```python
