@@ -779,6 +779,113 @@ def _header_bands_from_names(img, box, min_gap_ratio: float = 0.15):
     return np.array(edges, dtype=float)
 
 
+def _header_rows(df, source_image, warnings, cls='plot_row'):
+    """表頭の項目行の箱を選ぶ (**組成部の中の誤検出は捨てる**)
+
+    `_locate_header` から切り出した段 (2026-09-14．中身は変えていない)．
+    """
+    rows = filter_results(df, source_image, cls).sort_values(by='y1')
+    if rows.empty:
+        return rows
+    # **表頭は組成部より上にしかない** (2026-09-11 ユーザ指摘: 11_p1 は常在度の総合表で，
+    # 本体の途中の行が `plot_row` として検出され，表頭の帯が y 4085-5744 (本体は
+    # 971-6199) に出ていた)．行の検出の上端より下の `plot_row` は誤検出として捨てる
+    det_rows = filter_results(df, source_image, 'row')
+    if len(det_rows) >= 3:
+        # **上端は 10% 分位で見る** (2026-09-11)．`row` は表頭の中にも誤検出される
+        # ので，最小値を使うと表頭ごと捨ててしまう (14_p1 は y 430 の 1 本のせいで
+        # 表頭の 18 本すべてが「組成部の中」になった)．本体の途中に出た表頭
+        # (11_p1 は y 4085，本体は 971-6199) は分位でも下に来る
+        body_top = float(np.percentile(det_rows['y1'].astype(float), 10))
+        keep = rows['y1'] < body_top + float((rows['y2'] - rows['y1']).median())
+        if not keep.all():
+            n_drop = int((~keep).sum())
+            rows = rows[keep]
+            warnings.append(
+                f"組成部の中にあった '{cls}' の検出 {n_drop} 本を捨てた"
+                '(表頭は組成部より上にしかない)．表頭が本体の途中に出ていたら，'
+                '段階1で確かめる')
+        if rows.empty:
+            warnings.append(
+                f"'{cls}' の検出がすべて組成部の中にあったため，"
+                '表頭のセルを出力しない．')
+    return rows
+
+
+def _header_bands(df, source_image, rows, warnings,
+                  cls_row='plot_row', cls_head='header'):
+    """表頭の帯と，その境を作る
+
+    `_locate_header` から切り出した段 (2026-09-14．中身は変えていない)．
+
+    Returns:
+        (帯, 境, 帯の高さの中央値, `header` の検出)
+    """
+    # 項目行は高さがまちまち(値が複数行にわたる項目がある)ので，
+    # 等間隔を前提にした locate_edges は使わず，箱をそのまま帯として使う
+    bands = [[float(r.y1), float(r.y2)] for r in rows.itertuples()]
+    heights = [b - a for a, b in bands]
+    median_h = float(np.median(heights))
+    # 表頭の上下に，項目行として拾えていない帯が残っていたら足す
+    # (kinki_004 は「通し番号」の行にラベルが無く，先頭の項目が落ちていた)
+    head = filter_results(df, source_image, cls_head)
+    n_added = 0
+    if not head.empty:
+        top, bottom = float(head['y1'].min()), float(head['y2'].max())
+        if bands[0][0] - top > median_h * 0.5:
+            bands.insert(0, [top, bands[0][0]])
+            n_added += 1
+        if bottom - bands[-1][1] > median_h * 0.5:
+            bands.append([bands[-1][1], bottom])
+            n_added += 1
+    if n_added:
+        warnings.append(
+            f"表頭の端にある {n_added} 行は '{cls_row}' として検出されず，"
+            "'header' の範囲から補った．")
+    # 隣り合う帯のあいだを中点で分ける(隙間に値が落ちないように)
+    h_edges = [bands[0][0]]
+    for i in range(len(bands) - 1):
+        h_edges.append((bands[i][1] + bands[i + 1][0]) / 2)
+    h_edges.append(bands[-1][1])
+    h_edges = np.array(h_edges, dtype=float)
+    # **境が下がらないようにする**(2026-09-03)．`plot_row` の箱が重なって
+    # 並ぶと，隣り合う帯の中点が前の境より上に来て**高さが負のセル**が
+    # できる(s01115_18_p2 の表頭の 1 行)．そのまま渡すと切り出しで落ちる
+    h_edges = np.maximum.accumulate(h_edges)
+    gaps = [bands[i + 1][0] - bands[i][1] for i in range(len(bands) - 1)]
+    n_wide = sum(1 for g in gaps if g > median_h * 0.8)
+    if n_wide:
+        warnings.append(
+            f'表頭の項目行のあいだに，1行ぶん以上あいた箇所が {n_wide} つある．'
+            '拾えていない項目があるかもしれない．')
+    return bands, h_edges, median_h, head
+
+
+def _header_value_cells(x_edges, h_edges, n_items, img, warnings):
+    """表頭の**値**のセルを作る (列の横ずれを直してから)
+
+    `_locate_header` から切り出した段 (2026-09-14．中身は変えていない)．
+
+    Returns:
+        ([値のセル], 表頭の列の境)
+    """
+    h_notes = axis_notes(n=n_items)
+    # **表頭は組成部と横位置がずれることがある**(2026-09-04 ユーザ指摘)．
+    # s01115_22_p2(常在度の総合表)は表頭の値が組成部より 18 px 左に組まれており，
+    # 組成部の境をそのまま使うと表頭の値を割る．**列の数は変えず**，
+    # 表頭の黒画素がいちばん合う位置へ境ごとずらす(数が変わると
+    # 表頭の項目と地点の対応が崩れる)
+    hx_edges, shift = _shift_edges_for_header(
+        x_edges, img, [(float(a), float(b))
+                       for a, b in zip(h_edges[:-1], h_edges[1:])])
+    if shift:
+        warnings.append(
+            f'表頭は組成部と横位置が {shift:+d} px ずれているので，'
+            '表頭の列の境だけずらした．段階1で表頭の値の切れ目を目で確かめる')
+    return [coord_item(hx_edges, h_edges, obj_name='header_value',
+                       y_notes=h_notes)], hx_edges
+
+
 def _locate_header(df: pd.DataFrame, source_image: str, x_edges, warnings: list,
                    img=None, max_shift_ratio: float = 0.3):
     """
@@ -801,76 +908,19 @@ def _locate_header(df: pd.DataFrame, source_image: str, x_edges, warnings: list,
     class_plot_row = 'plot_row'
     class_hdr_col = 'header_col'
     class_hdr = 'header'
-    rows = filter_results(df, source_image, class_plot_row).sort_values(by='y1')
+    rows = _header_rows(df, source_image, warnings, cls=class_plot_row)
     if rows.empty:
         return []
-    # **表頭は組成部より上にしかない** (2026-09-11 ユーザ指摘: 11_p1 は常在度の総合表で，
-    # 本体の途中の行が `plot_row` として検出され，表頭の帯が y 4085-5744 (本体は
-    # 971-6199) に出ていた)．行の検出の上端より下の `plot_row` は誤検出として捨てる
-    det_rows = filter_results(df, source_image, 'row')
-    if len(det_rows) >= 3:
-        # **上端は 10% 分位で見る** (2026-09-11)．`row` は表頭の中にも誤検出される
-        # ので，最小値を使うと表頭ごと捨ててしまう (14_p1 は y 430 の 1 本のせいで
-        # 表頭の 18 本すべてが「組成部の中」になった)．本体の途中に出た表頭
-        # (11_p1 は y 4085，本体は 971-6199) は分位でも下に来る
-        body_top = float(np.percentile(det_rows['y1'].astype(float), 10))
-        keep = rows['y1'] < body_top + float((rows['y2'] - rows['y1']).median())
-        if not keep.all():
-            n_drop = int((~keep).sum())
-            rows = rows[keep]
-            warnings.append(
-                f"組成部の中にあった '{class_plot_row}' の検出 {n_drop} 本を捨てた"
-                '(表頭は組成部より上にしかない)．表頭が本体の途中に出ていたら，'
-                '段階1で確かめる')
-        if rows.empty:
-            warnings.append(
-                f"'{class_plot_row}' の検出がすべて組成部の中にあったため，"
-                '表頭のセルを出力しない．')
-            return []
     if x_edges is None:
         warnings.append(
             f"'{class_plot_row}' はあるが列の位置が決まらないため，"
             '表頭のセルを出力できない．')
         return []
-    # 項目行は高さがまちまち(値が複数行にわたる項目がある)ので，
-    # 等間隔を前提にした locate_edges は使わず，箱をそのまま帯として使う
-    bands = [[float(r.y1), float(r.y2)] for r in rows.itertuples()]
-    heights = [b - a for a, b in bands]
-    median_h = float(np.median(heights))
-    # 表頭の上下に，項目行として拾えていない帯が残っていたら足す
-    # (kinki_004 は「通し番号」の行にラベルが無く，先頭の項目が落ちていた)
-    head = filter_results(df, source_image, class_hdr)
-    n_added = 0
-    if not head.empty:
-        top, bottom = float(head['y1'].min()), float(head['y2'].max())
-        if bands[0][0] - top > median_h * 0.5:
-            bands.insert(0, [top, bands[0][0]])
-            n_added += 1
-        if bottom - bands[-1][1] > median_h * 0.5:
-            bands.append([bands[-1][1], bottom])
-            n_added += 1
-    if n_added:
-        warnings.append(
-            f"表頭の端にある {n_added} 行は '{class_plot_row}' として検出されず，"
-            "'header' の範囲から補った．")
-    # 隣り合う帯のあいだを中点で分ける(隙間に値が落ちないように)
-    h_edges = [bands[0][0]]
-    for i in range(len(bands) - 1):
-        h_edges.append((bands[i][1] + bands[i + 1][0]) / 2)
-    h_edges.append(bands[-1][1])
-    h_edges = np.array(h_edges, dtype=float)
-    # **境が下がらないようにする**(2026-09-03)．`plot_row` の箱が重なって
-    # 並ぶと，隣り合う帯の中点が前の境より上に来て**高さが負のセル**が
-    # できる(s01115_18_p2 の表頭の 1 行)．そのまま渡すと切り出しで落ちる
-    h_edges = np.maximum.accumulate(h_edges)
+    bands, h_edges, median_h, head = _header_bands(
+        df, source_image, rows, warnings,
+        cls_row=class_plot_row, cls_head=class_hdr)
     n_items = len(h_edges) - 1
     name_dy = 0.0        # 項目名の側の帯を値の帯からずらす量 (px)
-    gaps = [bands[i + 1][0] - bands[i][1] for i in range(len(bands) - 1)]
-    n_wide = sum(1 for g in gaps if g > median_h * 0.8)
-    if n_wide:
-        warnings.append(
-            f'表頭の項目行のあいだに，1行ぶん以上あいた箇所が {n_wide} つある．'
-            '拾えていない項目があるかもしれない．')
     hc = locate_x_range(df, source_image, obj_name=class_hdr_col)
     hc_guessed = False
     if hc is None and img is not None and not head.empty:
@@ -953,21 +1003,8 @@ def _locate_header(df: pd.DataFrame, source_image: str, x_edges, warnings: list,
                         '項目名の側を採った(OCR の箱は 3 行未満)．段階1で行の対応を目で確かめる．')
                 h_edges = new_edges
                 n_items = len(h_edges) - 1
-    h_notes = axis_notes(n=n_items)
-    # **表頭は組成部と横位置がずれることがある**(2026-09-04 ユーザ指摘)．
-    # s01115_22_p2(常在度の総合表)は表頭の値が組成部より 18 px 左に組まれており，
-    # 組成部の境をそのまま使うと表頭の値を割る．**列の数は変えず**，
-    # 表頭の黒画素がいちばん合う位置へ境ごとずらす(数が変わると
-    # 表頭の項目と地点の対応が崩れる)
-    hx_edges, shift = _shift_edges_for_header(
-        x_edges, img, [(float(a), float(b))
-                       for a, b in zip(h_edges[:-1], h_edges[1:])])
-    if shift:
-        warnings.append(
-            f'表頭は組成部と横位置が {shift:+d} px ずれているので，'
-            '表頭の列の境だけずらした．段階1で表頭の値の切れ目を目で確かめる')
-    out = [coord_item(hx_edges, h_edges, obj_name='header_value',
-                      y_notes=h_notes)]
+    out, hx_edges = _header_value_cells(x_edges, h_edges, n_items, img,
+                                        warnings)
     # 値の帯の傾きは，工程の最後に `header_lines.shear_header_values` が
     # 表頭の領域で測って掛ける (ここで掛けると，後段の `align_header_columns`
     # が列ごとに違う y を別の帯と数え，セルが 6 倍に膨れた．2026-09-10)
