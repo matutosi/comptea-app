@@ -135,6 +135,7 @@ history; neither is included here.
 | 種名の列が検出されないとき | `name_col.py` (組成部の左の黒画素の帯) | **正**の補い | 検出が 1 件でもあれば何もしない |
 | 表頭の縦の境 | 検出枠 `header_col` の右端 → **`header_cols.py` (黒画素)** | **正** | 検出から黒画素へ移した例．境が字を横切る行 1016 → 167 |
 | 表頭の行 | OCR の箱 (`header_lines`) ／ 投影 (`locate._header_bands_from_names`) | **正**．箱が 3 行未満なら投影へ**戻す** | 対策 A |
+| (参考) 段階 1 の読み手 | **EasyOCR だけ** | — | yomitoku を足す 2 案を 2026-09-14 に測って取り下げた (lessons.md「格子と行の境に yomitoku は足さない」) |
 | 組成部の行 | 検出の内挿 (`axes.locate_edges`) → 黒画素の格子 (`row_heights`・`body_rows.lattice_rows`) → 列ごとのずれの吸収 (`row_track`) の 3 段重ね | **正** | `--no-snap`・`--no-track` で後ろ 2 段を切れる |
 
 #### 3. 読み取り (段階 2)
