@@ -631,6 +631,58 @@ def _snap_block_edges(df, source_image, img, y_edges, y_interp,
             y_snapped, y_unresolved, x_snapped, x_unresolved)
 
 
+def _name_layer_items(df, img, ranges, x_edges, y_edges, y_notes,
+                      classes, warnings):
+    """学名・和名・階層の列のセルを作る (**階層は無ければ隙間から補う**)
+
+    `_locate_block` から切り出した段 (2026-09-14．中身は変えていない)．
+
+    Returns:
+        (セルのリスト, 階層の x の範囲．補ったときは補ったもの)
+    """
+    spec_x_range, sname_x_range, layer_x_range = ranges
+    class_spec, class_sname, class_layer = classes
+    # 階層の列が検出されなかったときは，種名の列と組成部の隙間から補う
+    layer_guessed = False
+    if layer_x_range is None:
+        name_ranges = [r for r in (spec_x_range, sname_x_range) if r is not None]
+        head_box = df[df['obj_name'] == 'header'] if 'obj_name' in df else None
+        head_y = ((float(head_box['y1'].min()), float(head_box['y2'].max()))
+                  if head_box is not None and len(head_box) else None)
+        layer_x_range, layer_guessed = _guess_layer_column(
+            img, name_ranges, x_edges, y_edges, head_y=head_y)
+        if layer_guessed:
+            warnings.append(
+                f"'{class_layer}' は検出されなかったが，種名の列と組成部の隙間に"
+                '字があるため，そこを階層の列として補った．'
+                '読んだ中身が階層として通らなければ段階2に挙がる．')
+    # itemごとのx,y座標．範囲が決まらないものは作らない
+    items = []
+    for x_range, obj_name in [
+        (spec_x_range , class_spec),
+        (sname_x_range, class_sname),
+        (layer_x_range, class_layer),
+    ]:
+        if x_range is None:
+            if obj_name == class_layer:
+                # 階層列を持たない組成表は珍しくない(草本群落など)．
+                # ラベル付き33枚のうち15枚にしかlayerが無かった．
+                # **隙間の黒画素で有無を見分けられる**ようになった(2026-09-01)ので，
+                # ここまで来たら「無い」と言い切ってよい(_guess_layer_column)．
+                warnings.append(
+                    '階層の列は**無い**とみなした'
+                    '(検出が無く，種名の列と組成部の隙間にも字が無い)．'
+                    '草本群落などでは普通のこと．'
+                    '階層の列があるはずなら，段階1で隙間を目で確かめる．')
+            else:
+                warnings.append(
+                    f"'{obj_name}' が1件も検出されなかったため，この列は出力しない．")
+            continue
+        col_edges = np.array([x_range['x1'].iloc[0], x_range['x2'].iloc[0]], dtype=float)
+        items.append(coord_item(col_edges, y_edges, obj_name=obj_name, y_notes=y_notes))
+    return items, layer_x_range
+
+
 def _locate_block(df: pd.DataFrame, source_image: str, img, max_shift_ratio: float,
                   threth_col: float = 0.8, threth_row: float = 0.8, x_max=None):
     """
@@ -688,44 +740,10 @@ def _locate_block(df: pd.DataFrame, source_image: str, img, max_shift_ratio: flo
             f'(全 {n_rows} 行)．内挿した行は位置がずれていることがある．')
     # セルごとの気になる点(内挿・スナップ・文字に重なったまま)
     y_notes = axis_notes(y_interp, y_snapped, y_unresolved, n=n_rows)
-    # 階層の列が検出されなかったときは，種名の列と組成部の隙間から補う
-    layer_guessed = False
-    if layer_x_range is None:
-        name_ranges = [r for r in (spec_x_range, sname_x_range) if r is not None]
-        head_box = df[df['obj_name'] == 'header'] if 'obj_name' in df else None
-        head_y = ((float(head_box['y1'].min()), float(head_box['y2'].max()))
-                  if head_box is not None and len(head_box) else None)
-        layer_x_range, layer_guessed = _guess_layer_column(
-            img, name_ranges, x_edges, y_edges, head_y=head_y)
-        if layer_guessed:
-            warnings.append(
-                f"'{class_layer}' は検出されなかったが，種名の列と組成部の隙間に"
-                '字があるため，そこを階層の列として補った．'
-                '読んだ中身が階層として通らなければ段階2に挙がる．')
-    # itemごとのx,y座標．範囲が決まらないものは作らない
-    items = []
-    for x_range, obj_name in [
-        (spec_x_range , class_spec),
-        (sname_x_range, class_sname),
-        (layer_x_range, class_layer),
-    ]:
-        if x_range is None:
-            if obj_name == class_layer:
-                # 階層列を持たない組成表は珍しくない(草本群落など)．
-                # ラベル付き33枚のうち15枚にしかlayerが無かった．
-                # **隙間の黒画素で有無を見分けられる**ようになった(2026-09-01)ので，
-                # ここまで来たら「無い」と言い切ってよい(_guess_layer_column)．
-                warnings.append(
-                    '階層の列は**無い**とみなした'
-                    '(検出が無く，種名の列と組成部の隙間にも字が無い)．'
-                    '草本群落などでは普通のこと．'
-                    '階層の列があるはずなら，段階1で隙間を目で確かめる．')
-            else:
-                warnings.append(
-                    f"'{obj_name}' が1件も検出されなかったため，この列は出力しない．")
-            continue
-        col_edges = np.array([x_range['x1'].iloc[0], x_range['x2'].iloc[0]], dtype=float)
-        items.append(coord_item(col_edges, y_edges, obj_name=obj_name, y_notes=y_notes))
+    items, layer_x_range = _name_layer_items(
+        df, img, (spec_x_range, sname_x_range, layer_x_range),
+        x_edges, y_edges, y_notes,
+        (class_spec, class_sname, class_layer), warnings)
     # 組成部のセル
     if x_edges is None:
         warnings.append(
