@@ -1561,7 +1561,7 @@ oligophlebium … K-+」のように**学名・和名・階層と被度の組・
 **地点番号と地名が対になって取れる**ので，既存の `parse_site_notes()` に渡せば
 `plot_table` に結合できる．**必要な部品はすべて揃っている**
 (切り出し `split_sheet.note_boxes` → 読み `DocumentAnalyzer` → 選別
-`row_kinds.NOTE_RE` → 構文解析 `link_pages.parse_site_notes`)．
+`row_kinds.NOTE_RE` → 構文解析 `parse_text.parse_site_notes`)．
 
 
 ## GPU があるとは限らない — 装置の選び方は 1 か所にまとめる (2026-09-13)

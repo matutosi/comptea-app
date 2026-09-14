@@ -28,6 +28,22 @@ history; neither is included here.
 
 ## Pipeline stages
 
+1. **Input** (`split_sheet.load_page`): a scanned page as an image, or a PDF — the
+   fold-out sheets (`s01115`, A0 at 300 dpi) come as one PDF page each, which is
+   rendered to an image before anything else. Everything downstream works on images
+2. **Orientation** (`split_sheet.check_rotation`, `grid.deskew_page`): a sheet set
+   sideways is turned upright **before detection**, since the detector never saw
+   rotated tables (of 157 pages only `kinki_014` needs it; the direction is decided
+   by detecting both ways and keeping the one with more `row`). The remaining tilt
+   (0.1–0.8°) is corrected on a copy (`<workdir>_deskew.png`), and **the grid records
+   which image it was built on** (`located.csv`'s `source_image`) — never assume the
+   original
+3. **Sheet splitting** (`split_sheet.find_tables`, `blocks.py`, `table_split.py`,
+   `strips.py`): an A0 sheet carries two to five separate tables, and feeding it whole
+   to the detector loses every row (a 9344 × 12873 page yields 0 `row`). The geometric
+   split cuts at the blank gutters, then the detections themselves separate tables
+   stacked vertically and set side by side (a divider can be narrower than a gap
+   *inside* one table). See **段ごとの版** below for what else was measured here
 4. **Detection** (`detect.py`): YOLO object detection. Confidence thresholds are per class (see `detect.filter_by_conf()`). The command-line path and the yardsticks all pass `--conf 30 --conf-col 20`: at 30 the `col` of a whole block is lost on some pages (kinki_047's left block scores 0.24), which drops every row in that block. `imgsz` defaults to `auto`, which scales it with
    the longest side so the page meets the detector at the scale it was trained on
    (long side 3300 px ↔ `imgsz` 1280): a book page still resolves to 1280, an
@@ -119,7 +135,7 @@ history; neither is included here.
 | 種名の列が検出されないとき | `name_col.py` (組成部の左の黒画素の帯) | **正**の補い | 検出が 1 件でもあれば何もしない |
 | 表頭の縦の境 | 検出枠 `header_col` の右端 → **`header_cols.py` (黒画素)** | **正** | 検出から黒画素へ移した例．境が字を横切る行 1016 → 167 |
 | 表頭の行 | OCR の箱 (`header_lines`) ／ 投影 (`locate._header_bands_from_names`) | **正**．箱が 3 行未満なら投影へ**戻す** | 対策 A |
-| 組成部の行 | 検出の内挿 (`locate.locate_edges`) → 黒画素の格子 (`row_heights`・`body_rows.lattice_rows`) → 列ごとのずれの吸収 (`row_track`) の 3 段重ね | **正** | `--no-snap`・`--no-track` で後ろ 2 段を切れる |
+| 組成部の行 | 検出の内挿 (`axes.locate_edges`) → 黒画素の格子 (`row_heights`・`body_rows.lattice_rows`) → 列ごとのずれの吸収 (`row_track`) の 3 段重ね | **正** | `--no-snap`・`--no-track` で後ろ 2 段を切れる |
 
 #### 3. 読み取り (段階 2)
 
@@ -563,7 +579,10 @@ shift.
 
 The same pipeline driven from the command line rather than Streamlit, for reading a
 table end to end in one go: `run_pipeline.py` (the whole run), `crop_cells.py`,
-`run_ocr.py`, `apply_text.py`, `build_table.py`, with `_common.py` shared between them.
+`run_ocr.py`, `apply_text.py`, `build_table.py`. They are thin wrappers: the stages
+themselves live in `comptea/pipeline/` (`grid.py`, `read.py`, `table.py`), with
+`comptea/pipeline/common.py` shared between them, so the CLI and the Streamlit apps
+run exactly the same code.
 `link_pages.py` joins the run-on blocks: the footnote under a table (the species that
 occurred once, the localities, the dates, the sources) spills onto the next page when
 it does not fit, and **the user marks the pair with a branch number in the file name**

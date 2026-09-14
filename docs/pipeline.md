@@ -42,18 +42,38 @@
 | `strips.py` | 地点の多い表を短冊に分けて検出し，元の座標へ戻す |
 | `table_split.py` | 1 枚に載る別々の表を，検出の手掛かりで見分ける |
 | `name_col.py` | 種名の列が検出されないとき，黒画素の山から作る |
+| `one_plot.py` | 1 調査区を左右 2 段に組んだ紙面で，階層と被度の列を黒画素から作る |
 | `body_rows.py` | 組成部の縦の範囲と，行の境 |
+| `row_heights.py` | 行の高さをそろえ，上下端を伸ばす (刻みの決め直しを含む) |
+| `row_track.py` | 列ごとの y のずれを吸収する．罫線を消す．拍で行数を検算する |
+| `row_skew.py` | 傾きに合わせて，セルの座標を列ごとにずらす |
+| `row_kinds.py` | 行の種類 (見出し・学名だけの行・凡例・流し込み) を見分けて `note` に付ける |
 | `axes.py` | 1 つの軸の境を組み立て，字を避けてずらす |
 | `col_edges.py` | 列の境 (等間隔の格子・字を割らない位置・表頭の境) |
 | `col_reach.py` | 組成部の右端の外にある地点の列を，黒画素から足す |
 | `noyolo.py` | **別案**: 物体検出を使わず，粗い区切りと OCR の文字列から部分を推定する (いまの工程では使っていない)．文字の型に加え，表頭の語彙・被度の値の型・種名の辞書で列と行の役割を確かめる (`guess_layout`) |
 | `layer_col.py` | 階層の列を見つけ，組成部でない列を整理する |
+| `header_lines.py` | 表頭の帯 (項目名の行と値の行) を作り，境を字の隙間へ寄せる |
+| `header_cols.py` | 表頭の独文と和文を分ける縦の境を，黒画素から決める |
 | `locate.py` | 上を呼んで**格子を組む本体** |
 | `checks.py` | できた格子を，独立した尺度で検査する |
+| `source.py` | **格子がどの画像で作られたか**を守る (傾きを直した写し・回した写し) |
 | `ocr.py` | セルを読む (字種を絞った読み直しを含む) |
+| `read_region.py` | 領域を 1 回読んで，読みを位置でセルに割り当てる (読み手を重ねる) |
+| `ndl.py`・`yomi.py` | 外の読み手 (NDLOCR-Lite・yomitoku)．**入っていなければ飛ばす** |
+| `tiles.py` | 大きな紙面を分けて読み，元の座標へ戻す |
+| `device.py` | 読み手を動かす装置 (cpu / cuda) を 1 か所で決める |
 | `correct_text.py` | 辞書と規則で補正し，`status` を付ける |
+| `parse_text.py` | 流し込み (文章) の表頭・1 回出現の種・注記を構文解析する |
+| `site_notes.py` | 表の下の注記を読み，地点の情報 (調査地・年月日・出典) を差し込む |
 | `comp_table.py`・`plot_table.py` | 縦持ちの表と，表頭の表に組む |
 | `pipeline/` | 段ごとの入口 (`grid`・`read`・`table`)．CLI もアプリもここを呼ぶ |
+| `table_find.py` | **別案**: 検出器を使わず，タイル分割 OCR の目印で表全体の箱を作る．いまの工程では**切り分けの検算**にだけ使える |
+
+道具まわり (`ink.py`・`draw_rect.py`・`util_file.py`・`progress.py`・
+`preprocess_image.py`・`deskew.py`・`page_group.py`・`once_page.py`・
+`count_plots.py`・`download_species_names.py`) は
+[architecture.md](architecture.md) の「Shared utilities」にまとめてあります．
 
 ---
 
@@ -64,12 +84,12 @@
 
 | 段 | CUI | GUI | 違いの理由 |
 |:---|:---|:---|:---|
-| 1 切り分け | `--min-gutter`・`--min-gap`・`--page` | 既定値のみ．PDF は全ページ | 調整はまれ |
-| 2 格子 | `--conf`・`--conf-col`・`--imgsz` | 既定値のみ (測って決めた値) | 同上 |
-| 2 格子 | 大きさの上限なし | imgsz 2560 まで | 無料枠のメモリ (1 GB) |
-| 3 読み取り | `--reader easyocr\|ai\|both`・`--only` | EasyOCR のみ | ブラウザから AI は呼べない |
-| 3 目視 | `crop_cells.py` → `review.tsv` → `apply_text.py` | 画面で実物を見て `corrected` を直す | 同じ規則で整える (入力は「読み」) |
-| 4 組み上げ | `--keep-absent` | チェックボックス | — |
+| 切り分け (段階の前) | `--min-gutter`・`--min-gap`・`--page` | 既定値のみ．PDF は全ページ | 調整はまれ |
+| 段階1 格子 | `--conf`・`--conf-col`・`--imgsz` | 既定値のみ (測って決めた値) | 同上 |
+| 段階1 格子 | 大きさの上限なし | imgsz 2560 まで | 無料枠のメモリ (1 GB) |
+| 段階2 読み取り | `--reader easyocr\|multi\|ai\|both`・`--only`・`--no-retry`・`--device` | EasyOCR のみ | ブラウザから AI は呼べない．`multi` は**外の読み手を入れた環境だけ**で効く (入っていなければ黙って飛ばす) |
+| 段階2 目視 | `crop_cells.py` → `review.tsv` → `apply_text.py` | 画面で実物を見て `corrected` を直す | 同じ規則で整える (入力は「読み」) |
+| 段階3 組み上げ | `--keep-absent` | チェックボックス | — |
 | 続きのページ | `run_pipeline.py` が `continuation.txt` を書く → `link_pages.py` | 2 枚まとめて受け取り，流し込みと注記を画面に出す | どちらも枝番で見分ける |
 | まとめて書き出す | `export_data.py` (Need Check の画像を切り出す) | 無し (画面に実物が出る) | 1 枚ずつ扱う道具 |
 | 表の中の場所 | 元の場所のまま (そこから画像を開く) | **ファイル名だけ** | 画面の作業ディレクトリは一時的なもの |
