@@ -341,18 +341,6 @@ def has_underline(dark, x1, x2, y1, y2, pitch):
     return False
 
 
-def widest_run(dark, x1, x2, y1, y2):
-    """帯の中で，横につながった黒のいちばん長い幅 (px)"""
-    x1, x2 = int(x1), int(x2)
-    y1, y2 = max(0, int(y1)), min(dark.shape[0], int(y2))
-    if x2 - x1 < 2 or y2 - y1 < 2:
-        return 0
-    best = 0
-    for a, b in _runs(dark[y1:y2, x1:x2].any(axis=0)):
-        best = max(best, b - a)
-    return int(best)
-
-
 def crossing_run(dark, x1, x2, y1, y2, into):
     """種名の側から本体の側 ( より右) へまたぐ 1 つの塊の幅 (px)
 

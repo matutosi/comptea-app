@@ -63,30 +63,6 @@ def find_layer_column(img, df_loc, ink_max=HEADER_INK_MAX, min_cols=MIN_COLS):
     return int(cols.index[0])
 
 
-def mark_layer_column(img, df_loc, **kw):
-    """先頭の列が階層の列なら `obj_name` を `layer` に変える
-
-    セルを組成部から外すだけでよい．地点番号は `comp_table.py` が
-    組成部の列を数え直して振る(`rank(method='dense')`)ので，
-    階層の列を外せば地点番号は自動で 1 から振り直される．
-
-    Returns:
-        (書き換えた格子, 警告のリスト)
-    """
-    col = find_layer_column(img, df_loc, **kw)
-    if col is None:
-        return df_loc, []
-    hit = (df_loc['obj_name'] == 'comp') & (df_loc['col'] == col)
-    if not hit.any():
-        return df_loc, []
-    out = df_loc.copy()
-    out.loc[hit, 'obj_name'] = 'layer'
-    return out, [
-        f'組成部の先頭の列(列 {col})は**表頭が空**なので，'
-        f'地点の列ではなく**階層の列**とみなした({int(hit.sum())} セル)．'
-        '地点番号はその次の列から 1 で振り直す．段階1で列の中身を目で確かめる']
-
-
 NAME_OVERLAP = 0.5      # 種名などの箱と横にこれ以上重なる組成列は，組成部ではない
 BODY_INK_MIN = 0.05     # 本体の黒画素が他の列の中央値のこれ未満なら，空の列
 MAX_LEADING = 3         # 先頭(と末尾)から見る列の数の上限

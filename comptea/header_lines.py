@@ -537,35 +537,6 @@ def bands_from_value_lines(value_spans, top, bottom):
     return np.maximum.accumulate(np.array(edges, dtype=float))
 
 
-def snap_to_value_lines(edges, spans, pitch, reach=VALUE_SNAP):
-    """境を，**値の側の行と行のあいだ**へ寄せる (対応する区切りがあるときだけ)
-
-    項目名の区切りをそのまま使うと，値が 2〜3 行にわたる項目で値の行を割ります
-    (22_p3 の「調査年月日」は '83 / 6 / 8 の 3 行で，2 行目と 3 行目のあいだに
-    項目名の区切りが落ちていました)．
-
-    **値の側にも同じやり方で区切りを仮に作り，項目名の区切りに対応するものだけを
-    使います** (2026-09-10 ユーザ指示)．値の行は項目より多いので，対応しない値の
-    区切りは落とします．寄せるのは行の高さの半分まで，順序は保ちます．
-    """
-    e = [float(v) for v in edges]
-    if len(e) < 3 or len(spans) < 2:
-        return np.asarray(e, dtype=float)
-    cuts = np.array([(a[2] + b[1]) / 2.0 for a, b in zip(spans[:-1], spans[1:])],
-                    dtype=float)
-    if not len(cuts):
-        return np.asarray(e, dtype=float)
-    r = float(reach) * float(pitch)
-    out = [e[0]]
-    for i in range(1, len(e) - 1):
-        d = np.abs(cuts - e[i])
-        j = int(d.argmin())
-        v = float(cuts[j]) if d[j] <= r else e[i]
-        out.append(max(v, out[-1]))
-    out.append(max(e[-1], out[-1]))
-    return np.maximum.accumulate(np.array(out, dtype=float))
-
-
 TOP_REACH_ROWS = 8      # 表頭の上端を上へ伸ばす行数の上限
 TOP_COVER_MIN = 0.5     # 値の行とみなすのに要る，字のある地点の列の割合
 TOP_GAP_MAX = 1.5       # 行と行の間隔がこの倍 (行の高さ) を超えたら，そこで止める

@@ -139,7 +139,7 @@ def test_組成のセルだけ読み直す():
     assert got.loc[0, 'corrected'] == 'Zzz'
 
 
-def test_読み手が無ければ何もしない():
+def test_読み直しも読み手が無ければ何もしない():
     df = pd.DataFrame([
         {'cell_id': 1, 'obj_name': 'comp', 'x1': 0, 'y1': 0, 'x2': 9, 'y2': 9,
          'corrected': '1;a', 'status': 'Need Check', 'note': ''},

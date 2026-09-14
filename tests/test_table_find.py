@@ -89,7 +89,7 @@ def test_同じ高さの語は1つと数える():
 
 
 def test_縦に並ばないまとまりは表とみなさない():
-    """`find_tables` の間引き．横一列の 3 語だけのまとまりは落ちる"""
+    """`find_by_marks` の間引き．横一列の 3 語だけのまとまりは落ちる"""
     groups = [[(100, 100), (104, 140), (98, 180)],      # 縦に 3 つ
               [(900, 900), (1200, 904), (1500, 898)]]   # 横に 3 つ
     kept = tf.keep_vertical(groups, x_tol=20, least=2)
@@ -400,7 +400,7 @@ def _stacked(size=(400, 300), x=(40, 100), ys=(60, 90, 120), h=8):
 
 def test_通しで表の箱が1つ出る():
     im = _stacked()
-    boxes = tf.find_tables(im, reader=FakeReader(), tile=40, least=1)
+    boxes = tf.find_by_marks(im, reader=FakeReader(), tile=40, least=1)
     assert len(boxes) == 1
     x1, y1, x2, y2 = boxes[0]
     assert x1 <= 40 and y1 <= 60 and x2 >= 100 and y2 >= 128
@@ -409,7 +409,7 @@ def test_通しで表の箱が1つ出る():
 def test_横一列の目印だけでは箱を出さない():
     """表頭が文章の紙面や本文の語 (kinki_026 型) を落とす"""
     im = _sheet(size=(400, 300), rect=(40, 60, 100, 68))
-    assert tf.find_tables(im, reader=FakeReader(), tile=150, least=1) == []
+    assert tf.find_by_marks(im, reader=FakeReader(), tile=150, least=1) == []
 
 
 # --- 実データ (slow) -------------------------------------------------------
@@ -442,7 +442,7 @@ def test_本のページで組成表を囲む(name):
                            'header_value', 'header_item', 'header_item_ja'))]
     truth = (float(d.x1.min()), float(d.y1.min()),
              float(d.x2.max()), float(d.y2.max()))
-    boxes = tf.find_tables(Image.open(jpg))
+    boxes = tf.find_by_marks(Image.open(jpg))
     assert boxes, '表が見つからない'
     assert max(_iou(b, truth) for b in boxes) >= 0.7
 
@@ -459,7 +459,7 @@ def test_折込で表の数が合う(num, n_tables):
         pytest.skip('実データが無い')
     from comptea import split_sheet
     im = split_sheet.load_page(pdf)
-    boxes = tf.find_tables(im)
+    boxes = tf.find_by_marks(im)
     assert len(boxes) == n_tables, f'表 {n_tables} 枚のはずが {len(boxes)} 箱'
 
 
