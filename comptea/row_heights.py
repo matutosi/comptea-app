@@ -317,6 +317,114 @@ END_UNIT_MIN = 0.3      # 末尾の帯を読んで戻すとき，種名の側の
 
 
 
+def _trim_tail(out, med, prof_names, is_row, is_flow, judge):
+    """末尾の帯を落とし，**読んで種の行と分かったものは戻す**
+
+    `extend_edges` から切り出した段 (2026-09-14．中身は変えていない)．
+    判定は呼ぶ側の閉じた関数を受け取る．
+
+    Returns:
+        (境, 落とした数)
+    """
+    trimmed = 0
+    # 行の高さは一定なので，**中央値の 3/4 に満たない末尾の行は無条件に落とす**．
+    # 並べ直し(`lattice_rows`)は最後に 0.5〜1.5 行の余りを残し，20 px の余りが
+    # 直下の流し込みの字に触れて「字がある」と残った(14_p1 の行 219．2026-09-08)
+    while len(out) > 2 and (out[-1] - out[-2]) < med * END_SHORT:
+        out.pop()
+        trimmed += 1
+    dropped = []
+    while len(out) > 2 and (not is_row(out[-2], out[-1])
+                            or is_flow(out[-2], out[-1])):
+        dropped.append(out.pop())
+        trimmed += 1
+
+    def unit_centred(a, b):
+        """種名の側の字の塊 (黒画素の連なり) の中心が帯 (a, b) の中にあるか
+
+        本物の行は字が帯に収まる．直下の流し込みの 1 行目は帯の下半分にかかる
+        だけで，中心は帯の外 (02_p1・22_p1 は `ja_flow` が欠けた読みで止められない)
+        """
+        for p in prof_names.values():
+            lo_, hi_ = max(0, int(a - med)), min(len(p), int(b + med))
+            idx = np.flatnonzero(p[lo_:hi_] > 0)
+            if len(idx) == 0:
+                continue
+            cut = np.flatnonzero(np.diff(idx) > 1)
+            for s, e in zip(np.r_[idx[0], idx[cut + 1]], np.r_[idx[cut], idx[-1]] + 1):
+                if (e - s) >= med * END_UNIT_MIN and a <= lo_ + (s + e) / 2 <= b:
+                    return True
+        return False
+
+    # **形で字が無く見えても，読んで種の行なら落とさない** (2026-09-12．16_p2 の
+    # 最終行「イワボタン」: タイプの薄い「・」が二値化で消え，学名が和名より 8 px
+    # 下に印字されて帯の中央 1/2 に 4 割しか入らず，3 つの判定すべてで「字が無い」
+    # になった)．落とした帯を上から読み直し，種の行と分かるものを戻す．
+    # 最初に違うものが出たら止める (見出しの下に並ぶ種名を拾わない: 13_p1)
+    if judge is not None:
+        for e in reversed(dropped):
+            a = out[-1]
+            if is_flow(a, e) or not unit_centred(a, e) or judge(a, e) != 'species':
+                break
+            out.append(e)
+            trimmed -= 1
+    return out, trimmed
+
+
+def _add_below(out, med, hi, is_row, is_flow, judge):
+    """組成部の下端まで，行の高さで足す (**読んで止める**)
+
+    `extend_edges` から切り出した段 (2026-09-14．中身は変えていない)．
+
+    Returns:
+        (境, 足した行数)
+    """
+    # 足す行は**行の高さのまま**足す(範囲の端で切り詰めると短い行ができ，
+    # 行の高さがそろわない)．範囲の端は箱の端なので数 px 越えてよい
+    below = 0
+    # **目安 `hi` を少し越えても試す** (2026-09-11 ユーザ指示: 多めに取ってから
+    # 読んで除外する)．`hi` は流し込みの手前で詰めた範囲だが，本物の最終行の
+    # 直下に流し込みがあると詰めすぎる (13_p3 は最終行「コチヂミザサ」の手前
+    # 20 px で止まり，1 行足りなかった)．越えたぶんは読みで止める (見出し・流し込み)
+    # ので，**読み手 (`judge`) があるときだけ**越える．無ければ除外できない
+    reach = hi + (med * END_EXTRA if judge is not None else 0.0)
+    while reach - out[-1] > med * END_MIN_GAP:
+        new = out[-1] + med
+        if is_flow(out[-1], new):
+            break                                   # 流し込みに入った
+        if not is_row(out[-1], new):
+            break
+        # **目安を越えた分は，読んで種の行と分かったものだけ**足す．読めない
+        # (other) ものは足さない — 除外の手段が無いまま多めに取ると，直下の
+        # 流し込みを行として足す (04_p2 型) のを防げない
+        if new > hi + 1 and judge(out[-1], new) != 'species':
+            break
+        out.append(new)
+        below += 1
+    return out, below
+
+
+def _add_above(out, med, lo, prof_all):
+    """組成部の上端まで，行の高さで足す
+
+    `extend_edges` から切り出した段 (2026-09-14．中身は変えていない)．
+    **上端は全幅で見る** (最初の行は種群の見出しで，組成部は空のことがある)．
+
+    Returns:
+        (境, 足した行数)
+    """
+    above = 0
+    base_all = float(np.median([_row_ink(prof_all, a, b)
+                                for a, b in zip(out[:-1], out[1:])]))
+    while out[0] - lo > med * END_MIN_GAP:
+        new = max(out[0] - med, 0.0)
+        if _row_ink(prof_all, new, out[0]) < base_all * END_MIN_INK:
+            break
+        out.insert(0, new)
+        above += 1
+    return out, above
+
+
 def extend_edges(edges, prof_comp, prof_all, med, ext, is_text=None, prof_names=None,
                  judge=None, ja_flow=None):
     """格子の上下端を，組成部の本当の範囲 `ext` まで行の高さで埋める
@@ -421,79 +529,9 @@ def extend_edges(edges, prof_comp, prof_all, med, ext, is_text=None, prof_names=
             return False
         return is_text is not None and is_text(a, b)
 
-    trimmed = 0
-    # 行の高さは一定なので，**中央値の 3/4 に満たない末尾の行は無条件に落とす**．
-    # 並べ直し(`lattice_rows`)は最後に 0.5〜1.5 行の余りを残し，20 px の余りが
-    # 直下の流し込みの字に触れて「字がある」と残った(14_p1 の行 219．2026-09-08)
-    while len(out) > 2 and (out[-1] - out[-2]) < med * END_SHORT:
-        out.pop()
-        trimmed += 1
-    dropped = []
-    while len(out) > 2 and (not is_row(out[-2], out[-1])
-                            or is_flow(out[-2], out[-1])):
-        dropped.append(out.pop())
-        trimmed += 1
-
-    def unit_centred(a, b):
-        """種名の側の字の塊 (黒画素の連なり) の中心が帯 (a, b) の中にあるか
-
-        本物の行は字が帯に収まる．直下の流し込みの 1 行目は帯の下半分にかかる
-        だけで，中心は帯の外 (02_p1・22_p1 は `ja_flow` が欠けた読みで止められない)
-        """
-        for p in prof_names.values():
-            lo_, hi_ = max(0, int(a - med)), min(len(p), int(b + med))
-            idx = np.flatnonzero(p[lo_:hi_] > 0)
-            if len(idx) == 0:
-                continue
-            cut = np.flatnonzero(np.diff(idx) > 1)
-            for s, e in zip(np.r_[idx[0], idx[cut + 1]], np.r_[idx[cut], idx[-1]] + 1):
-                if (e - s) >= med * END_UNIT_MIN and a <= lo_ + (s + e) / 2 <= b:
-                    return True
-        return False
-
-    # **形で字が無く見えても，読んで種の行なら落とさない** (2026-09-12．16_p2 の
-    # 最終行「イワボタン」: タイプの薄い「・」が二値化で消え，学名が和名より 8 px
-    # 下に印字されて帯の中央 1/2 に 4 割しか入らず，3 つの判定すべてで「字が無い」
-    # になった)．落とした帯を上から読み直し，種の行と分かるものを戻す．
-    # 最初に違うものが出たら止める (見出しの下に並ぶ種名を拾わない: 13_p1)
-    if judge is not None:
-        for e in reversed(dropped):
-            a = out[-1]
-            if is_flow(a, e) or not unit_centred(a, e) or judge(a, e) != 'species':
-                break
-            out.append(e)
-            trimmed -= 1
-    # 足す行は**行の高さのまま**足す(範囲の端で切り詰めると短い行ができ，
-    # 行の高さがそろわない)．範囲の端は箱の端なので数 px 越えてよい
-    below = 0
-    # **目安 `hi` を少し越えても試す** (2026-09-11 ユーザ指示: 多めに取ってから
-    # 読んで除外する)．`hi` は流し込みの手前で詰めた範囲だが，本物の最終行の
-    # 直下に流し込みがあると詰めすぎる (13_p3 は最終行「コチヂミザサ」の手前
-    # 20 px で止まり，1 行足りなかった)．越えたぶんは読みで止める (見出し・流し込み)
-    # ので，**読み手 (`judge`) があるときだけ**越える．無ければ除外できない
-    reach = hi + (med * END_EXTRA if judge is not None else 0.0)
-    while reach - out[-1] > med * END_MIN_GAP:
-        new = out[-1] + med
-        if is_flow(out[-1], new):
-            break                                   # 流し込みに入った
-        if not is_row(out[-1], new):
-            break
-        # **目安を越えた分は，読んで種の行と分かったものだけ**足す．読めない
-        # (other) ものは足さない — 除外の手段が無いまま多めに取ると，直下の
-        # 流し込みを行として足す (04_p2 型) のを防げない
-        if new > hi + 1 and judge(out[-1], new) != 'species':
-            break
-        out.append(new)
-        below += 1
-    above = 0
-    base_all = float(np.median([_row_ink(prof_all, a, b)
-                                for a, b in zip(out[:-1], out[1:])]))
-    while out[0] - lo > med * END_MIN_GAP:
-        new = max(out[0] - med, 0.0)
-        if _row_ink(prof_all, new, out[0]) < base_all * END_MIN_INK:
-            break
-        out.insert(0, new)
-        above += 1
+    out, trimmed = _trim_tail(out, med, prof_names, is_row, is_flow, judge)
+    out, below = _add_below(out, med, hi, is_row, is_flow, judge)
+    out, above = _add_above(out, med, lo, prof_all)
     return out, below, above, trimmed
 
 
