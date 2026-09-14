@@ -507,7 +507,9 @@ def resplit_parts(image, tables, base, args):
                 continue
             y0, y1 = slot_for(k, edges[k2], edges[k2 + 1])
             crop = im.crop((edges[k2], y0, edges[k2 + 1], y1))
-            boxes = split_sheet.find_tables(ink.binarize(crop))
+            # **切り出した箱の中では高さの歯止めを使わない** (2026-09-15)．
+            # ここでの「箱」は 1 つの表の部分なので，紙面に対する比で測れない
+            boxes = split_sheet.find_tables(ink.binarize(crop), min_height=0)
             if len(boxes) < 2:
                 pieces.append((f'_t{i}' if n_tables > 1 else '', k2 + 1, None, crop))
                 continue

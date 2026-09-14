@@ -53,6 +53,12 @@ ROT_MAX_RATIO = 0.2     # 横の帯 / 縦の帯 がこれ未満なら横倒し
 ROT_BLANK_RATIO = 0.995 # 「空白」とみなす，黒でない画素の割合
 ROT_BAND_MIN = 3        # 帯とみなす最小の幅(px)
 MIN_AREA = 0.01         # これ未満の切れ端は表とみなさない(シート全体に対する面積比)
+# **面積だけでは落ちない切れ端がある** (2026-09-15)．折込 23 枚で残った
+# 2 つ (16_p1 は 1782x656，21_p2 は 3041x527) は面積比 0.013・0.014 で
+# `MIN_AREA` を通り抜けるが，**紙面に対して低すぎる**．
+# 実測: 本物の表 68 箱の高さ比は 0.109〜0.987，切れ端は 0.041・0.059．
+# 0.08 で分かれる (どちらからも離れている)
+MIN_HEIGHT = 0.08       # これ未満の低い箱は表とみなさない(シート全体に対する高さ比)
 MAX_SPLIT_ROUNDS = 6    # 切り分けを繰り返す上限
 BLANK_TOL_MIN = 3       # 「空白」とみなす黒画素の数の下限
 BLANK_TOL_DIV = 1000    # 帯を横切る長さの何分の1まで汚れを許すか
@@ -352,7 +358,8 @@ def _reach_down(blobs, height, stops=None, gap=BLOB_REACH_GAP):
 
 
 def find_tables(dark, min_gutter=MIN_GUTTER, min_gap=MIN_GAP,
-                min_area=MIN_AREA, margin=MARGIN, use_blob=True):
+                min_area=MIN_AREA, margin=MARGIN, use_blob=True,
+                min_height=MIN_HEIGHT):
     """表ごとの箱を返す
 
     並びは**左の段から，段の中は上から**(縦組みのシートに合わせた列優先)．
@@ -368,6 +375,14 @@ def find_tables(dark, min_gutter=MIN_GUTTER, min_gap=MIN_GAP,
     **しきい値はシート全体に対する比のまま**にする．切り出した箱の大きさで
     決め直すと，箱が小さくなるほどしきい値が下がり，1つの表を
     種名の列と組成部の隙間で割ってしまう．
+
+    **表にならない切れ端は返さない** (2026-09-15)．面積 (`min_area`) に加えて
+    **高さ** (`min_height`) でも落とす．折込 23 枚で，面積を通り抜ける低い
+    切れ端が 2 つ残っていた (16_p1・21_p2)．格子を組む段で落ちるので実害は
+    無かったが，箱の数が真値と 2 枚ぶん食い違っていた．
+    **部分画像に切り出してやり直す経路 (`grid.resplit_parts`) では
+    `min_height=0` で呼ぶ** — そこでの「箱」は 1 つの表の部分なので，
+    紙面に対する高さの比では測れない．
     """
     h, w = dark.shape
     gutter = max(int(w * min_gutter), MIN_BAND_PX)
@@ -403,6 +418,8 @@ def find_tables(dark, min_gutter=MIN_GUTTER, min_gap=MIN_GAP,
                min(w, x1 + bx2 + margin), min(h, y1 + by2 + margin))
         if (box[2] - box[0]) * (box[3] - box[1]) < w * h * min_area:
             continue                            # 見出しの札や折り目の汚れ
+        if (box[3] - box[1]) < h * min_height:
+            continue                            # 低すぎる切れ端(表にならない)
         result.append(box)
     return sorted(result, key=lambda b: (b[0], b[1]))
 

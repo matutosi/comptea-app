@@ -73,7 +73,7 @@ history; neither is included here.
 
 | 版 | 実体 | 工程 | 実測の水準 |
 |:--|:--|:--|:--|
-| 幾何 (空白の帯 + 黒画素の塊) | `split_sheet.find_tables`・`blob_boxes`．`split_sheet.py` 自身が CLI を持ち，工程の**前**に回す | **正** | 23 枚中 **21 枚**で箱の数が真値と一致．外す 2 枚は**余分な細い切れ端**なので，**格子ができた表で数えると 23/23** (下の「4 つを組み合わせると全部に対応できるか」) |
+| 幾何 (空白の帯 + 黒画素の塊) | `split_sheet.find_tables`・`blob_boxes`．`split_sheet.py` 自身が CLI を持ち，工程の**前**に回す | **正** | **23 枚すべてで箱の数が真値と一致** (68 箱 = 68 表)．2026-09-15 に高さの歯止め (`MIN_HEIGHT`) を足して，残っていた低い切れ端 2 つを落とした |
 | 検出の手掛かりで分ける | `blocks.split_tables` (縦に重なる表)・`table_split.split_side_by_side` (左右に並ぶ表)・`grid.resplit_parts` (部分画像に切り出してやり直す) | **正** | 表と表の仕切りが 23〜50 px の紙面は空白では切れない．幾何のあとに掛ける |
 | 目印 (OCR) から組み立てる | `table_find.find_by_marks`・`columns`・`count_tables`・`structure_boxes`・`split_between_heads`・`recheck_boxes` | 控え (**検算**) | 箱 73 のうち**表頭がちょうど 1 つ入る箱 69**．ただし 23 枚中 11 枚に端から端まで通る隙間が無く，**幾何を置き換えられない** (2026-09-14 の結論) |
 | 注記の切り出し | `split_sheet.note_boxes` → `<stem>_p<i>_note.png` | **正** | 表の画像には**含めない** (高さが変わると検出の縮尺が動く) |
@@ -96,7 +96,7 @@ history; neither is included here.
 
 | 手法 | 表の数が真値と一致 | 箱の合計 | 外す紙面 |
 |:--|--:|--:|:--|
-| A 幾何 `split_sheet.find_tables` | **21/23** (格子で数えると 23/23) | 70 | 16・21 (余分な細い切れ端) |
+| A 幾何 `split_sheet.find_tables` | **21/23** → **23/23** (2026-09-15) | 70 → 68 | 16・21 の余分な切れ端は高さの歯止めで落とした |
 | C 目印 `table_find` | **22/23** | 67 | 17 |
 | D yomitoku のレイアウト | 13/23 | 71 | 10 枚 |
 | E DocLayout-YOLO | 9/23 | 81 | 14 枚 |
