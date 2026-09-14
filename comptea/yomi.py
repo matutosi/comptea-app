@@ -10,8 +10,10 @@ python を指します．
     <置き場>/venv_yomi/Scripts/pip install yomitoku==0.14.0
 
 `--system-site-packages` にするのは，**主環境の torch を使い回す**ためです
-(入れ直すと数 GB になる)．置き場は `DEFAULT_PYS` のどれかにするか，
-`COMPTEA_YOMI_PY` にその python を指します (環境変数が優先)．
+(入れ直すと数 GB になる)．**置き場は環境変数 `COMPTEA_YOMI_PY` で指します**
+(`setx COMPTEA_YOMI_PY <置き場>\\venv_yomi\\Scripts\\python.exe` のように
+恒久設定しておけば，呼ぶたびに指す必要はありません)．
+**公開リポジトリなので，手元の実際のパスはここに書きません**．
 **入っていなければ黙って飛ばす**ので，入れていない環境でも工程は動きます
 (`--reader multi` が yomitoku を使わなくなるだけ)．
 重みは初回の呼び出しのときに取りに行きます (以後は使い回す)．
@@ -36,10 +38,10 @@ ENV_PY = 'COMPTEA_YOMI_PY'
 # 決まった置き場 (2026-09-14 に正式導入．NDLOCR-Lite の隣に置いた)．
 # `COMPTEA_YOMI_PY` を指していれば，そちらが優先される．
 # `ndl.DEFAULT_DIRS` と同じ考え方: **環境変数なしでも動くようにする**
-DEFAULT_PYS = (
-    r'D:\pf\dos\venv_yomi\Scripts\python.exe',      # Windows
-    '/opt/venv_yomi/bin/python',                    # Linux・macOS
-)
+# **手元の実際の置き場は書かない** (公開リポジトリのため．2026-09-14 ユーザ決定)．
+# 場所は環境変数 `COMPTEA_YOMI_PY` で指す．ここは**自分の環境だけで**
+# 足したいときの逃げ道として残してある (足しても公開の repo には出さない)
+DEFAULT_PYS = ()
 # **GPU があるとは限らない**．`comptea.device` が決める (`COMPTEA_DEVICE`)
 
 WORKER = '''

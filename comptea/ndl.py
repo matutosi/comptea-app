@@ -20,7 +20,9 @@ import subprocess
 import sys
 import tempfile
 
-DEFAULT_DIRS = (r'D:\pf\dos\ndlocr-lite\src',)
+# **手元の実際の置き場は書かない** (公開リポジトリのため．2026-09-14 ユーザ決定)．
+# 場所は環境変数 `COMPTEA_NDLOCR` で指す
+DEFAULT_DIRS = ()
 ENV = 'COMPTEA_NDLOCR'
 
 

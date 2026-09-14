@@ -59,9 +59,14 @@ python cli/run_ocr.py work/<名前> --device cpu       # GPU が無いとき (�
   主環境を汚さないよう別の環境に入れます
   (`python -m venv --system-site-packages <置き場>/venv_yomi` して
   `pip install yomitoku`)．場所は環境変数 `COMPTEA_YOMI_PY` でその python を
-  指すか，`comptea/yomi.py` の `DEFAULT_PYS` のどれかに置きます．
-- **NDLOCR-Lite** — **ONNX で GPU が要りません**．repo を置いて場所を
-  `COMPTEA_NDLOCR` で指します (`comptea/ndl.py` の `DEFAULT_DIRS` でも可)．
+  指します．
+- **NDLOCR-Lite** — **ONNX で GPU が要りません**．repo を置いて，場所を
+  環境変数 `COMPTEA_NDLOCR` で指します．
+
+置き場は**環境変数だけ**で決めます (コードに既定のパスは持ちません)．
+毎回指さなくて済むよう，環境に登録しておくと楽です
+(Windows は `setx COMPTEA_YOMI_PY <その python>`，
+POSIX は `~/.profile` などに `export`)．
 
 **どちらも，入っていなければ黙って飛ばします**．入れていない環境でも
 `--reader multi` は落ちず，EasyOCR だけで読みます．

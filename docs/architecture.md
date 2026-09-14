@@ -155,14 +155,18 @@ history; neither is included here.
 
 | 読み手 | 置き場の決め方 | 入れ方 |
 |:--|:--|:--|
-| yomitoku (`yomi.py`) | `COMPTEA_YOMI_PY` → `yomi.DEFAULT_PYS` | `python -m venv --system-site-packages <置き場>/venv_yomi` して `pip install yomitoku==0.14.0`．**`--system-site-packages` は主環境の torch を使い回すため** (入れ直すと数 GB)．重みは初回の呼び出しで取りに行く |
-| NDLOCR-Lite (`ndl.py`) | `COMPTEA_NDLOCR` → `ndl.DEFAULT_DIRS` | repo を置いて `ordered-set` を足すだけ．**ONNX で GPU 不要** |
+| yomitoku (`yomi.py`) | 環境変数 `COMPTEA_YOMI_PY` | `python -m venv --system-site-packages <置き場>/venv_yomi` して `pip install yomitoku==0.14.0`．**`--system-site-packages` は主環境の torch を使い回すため** (入れ直すと数 GB)．重みは初回の呼び出しで取りに行く |
+| NDLOCR-Lite (`ndl.py`) | 環境変数 `COMPTEA_NDLOCR` | repo を置いて `ordered-set` を足すだけ．**ONNX で GPU 不要** |
 
-**【正式導入 2026-09-14】yomitoku を決まった置き場に据えた**．それまでは
-セッションの一時ディレクトリに作った環境を `COMPTEA_YOMI_PY` で指しており，
-**ジョブを消すと読み手ごと消える**状態だった．`find_python()` が
-`DEFAULT_PYS` も見るようにしたので，**環境変数なしで使える**
-(環境変数は変わらず優先され，指した先が無ければ置き場へ落ちる)．
+**【正式導入 2026-09-14】yomitoku を恒久の置き場に据えた**．それまでは
+セッションの一時ディレクトリに作った環境を指しており，**ジョブを消すと
+読み手ごと消える**状態だった．
+
+**置き場はコードに書かない** (2026-09-14 ユーザ決定)．公開リポジトリなので，
+手元の実際のパスを既定値に持たせず，**環境変数だけ**で決める
+(`yomi.DEFAULT_PYS`・`ndl.DEFAULT_DIRS` は空)．毎回指さずに済むよう，
+環境に登録しておく (`setx` など)．この規則は `tests/test_no_local_paths.py`
+が字面で見張る．
 
 #### 4. 後処理 (段階 3)
 
