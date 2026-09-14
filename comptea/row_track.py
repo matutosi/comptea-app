@@ -483,15 +483,6 @@ def check_beats(img, df_loc):
     return warnings
 
 
-def shift_column(df, mask, dy):
-    """`mask` のセルの y1/y2 を `dy` ずらした写し (行番号は変えない)"""
-    out = df.copy()
-    out.loc[mask, 'y1'] = out.loc[mask, 'y1'].astype(float) + dy
-    out.loc[mask, 'y2'] = out.loc[mask, 'y2'].astype(float) + dy
-    out.loc[mask, 'note'] = 'y_shifted'
-    return out
-
-
 def _edges_of(cells):
     """1 つの列の帯の境 (行 n 本 + 1)．行の順に並べる"""
     c = cells.sort_values('row')

@@ -31,42 +31,6 @@ ROW_VALLEY_K = 0.2      # 行の谷とみなす黒画素の量．組成部の中
 ROW_VALLEY_MIN = 2      # 谷とみなす最小の幅(px)
 
 
-def body_row_valleys(dark, x1, x2, y1, y2, k=ROW_VALLEY_K, min_w=ROW_VALLEY_MIN):
-    """組成部の**黒画素の谷**から，行の境を数えて返す
-
-    **種名の列で数えてはいけない**(2026-09-02 ユーザ指摘)．
-    1つの種が複数の階層に出るとき，種名は最初の行にしか印字されず，
-    下の階層の行は空白になる．種名で数えると行を数え落とす．
-    **組成部は非出現でも「・」があるので，どの行にも必ず字がある**．
-
-    数え方は**黒画素の量の谷**．横方向に使った「空白の割合」は
-    行方向では効かない(組成部は字がまばらで，行の内側でも 95% が空白に
-    なり，行と行が繋がってしまう)．中央値の `k` 倍を下回る所を谷とする．
-    実測(2026-09-02)．
-
-        正しく組めている表   格子の行 / 谷 = 0.92 - 1.03
-        行が落ちている表                    0.10 - 0.26
-
-    Returns:
-        谷の中央の y の並び
-    """
-    sub = dark[int(y1):int(y2), int(x1):int(x2)]
-    if sub.size == 0:
-        return []
-    prof = sub.sum(axis=1).astype(float)
-    thr = float(np.median(prof)) * k
-    out, start = [], None
-    for i, v in enumerate(prof):
-        if v <= thr:
-            if start is None:
-                start = i
-        else:
-            if start is not None and i - start >= min_w:
-                out.append(int(y1) + (start + i) // 2)
-            start = None
-    return out
-
-
 GUTTER_MIN_W = 20           # 種名の列と組成部のあいだの隙間とみなす最小の幅(px)
 
 

@@ -989,7 +989,8 @@ def box_for(group, blobs, pad=PAD, max_frac=None, size=None):
 
 # --- 通し ----------------------------------------------------------------
 
-def find_tables(im, reader=None, tile=TILE, dist=DIST, least=LEAST, pad=PAD):
+def find_by_marks(im, reader=None, tile=TILE, dist=DIST, least=LEAST,
+                  pad=PAD):
     """紙面から組成表の箱 (x1, y1, x2, y2) を見つける (検出器を使わない)
 
     Args:

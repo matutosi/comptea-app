@@ -4,16 +4,6 @@ import os
 import re
 
 
-def crop_images_df_path(path):
-    """
-    crop_images_dfのラッパー
-    
-    dataframeのパスをもとに画像を抽出
-    """
-    df = pd.read_csv(path)
-    crop_images_df(df)
-
-
 def crop_images_df(df):
     """
     crop_imageのラッパー

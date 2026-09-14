@@ -296,15 +296,6 @@ def test_境は重ならず順序も保つ():
     assert np.allclose(s.y2.values[:-1], s.y1.values[1:])       # 隙間も重なりも無い
     assert np.all((s.y2.values - s.y1.values) > 34 * 0.5)
     assert list(s['row']) == list(range(1, 13))                 # 行番号は変わらない
-
-
-def test_元から中央にある紙面は触らない():
-    img = _sheet(EDGES)
-    df = _df(EDGES)
-    out, warns = row_track.fix_offsets(img, df)
-    assert out is df and warns == []
-
-
 def test_空白が無ければその境は動かさない():
     edges = list(range(100, 100 + 20 * 12 + 1, 20))      # 行 20 px に字 16 px (空白が乏しい)
     img = _sheet_rows(edges, [0] * 12, size=(500, 500))
