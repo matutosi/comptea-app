@@ -146,3 +146,56 @@ def test_読み手が無ければ何もしない():
     ])
     got = read_mod.retry_cells(None, df, None)
     assert got.loc[0, 'corrected'] == '1;a'
+
+
+# --- 読み直しの余白 --------------------------------------------------------
+#
+# 2026-09-14 に 17_p1 を目視して分かった．**要確認のセルは，値がセルより広い**
+# (インク幅 74 px / セル幅 54 px)．`5・4` の `4` が境で切れて `5;i` と読まれる．
+# 要確認のセルの **66% で境にインクが乗る** (それ以外は 5%)．
+#
+# 余白を振ると: **3 px で 0%，6 px で 14〜16%，10 px で 17〜18%**，14 px で頭打ち．
+#
+# **しかし広げる案は取り下げた**．工程を通すと**悪くなる** (本体の要確認が
+# 17_p1 で 114 → 132，05_p2 で 93 → 98)．広げた読みは `correct_comp` を通るが
+# **隣の値**のことがあり，そこから列の種類の判定が動いて他のセルが要確認に回る．
+# **セル単位の「読めた」と，工程の要確認の数は別物**．
+
+def test_読み直しは余白を付ける():
+    df = pd.DataFrame([
+        {'cell_id': 1, 'obj_name': 'comp', 'x1': 100, 'y1': 100,
+         'x2': 154, 'y2': 122, 'corrected': '5;i', 'status': 'Need Check',
+         'note': ''},
+    ])
+    seen = {}
+
+    class _Pad:
+        def available(self):
+            return True
+
+        def read_crops(self, img, boxes, pad=0):
+            seen['pad'] = pad
+            return ['5・4']
+
+    got = read_mod.retry_cells(None, df, _Pad())
+    assert seen['pad'] == read_mod.RETRY_PAD
+    assert got.loc[0, 'corrected'] == '5;4'
+
+
+def test_余白は呼ぶ側で変えられる():
+    df = pd.DataFrame([
+        {'cell_id': 1, 'obj_name': 'comp', 'x1': 0, 'y1': 0, 'x2': 9, 'y2': 9,
+         'corrected': '1;a', 'status': 'Need Check', 'note': ''},
+    ])
+    seen = {}
+
+    class _Pad:
+        def available(self):
+            return True
+
+        def read_crops(self, img, boxes, pad=0):
+            seen['pad'] = pad
+            return ['']
+
+    read_mod.retry_cells(None, df, _Pad(), pad=4)
+    assert seen['pad'] == 4
