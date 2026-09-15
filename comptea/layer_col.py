@@ -203,6 +203,73 @@ def _mark_summary_columns(out, cols, hb, dropped, layered, n, ink_max):
     return out, summary
 
 
+JUNK_SHARE = 0.3        # 字のある行の割合が，列の中央値のこの倍に満たない右端の
+                        # 列は，表の外 (04_p1 は 0.075・0.081 対 中央値 0.988)
+JUNK_ROWS = 120         # 割合を測る行の上限 (大きな表で数えすぎないため)
+JUNK_MAX = 3            # 右端から見る列の数の上限
+
+
+def _ink_share(dark, comp, rows_max=JUNK_ROWS):
+    """列ごとの「字のある行の割合」
+
+    **黒画素の量ではなく行の数で見る**．04_p1 の右端 2 列は表頭に回転した表題が
+    かかっていて「表頭が空」にならず，地点として扱われていた．本体のインクの量は
+    中央値の 2 割で紛らわしいが，**字のある行の割合は 0.08 対 0.99** と離れる
+    (非出現の `・` も字として数えるため)．
+    """
+    out = {}
+    for c, g in comp.groupby('col'):
+        g = g.drop_duplicates('row')
+        if len(g) > rows_max:
+            g = g.iloc[:: max(1, len(g) // rows_max)]
+        if g.empty:
+            continue
+        hit = 0
+        for _i, r in g.iterrows():
+            y1, y2 = int(r['y1']), int(r['y2'])
+            x1, x2 = int(r['x1']), int(r['x2'])
+            if y2 > y1 and x2 > x1 and dark[y1:y2, x1:x2].any():
+                hit += 1
+        out[int(c)] = hit / len(g)
+    return out
+
+
+def _drop_right_junk(out, dark, min_cols=MIN_COLS, share_min=JUNK_SHARE,
+                     max_drop=JUNK_MAX):
+    """**右端の，字がほとんど無い列を捨てる** (2026-09-15)
+
+    紙面の右の欄外まで格子が伸びることがある (04_p1 は 16 列のうち右 2 列が
+    x 2582-2747 の欄外で，本体に字のある行が 7.5%・8.1% しかないのに
+    地点として下流へ流れ，`1` や `ダ;n;!` を値として書き込んでいた)．
+
+    `_mark_summary_columns` は**表頭が空**であることを求めるので，
+    欄外に回転した表題がかかる紙面では止まる．こちらは**本体だけ**を見る．
+
+    Returns:
+        (格子, 捨てた列の番号)
+    """
+    comp = out[out['obj_name'] == 'comp']
+    if comp.empty or comp['col'].nunique() <= min_cols:
+        return out, []
+    share = _ink_share(dark, comp)
+    if len(share) < min_cols:
+        return out, []
+    med = float(np.median(list(share.values())))
+    if not med > 0:
+        return out, []
+    order = sorted(share)
+    gone = []
+    for c in reversed(order[-max_drop:]):
+        if len(order) - len(gone) <= min_cols:
+            break
+        if share[c] >= med * share_min:
+            break
+        gone.append(c)
+    if not gone:
+        return out, []
+    return out[~((out['obj_name'] == 'comp') & (out['col'].isin(gone)))], gone
+
+
 def _scan_left_columns(out, cols, dark, spans, name_right, lay_span,
                        widths, body, hb, hc, hx1, hy1, hy2, have_head,
                        ink_max, overlap, body_min):
@@ -354,6 +421,11 @@ def fix_columns(img, df_loc, ink_max=HEADER_INK_MAX, min_cols=MIN_COLS,
 
     out, summary = _mark_summary_columns(out, cols, hb, dropped, layered,
                                          n, ink_max)
+    out, junk = _drop_right_junk(out, dark, min_cols)
+    if junk:
+        warnings.append(
+            f'**組成部の右端の列 {sorted(junk)} は本体に字がほとんど無い**ので'
+            '捨てた(紙面の欄外まで格子が伸びていた)．地点番号は詰めて振り直す')
     if trimmed:
         warnings.append(
             f'組成部の左端の列 {trimmed} は種名の領域にかかっていたので，右端 1 列ぶんだけを'
