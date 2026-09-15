@@ -231,13 +231,13 @@ def guess_parts(img, reader=None):
 
     Args:
         img: PIL の画像
-        reader: easyocr の Reader (省略すると `ocr.READER`)
+        reader: easyocr の Reader (省略すると `ocr.get_reader()`)
     Returns:
         [{'x1', 'x2', 'kind', 'texts'}, ...] を左から．`pitch` と `rows` も付ける
     """
     if reader is None:
         from . import ocr
-        reader = ocr.READER
+        reader = ocr.get_reader()
     dark = ink.binarize(img)
     pitch = guess_pitch(dark)
     rows = rough_rows(dark, pitch)
@@ -446,7 +446,7 @@ def guess_layout(img, reader=None):
     """
     if reader is None:
         from . import ocr
-        reader = ocr.READER
+        reader = ocr.get_reader()
     parts = guess_parts(img, reader)
     dark = ink.binarize(img)
     pitch, rows = parts['pitch'], parts['rows']
