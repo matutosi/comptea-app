@@ -67,6 +67,13 @@ RETRY_CLASS = 'comp'
 # `constancy_share`) が動いて，他のセルが要確認に回る．
 # **セル単位の「読めた」と，工程の要確認の数は別物**．
 RETRY_PAD = 3
+# **変わらなくなるまで繰り返す巡の上限** (2026-09-15)．
+# 保存済みの結果に同じ読み直しを当て直すと，17_p1 でだけ 43 セル読めた
+# (要確認 367 → 324)．画像・読み手・余白・束の大きさ・装置・補正はすべて
+# 同じで，**なぜ 1 回で取りこぼしたのかは分かっていない**．
+# 原因が分からなくても，**変化が無くなるまで回せば取りこぼさない**．
+# 2 巡目は要確認のセルだけが対象なので費用は小さい
+RETRY_ROUNDS = 3
 
 
 def retry_cells(img, df, reader, cls=RETRY_CLASS, pad=RETRY_PAD):
@@ -120,6 +127,32 @@ def retry_cells(img, df, reader, cls=RETRY_CLASS, pad=RETRY_PAD):
         print(f'読み直し: 組成の {int(hit.sum())} セルのうち {n} セルが読めた'
               ' (NDLOCR-Lite)')
     return out
+
+
+def retry_until_stable(img, df, reader, cls=RETRY_CLASS, pad=RETRY_PAD,
+                       rounds=RETRY_ROUNDS):
+    """**変わらなくなるまで**読み直す (2026-09-15)
+
+    1 回では取りこぼすことがある (17_p1 で 43 セル)．原因は未解明だが，
+    **変化が無くなるまで回せば取りこぼさない**．2 巡目以降は残った要確認の
+    セルだけが対象なので，費用は巡ごとに小さくなる．
+
+    Returns:
+        (格子, 回った巡の数)
+    """
+    out = df
+    for i in range(1, max(1, rounds) + 1):
+        before = int(((out['obj_name'] == cls)
+                      & (out['status'] == 'Need Check')).sum()) \
+            if 'status' in out.columns else 0
+        if not before:
+            return out, i - 1
+        out = retry_cells(img, out, reader, cls=cls, pad=pad)
+        after = int(((out['obj_name'] == cls)
+                     & (out['status'] == 'Need Check')).sum())
+        if after == before:
+            return out, i
+    return out, rounds
 
 
 def recorrect_cells(df, cls=RETRY_CLASS):
@@ -363,7 +396,7 @@ def main(argv=None):
             except Exception:
                 _img = None
             if _img is not None:
-                read = retry_cells(_img, read, rd)
+                read, _rounds = retry_until_stable(_img, read, rd)
     # AI が読み直したセルを後から見分けられるようにする
     if 'read_by' not in read.columns:
         read['read_by'] = '(未読)' if args.reader == 'ai' else 'easyocr'
