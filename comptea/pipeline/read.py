@@ -78,6 +78,9 @@ def retry_cells(img, df, reader, cls=RETRY_CLASS, pad=RETRY_PAD):
     (1 セルずつ呼ぶと 15 秒．別プロセスの起動と模型の読み込みのため)．
 
     領域をまとめて読む形は駄目だった (488 セル中 53 個しか割り当たらない)．
+
+    **読んだ文字列は `text_ndl` に残す** (2026-09-15)．補正で落ちた読みも残すので，
+    あとで補正の規則を良くしたときに，**OCR をやり直さずに当て直せる**．
     """
     from comptea import correct_text
 
@@ -96,10 +99,15 @@ def retry_cells(img, df, reader, cls=RETRY_CLASS, pad=RETRY_PAD):
     sub = out[hit]
     boxes = list(zip(sub['x1'], sub['y1'], sub['x2'], sub['y2']))
     got = reader.read_crops(img, boxes, pad=pad) or []
+    if 'text_ndl' not in out.columns:
+        out['text_ndl'] = ''
     n = 0
     for i, text in zip(sub.index, got):
         if not text:
             continue
+        # **読みそのものを残す** (2026-09-15)．補正で落ちた読みも残す —
+        # あとで補正の規則を良くしたとき，OCR をやり直さずに当て直せる
+        out.at[i, 'text_ndl'] = str(text)
         fixed = correct_text.correct_comp(str(text))
         if not fixed or fixed.get('status') != 'OK':
             continue
@@ -112,6 +120,39 @@ def retry_cells(img, df, reader, cls=RETRY_CLASS, pad=RETRY_PAD):
         print(f'読み直し: 組成の {int(hit.sum())} セルのうち {n} セルが読めた'
               ' (NDLOCR-Lite)')
     return out
+
+
+def recorrect_cells(df, cls=RETRY_CLASS):
+    """**保存した読みに，いまの補正を当て直す** (OCR はやり直さない．2026-09-15)
+
+    読み直し (`retry_cells`) の読みは `text_ndl` に残してある．補正の規則を
+    良くしたあと，**もう一度 OCR を回さずに**要確認を減らせる
+    (1 表あたり 4 分 → 1 秒)．
+
+    当てるのは**要確認のセルだけ**．OK のセルには触らない
+    (読めているものを補正の版で揺らさない)．
+
+    Returns:
+        (格子, 直した数)
+    """
+    from comptea import correct_text
+
+    if df is None or not len(df) or 'text_ndl' not in df.columns:
+        return df, 0
+    out = df.copy()
+    hit = ((out['obj_name'] == cls) & (out['status'] == 'Need Check')
+           & out['text_ndl'].astype(str).str.strip().ne(''))
+    n = 0
+    for i in out[hit].index:
+        fixed = correct_text.correct_comp(str(out.at[i, 'text_ndl']))
+        if not fixed or fixed.get('status') != 'OK':
+            continue
+        out.at[i, 'corrected'] = fixed['corrected']
+        out.at[i, 'status'] = 'OK'
+        now = str(out.at[i, 'note'] or '')
+        out.at[i, 'note'] = f'{now};ndl' if now else 'ndl'
+        n += 1
+    return out, n
 
 
 def blend(img, read, readers, ok=None):
