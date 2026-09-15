@@ -153,3 +153,65 @@ def test_入っていなければ空(monkeypatch):
 
 def test_箱が無ければ空():
     assert ndl.NdlReader(ndl_dir='x').read_crops(None, []) == []
+
+
+def test_途中で落ちたら枚数を知らせる(monkeypatch, tmp_path, capsys):
+    """**外の道具は画像を 1 枚ずつ回す**ので，1 枚で落ちると残りの JSON が無い
+
+    これまでは黙って空文字が返っていた．読み直しを 2 度めに回すと取りこぼしが
+    減る現象 (17_p1 で 43 セル) の説明が付く見込みで，まず**見えるようにする**
+    (2026-09-15)．
+    """
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    def fake_run(cmd, **kw):
+        src = cmd[cmd.index('--sourcedir') + 1]
+        dst = cmd[cmd.index('--output') + 1]
+        names = sorted(os.listdir(src))
+        for n in names[:1]:                 # 1 枚だけ書いて落ちる
+            doc = {'contents': [[{'boundingBox': [[0, 0], [9, 0], [9, 9], [0, 9]],
+                                  'text': 'x', 'confidence': 0.9}]]}
+            with open(os.path.join(dst, n.rsplit('.', 1)[0] + '.json'), 'w',
+                      encoding='utf-8') as f:
+                json.dump(doc, f)
+
+        class R:
+            returncode = 1
+            stderr = 'RuntimeError: out of memory'
+            stdout = ''
+        return R()
+
+    monkeypatch.setattr(ndl.subprocess, 'run', fake_run)
+    r = ndl.NdlReader(ndl_dir=str(tmp_path))
+    img = Image.new('RGB', (200, 200), 'white')
+    got = r.read_crops(img, [(0, 0, 20, 20), (20, 20, 40, 40), (40, 40, 60, 60)])
+    assert got == ['x', '', '']
+    out = capsys.readouterr().out
+    assert '終了コード 1' in out
+    assert '2 枚は結果が' in out
+    assert 'out of memory' in out
+
+
+def test_全部読めれば何も言わない(monkeypatch, tmp_path, capsys):
+    pytest.importorskip('PIL')
+    from PIL import Image
+
+    def fake_run(cmd, **kw):
+        src = cmd[cmd.index('--sourcedir') + 1]
+        dst = cmd[cmd.index('--output') + 1]
+        for n in sorted(os.listdir(src)):
+            doc = {'contents': [[{'boundingBox': [[0, 0], [9, 0], [9, 9], [0, 9]],
+                                  'text': 'x', 'confidence': 0.9}]]}
+            with open(os.path.join(dst, n.rsplit('.', 1)[0] + '.json'), 'w',
+                      encoding='utf-8') as f:
+                json.dump(doc, f)
+
+        class R:
+            returncode = 0
+        return R()
+
+    monkeypatch.setattr(ndl.subprocess, 'run', fake_run)
+    r = ndl.NdlReader(ndl_dir=str(tmp_path))
+    r.read_crops(Image.new('RGB', (200, 200), 'white'), [(0, 0, 20, 20)])
+    assert capsys.readouterr().out.strip() == ''

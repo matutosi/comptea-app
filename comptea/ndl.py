@@ -104,16 +104,27 @@ class NdlReader:
                 names.append(name)
                 img.crop((max(0, x1), max(0, y1), x2, y2)).convert('RGB').save(
                     os.path.join(src, name + '.png'))
-            subprocess.run(
+            res = subprocess.run(
                 [self.python, 'ocr.py', '--sourcedir', src, '--output', dst,
                  '--device', self.device],
                 cwd=self.dir, capture_output=True, text=True,
                 encoding='utf-8', errors='replace')
+            # **途中で落ちても黙って空が返っていた** (2026-09-15)．外の道具は
+            # 画像を 1 枚ずつ回すので，**1 枚で落ちると残りの JSON が作られない**．
+            # 読み直しを 2 度めに回すと取りこぼしが減る現象 (17_p1 で 43 セル) は
+            # これで説明が付く．**落ちたことと，欠けた枚数を知らせる**
+            if res.returncode:
+                tail = (res.stderr or res.stdout or '').strip().splitlines()
+                print(f'  読み直し: 外の道具が終了コード {res.returncode} で終わった'
+                      f'({len(boxes)} 枚を渡した)．'
+                      + (f'最後の出力: {tail[-1][:160]}' if tail else ''))
             out = []
+            missing = 0
             for name in names:
                 f = os.path.join(dst, name + '.json')
                 if not os.path.isfile(f):
                     out.append('')
+                    missing += 1
                     continue
                 try:
                     with open(f, encoding='utf-8') as fh:
@@ -122,6 +133,11 @@ class NdlReader:
                     out.append('')
                     continue
                 out.append(''.join(t for _b, t, _c in parse(doc)))
+            if missing:
+                # 欠けた枚数は，取りこぼしの大きさそのもの
+                print(f'  読み直し: {len(boxes)} 枚のうち **{missing} 枚は結果が'
+                      '作られなかった** (外の道具が途中で終わった見込み)．'
+                      '読み直しをもう一巡すれば拾える')
         return out
 
     def read_boxes(self, img, box=None):
