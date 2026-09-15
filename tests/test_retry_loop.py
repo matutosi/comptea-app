@@ -83,3 +83,45 @@ def test_読み手が無ければ何もしない():
     got, rounds = read_mod.retry_until_stable(None, _df(2), None)
     assert _left(got) == 2
     assert rounds == 1                         # 1 巡目で変化なし → 止まる
+
+
+# --- 読み直す対象の選び方 (2026-09-15) --------------------------------------
+
+def _cells(rows):
+    import pandas as pd
+    return pd.DataFrame(rows)
+
+
+def test_要確認のセルを選ぶ():
+    df = _cells([{'obj_name': 'comp', 'status': 'Need Check', 'text': 'x'},
+                 {'obj_name': 'comp', 'status': 'OK', 'text': '1'}])
+    assert list(read_mod.retry_targets(df)) == [True, False]
+
+
+def test_判定の付いていない字のあるセルも選ぶ():
+    """`correct_comp` が何も返さない読み (点線) は `status` が空のまま残り，
+    **段階 3 で初めて要確認になる**．17_p1 で 12 件あった (うち 3 件は
+    読み直すと値になった: `4;4`・`1;2`・`2`)．
+    """
+    df = _cells([{'obj_name': 'comp', 'status': None, 'text': '……'},
+                 {'obj_name': 'comp', 'status': None, 'text': '‥'}])
+    assert list(read_mod.retry_targets(df)) == [True, True]
+
+
+def test_空のセルは選ばない():
+    """17_p1 は組成 63,232 のうち 59,784 が空．混ぜると桁違いに重くなる"""
+    df = _cells([{'obj_name': 'comp', 'status': None, 'text': ''},
+                 {'obj_name': 'comp', 'status': None, 'text': None},
+                 {'obj_name': 'comp', 'status': None, 'text': '  '}])
+    assert list(read_mod.retry_targets(df)) == [False, False, False]
+
+
+def test_組成以外は選ばない():
+    df = _cells([{'obj_name': 'layer', 'status': 'Need Check', 'text': 'K'},
+                 {'obj_name': 'comp', 'status': 'Need Check', 'text': 'x'}])
+    assert list(read_mod.retry_targets(df)) == [False, True]
+
+
+def test_判定の列が無ければ選ばない():
+    df = _cells([{'obj_name': 'comp', 'text': 'x'}])
+    assert not read_mod.retry_targets(df).any()

@@ -76,6 +76,31 @@ RETRY_PAD = 3
 RETRY_ROUNDS = 3
 
 
+def retry_targets(df, cls=RETRY_CLASS):
+    """読み直す対象のセル (要確認と，**判定の付いていない字のあるセル**)
+
+    `correct_comp` が何も返さない読み (点線・記号だけ) では `status` が空のまま
+    残り，**段階 3 で初めて要確認になる** (`comp_table` が `validate_comp` で
+    判定し直すため)．要確認だけを選ぶと，そのセルは読み直しの対象から外れていた
+    — 17_p1 は段階 2 で 349・段階 3 で 360 と 11 件ずれ，その中身がこれだった
+    (2026-09-15 に突き合わせて分かった)．
+
+    **空のセルは混ぜない**．17_p1 は組成 63,232 のうち 59,784 が空で，
+    混ぜると読み直しが桁違いに重くなる (空のセルは `retry_empty_comp` の持ち場)．
+    """
+    import pandas as pd
+
+    if df is None or not len(df) or 'status' not in df.columns:
+        return pd.Series(False, index=getattr(df, 'index', None))
+    need = df['status'] == 'Need Check'
+    if 'text' in df.columns:
+        # `astype('string')` は None も float の nan も欠測のまま残す
+        # (`astype(str)` だと 'None'・'nan' という**字のある値**になる)
+        text = df['text'].astype('string').str.strip()
+        need = need | (df['status'].isna() & text.notna() & (text != ''))
+    return (df['obj_name'] == cls) & need
+
+
 def retry_cells(img, df, reader, cls=RETRY_CLASS, pad=RETRY_PAD):
     """**読めなかった組成のセルを，まとめて読み直す**
 
@@ -100,7 +125,7 @@ def retry_cells(img, df, reader, cls=RETRY_CLASS, pad=RETRY_PAD):
     out = df.copy()
     if 'status' not in out.columns:
         return out
-    hit = (out['obj_name'] == cls) & (out['status'] == 'Need Check')
+    hit = retry_targets(out, cls)
     if not hit.any():
         return out
     sub = out[hit]
@@ -142,14 +167,11 @@ def retry_until_stable(img, df, reader, cls=RETRY_CLASS, pad=RETRY_PAD,
     """
     out = df
     for i in range(1, max(1, rounds) + 1):
-        before = int(((out['obj_name'] == cls)
-                      & (out['status'] == 'Need Check')).sum()) \
-            if 'status' in out.columns else 0
+        before = int(retry_targets(out, cls).sum())
         if not before:
             return out, i - 1
         out = retry_cells(img, out, reader, cls=cls, pad=pad)
-        after = int(((out['obj_name'] == cls)
-                     & (out['status'] == 'Need Check')).sum())
+        after = int(retry_targets(out, cls).sum())
         if after == before:
             return out, i
     return out, rounds
