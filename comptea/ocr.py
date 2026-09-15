@@ -2,7 +2,6 @@ import base64
 import io
 import numpy as np
 import pandas as pd
-import easyocr
 from PIL import Image, ImageOps
 
 from . import ink
@@ -42,10 +41,31 @@ def add_margin(img, top=20, right=20, bottom=20, left=20, color='white'):
     result.paste(img, (left, top))
     return result
 
-READER = easyocr.Reader(['ja', 'en'])   # 作るのに時間がかかるので使い回す
+# **読み手は初めて使うときに作る** (2026-09-15)．import の時点で作ると
+# (a) EasyOCR の入っていない環境では `import comptea.ocr` そのものが落ち
+# (CI がテストの収集でこけた)，(b) 読まない仕事でも 10 秒待たされる．
+# 呼ぶ側は `ocr.get_reader()` を使う (`ocr.READER` は廃した．
+# 字面で確かめる歯止め `tests/test_wiring.py` は実体のある名前しか認めない)．
+_READER = None
 
 
-def ocr_image(img, box, reader = READER, clean=False, allow=None):
+def get_reader():
+    """EasyOCR の読み手 (使い回す)．入っていなければ ImportError
+
+    **名前を `reader` にしない**．読み手を引数で受け取る関数が多く，
+    その中で影に隠れる (`reader = reader if ... else reader()` が
+    `None` を呼ぶことになる)．
+    """
+    global _READER
+    if _READER is None:
+        import easyocr
+
+        _READER = easyocr.Reader(['ja', 'en'])
+    return _READER
+
+
+def ocr_image(img, box, reader=None, clean=False, allow=None):
+    reader = reader if reader is not None else get_reader()
     # **座標の上下・左右を整える**(2026-09-03)．格子の端で高さや幅が
     # 負になる箱ができることがあり(s01115_18_p2 の表頭の 1 行)，
     # そのまま crop すると PIL が落ちて読み取りが途中で止まる
@@ -118,7 +138,7 @@ def retry_comp_cell(img, box, thin: bool):
     # 被度・群度の字種で読み，値にならなければ**括弧付きの字種**でもう一度
     # (2026-09-05)．狭い方を先に試すので，括弧の無い表の結果は変わらない
     for allow in (COMP_ALLOW, CONSTANCY_ALLOW):
-        res = READER.recognize(np.array(cell), allowlist=allow)
+        res = get_reader().recognize(np.array(cell), allowlist=allow)
         text = ' '.join(t[1] for t in res) if res else ''
         if not text.strip():
             continue
@@ -146,7 +166,7 @@ def retry_layer_cell(img, box):
     from . import correct_text
 
     cell = trim_image(ink.erase_box_lines(img.crop(box)))
-    res = READER.recognize(np.array(cell), allowlist=LAYER_ALLOW)
+    res = get_reader().recognize(np.array(cell), allowlist=LAYER_ALLOW)
     text = ' '.join(t[1] for t in res) if res else ''
     if not text.strip():
         return ''
@@ -383,6 +403,8 @@ def jpg2base64(img):
 
 
 if __name__ == "__main__":
+    import easyocr
+
     reader = easyocr.Reader(['ja','en'])
     path = "located.csv"
     df_all = pd.read_csv(path)

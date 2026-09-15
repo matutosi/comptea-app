@@ -583,7 +583,7 @@ def read_marks(im, reader=None, tile=TILE, least=LEAST, orientations=ORIENTATION
     """
     if reader is None:
         from . import ocr
-        reader = ocr.READER
+        reader = ocr.get_reader()
     best, best_how = [], orientations[0]
     for how in orientations:
         img = rotate(im, how)

@@ -48,7 +48,7 @@ def _reader():
     """段階 2 と同じ reader を使い回す (作るのに 10 秒ほどかかる)．無ければ None"""
     try:
         from . import ocr
-        return ocr.READER
+        return ocr.get_reader()
     except Exception:            # noqa: BLE001  easyocr が無い・モデルが無い
         return None
 

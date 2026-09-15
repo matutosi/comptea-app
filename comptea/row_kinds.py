@@ -223,9 +223,10 @@ def reader_or_none(reader=None):
         return reader
     try:
         from . import ocr
+
+        return ocr.get_reader()
     except Exception:                           # noqa: BLE001  入っていない
         return None
-    return getattr(ocr, 'READER', None)
 
 
 def read_texts(img, box, reader=None, pad=0.0):
