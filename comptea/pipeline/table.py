@@ -17,6 +17,11 @@ import sys
 from . import common as _common
 
 
+# 読めなくて当たり前の行の印 (流し込み・「1 回出現の種」・見出し)．
+# 要確認の数から分けて出す (2026-09-15)
+SKIP_MARKS = 'flow|once|heading'
+
+
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description='縦持ちに組んで検査する')
     p.add_argument('workdir')
@@ -63,9 +68,19 @@ def check(df_long, df_plot, out):
         out.append('[重複] なし')
 
     # 3. 被度として読めない形．OCR の誤りが残っている
+    # **印の付いた行は見なくてよい** (2026-09-15)．流し込み・「1 回出現の種」・
+    # 見出しの行は，読めなくて当たり前 (種名の文章が行に入っている)．
+    # 全 147 表で要確認 1,027 件のうち **379 件 (37%)** がこれで，
+    # 混ぜて数えると「まだこんなに残っている」と見えてしまう
     ng = df_long[df_long['status'] == 'Need Check']
-    out.append(f'[被度] 読めない形 {len(ng)} 件')
-    for _, r in ng.head(20).iterrows():
+    mark = ng['note'].fillna('').str.contains(SKIP_MARKS) if len(ng) else ng
+    see = ng[~mark] if len(ng) else ng
+    skip = len(ng) - len(see)
+    out.append(f'[被度] 読めない形 {len(ng)} 件'
+               + (f' (うち {skip} 件は流し込み・1 回出現の種・見出しの行なので'
+                  f'**見なくてよい**．**見るべきは {len(see)} 件**)'
+                  if skip else ''))
+    for _, r in see.head(20).iterrows():
         out.append(f'  地点{r["plot"]} 行{r["row_no"]} {r["j_name"]} = {r["comp_raw"]!r}')
 
     # 4. 位置決めで気になった点が残っているセル
