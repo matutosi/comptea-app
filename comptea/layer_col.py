@@ -637,3 +637,162 @@ def refit_layer_width(img, df_loc):
     if not changed:
         return df_loc, warnings
     return out, warnings
+
+
+JOIN_MIN_OVER = 3       # これ以下の重なりは触らない (px)．数 px は箱のゆらぎ
+
+
+JOIN_BLOB_GAP = 4       # 字の塊をつなぐ隙間の上限 (px)．記号と値のあいだの谷は
+                        # 8 px しかない (kinki_076)．`_blobs` の 0.8 行 (32 px)
+                        # ではまたいでしまう
+
+
+JOIN_VALLEY = 0.2       # 票が行数のこの割合を超える x を「字あり」とみなす．
+                        # `LAYER_LO_F` (5%) では谷が字に見える (kinki_076 の谷は
+                        # 2〜3 / 20 行 = 10〜15%．記号と値は 18 / 20)
+
+
+JOIN_CUT_MAX = 0.03     # 谷の中でいちばん空いた x でも，行数のこの割合 (または
+                        # 1 行) を超えて字を割るなら動かさない．**谷はほぼ空で
+                        # なければならない** (kinki_076 は 1/20 行・045-1 は
+                        # 0/36 行)．0.1 では 05_p2 を通してしまい，谷に見えた所に
+                        # 237 行中 23 行の値があって**本物の値 17 件が消えた**
+                        # (2026-09-15 に測った)
+                        # (kinki_076 は記号 18/20・値 18/20 に対し谷 2〜3)
+
+
+def join_layer_comp_edge(img, df_loc, min_over=JOIN_MIN_OVER):
+    """**階層の枠と組成の 1 列目が重なっていたら，境を印字の谷で 1 本にする**
+
+    同じ規則が `refit_layer_width` にもあるが，そちらは**階層の枠が記号を
+    切っている段**でしか動かない (`LAYER_CLIP_MIN` を超える段だけ直す)．
+    記号が枠に収まっていても，組成の 1 列目が階層へ食い込む紙面がある．
+    そのとき**組成のセルが階層の記号を拾い**，`K;+`・`S;4;4` のような
+    読めない値になる (kinki_076 の段 2 は 28 px 重なり，14 件が要確認．
+    2026-09-15 に測った)．
+
+    境は**印字の谷**に置く．kinki_076 の段 2 は，記号の塊 (x 2128-2156，
+    18/20 行) と値の塊 (2164-2200，18/20 行) のあいだに票 2〜3 の谷があり，
+    いまの境 2124 は**記号の塊の中**にある．
+
+    歯止めは `refit_layer_width` と同じ 3 つ．
+    (a) 組成の 1 列目に `LAYER_COMP_MIN_W` 倍の幅が残ること，
+    (b) 印字の縦罫線があればそれを越えないこと，
+    (c) 動かして**組成の値を割る回数が増えない**こと．
+
+    Returns:
+        (直した格子, 警告のリスト)．直す所が無ければ元の格子をそのまま返す
+    """
+    if df_loc is None or len(df_loc) == 0 or 'obj_name' not in df_loc.columns:
+        return df_loc, []
+    if 'block' not in df_loc.columns or 'row' not in df_loc.columns:
+        return df_loc, []
+    if not (df_loc['obj_name'] == 'layer').any():
+        return df_loc, []
+    dark = None
+    out = df_loc
+    warnings = []
+    for block, g in df_loc.groupby('block', sort=True):
+        lay = g[g['obj_name'] == 'layer']
+        comp = g[g['obj_name'] == 'comp']
+        if lay.empty or comp.empty or lay['row'].nunique() < 5:
+            continue
+        c_left = float(comp['x1'].min())
+        l_x1, l_x2 = float(lay['x1'].min()), float(lay['x2'].max())
+        if l_x2 - c_left <= min_over:
+            continue                            # 重なっていない
+        widths = (comp.groupby('col')['x2'].max()
+                  - comp.groupby('col')['x1'].min())
+        c_w = float(np.median(widths))
+        first_col = comp[comp['x1'].astype(float) <= c_left + 0.5]
+        c_right = float(first_col['x2'].max())
+        pitch = float(np.median(comp['y2'].astype(float)
+                                - comp['y1'].astype(float)))
+        if not (pitch > 0 and c_right > c_left):
+            continue
+        if dark is None:
+            dark = ink.binarize(img)
+        rows = [(float(a), float(b)) for a, b in
+                lay.drop_duplicates('row')[['y1', 'y2']].values]
+        votes = _layer_votes(dark, l_x1, c_right, rows, pitch)
+        if votes.size == 0:
+            continue
+        # **記号の塊を特定してから，その右の谷を探す**．
+        # 塊は `_blobs` ではなく**狭い隙間**でつなぐ (`_blobs` は行の高さの
+        # 0.8 倍 = kinki_076 で 32 px までつなぐので，記号と値のあいだの谷
+        # 8 px をまたいで 1 つになる)．
+        # 記号の塊は**いまの階層の枠と重なるもの**．いちばん左の字を記号と
+        # みなすと，記号の**左**の余白を選んでしまう
+        # (kinki_045-1 は 1761 を選び，記号 1763-1790 がセルに残った)
+        n = len(rows)
+        on = np.flatnonzero(votes > JOIN_VALLEY * n)
+        if on.size == 0:
+            continue
+        brk = np.flatnonzero(np.diff(on) > JOIN_BLOB_GAP)
+        b_starts = np.r_[on[0], on[brk + 1]].tolist()
+        b_ends = (np.r_[on[brk], on[-1]] + 1).tolist()
+        lay_w = l_x2 - l_x1
+        over = [(s2, e2) for s2, e2 in zip(b_starts, b_ends)
+                if s2 < lay_w and e2 > 0]
+        if not over:
+            continue
+        sym_end = max(e2 for _s2, e2 in over)    # 記号の右端
+        after = [s2 for s2 in b_starts if s2 >= sym_end]
+        a = sym_end
+        b = min(after) if after else int(c_right - l_x1)
+        if b <= a:
+            continue
+        # **谷の中で，字を割る回数がいちばん少ない x に置く** (同じなら左端．
+        # 組成の 1 列目を広く残す)．**印字の縦罫線は越えない**
+        rule_x = _vrule_between(dark, l_x1 + a, l_x1 + b, rows)
+        from .col_edges import crossing_counts
+        bands = [(float(y1), float(y2)) for y1, y2 in
+                 comp.drop_duplicates('row')[['y1', 'y2']].values]
+        cross = crossing_counts(dark, bands, dark.shape[1])
+        lo, hi = l_x1 + a, l_x1 + b
+        # **新しい 1 列目に印字の縦罫線が残るなら動かさない** (2026-09-15)．
+        # 罫線はセルの中で `1` と読まれる．kinki_045-1 は谷 (1791-1832) の右に
+        # 罫線 1832-1837 があり，境を 1793 に置くと列の中に罫線が入って
+        # **`5`・`4`・`3` がすべて `1` になった**．要確認は 7 → 0 になるので，
+        # **数だけでは見抜けない** (中身を突き合わせて分かった)
+        inner_rule = _vrule_between(dark, lo + 2, c_right - 2, rows)
+        if inner_rule is not None:
+            warnings.append(
+                f'段{block}: 階層と組成の境は動かさなかった'
+                f'(組成の 1 列目に印字の縦罫線 {inner_rule:.0f} px が残る)')
+            continue
+        if rule_x is not None:
+            hi = min(hi, rule_x)
+        cand = [x for x in range(int(max(lo, c_left + 2)), int(hi) + 1)
+                if x < c_right - 1]
+        if not cand:
+            continue
+        best = min(cand, key=lambda x: (int(cross[x]), x))
+        edge, now = float(best), int(cross[best])
+        if c_right - edge < c_w * LAYER_COMP_MIN_W:
+            warnings.append(
+                f'段{block}: 階層と組成の境は動かさなかった'
+                f'(動かすと組成の 1 列目が {c_right - edge:.0f} px になる)')
+            continue
+        # **歯止めは「谷が十分に空いていること」**．ここでは
+        # 「いまの境より増えないこと」は使えない．いまの境は**記号の左の余白**に
+        # あって割る回数 0 なので (kinki_076 は 2124 で 0)，どこへ動かしても
+        # 増えたように見える．記号がセルに入っている害の方が大きい
+        if now > max(1, JOIN_CUT_MAX * len(rows)):
+            warnings.append(
+                f'段{block}: 階層と組成の境は動かさなかった'
+                f'(いちばん空いた x でも {now} / {len(rows)} 行の字を割る)')
+            continue
+        out = out.copy() if out is df_loc else out
+        first = ((out['block'] == block) & (out['obj_name'] == 'comp')
+                 & (out['x1'].astype(float) <= c_left + 0.5))
+        out.loc[first, 'x1'] = float(edge)
+        out.loc[(out['block'] == block) & (out['obj_name'] == 'layer'),
+                'x2'] = float(edge)
+        warnings.append(
+            f'段{block}: **階層と組成の境を印字の谷に合わせた** '
+            f'({c_left:.0f} → {edge:.0f} px．階層の枠 {l_x2:.0f} と重なっていた)'
+            + ('．印字の縦罫線に合わせた' if rule_x is not None else ''))
+    if out is df_loc:
+        return df_loc, warnings
+    return out, warnings

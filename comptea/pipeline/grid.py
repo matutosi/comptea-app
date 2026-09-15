@@ -291,6 +291,12 @@ def _polish_grid(image, df_det, df_loc, args):
     df_loc, lw_warn = layer_col.refit_layer_width(Image.open(image), df_loc)
     warnings += lw_warn
 
+    # **階層の枠と組成の 1 列目が重なっていたら，境を印字の谷に置く** (2026-09-15)．
+    # 上の直しは「記号が枠からはみ出す段」しか見ないので，記号が枠に収まったまま
+    # 組成が食い込む紙面が残る (kinki_076 の段 2 は 28 px 重なり，14 件が要確認)
+    df_loc, jn_warn = layer_col.join_layer_comp_edge(Image.open(image), df_loc)
+    warnings += jn_warn
+
     # 行の種類 (見出し・学名だけの行・凡例) を見分けて note に付ける (案 e の段階 3)．
     # **行は落とさない**．落とすと真値との一致 (行の recall 1.000) が下がる
     from comptea import header_lines, row_kinds
