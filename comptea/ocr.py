@@ -234,49 +234,6 @@ def ocr_images_df(df):
     return retry_empty_comp(df, image, img)
 
 
-RETRY_MIN_COL = 8       # 列ごとに測るのに要る，読めたセルと読めなかったセルの数の下限
-
-
-def _thresholds(blank_ratios, full_ratios):
-    """「何も無い」と「値がある」の高さから，(読み直す高さ, 薄いとみなす高さ)"""
-    blank = float(np.percentile(blank_ratios, 10))
-    full = float(np.median(full_ratios)) if len(full_ratios) else blank * 6
-    if full <= blank:
-        full = blank * 6 or 0.05
-    return blank + (full - blank) * RETRY_AT, blank + (full - blank) * THIN_AT
-
-
-def empty_limits(df, ratios, read_ratios, min_col=RETRY_MIN_COL):
-    """読めなかったセルごとの (読み直す高さ, 薄いとみなす高さ)
-
-    **列ごとに測る** (2026-09-16)．表全体の統計で 1 つの高さを決めていたので，
-    **ある列の箱を変えると，触っていない列の読み直しまで動いた**．
-    左端の列の左の境を押し出すと 19_p2 で地点 1 以外が 7 件，
-    欄外の列を捨てると 04_p1 で本物の `+` が 1 件消えた．
-    列ごとに測れば，ある列の変化は他の列の高さに波及しない．
-
-    **列に読めたセル・読めなかったセルが `min_col` 未満なら，表全体の高さに戻す**
-    (出現の少ない地点では中央値が当てにならない)．`col` が無ければ表全体．
-    """
-    table = _thresholds(list(ratios.values()), list(read_ratios.values()))
-    if 'col' not in df.columns:
-        return {i: table for i in ratios}
-    by_col = {}
-    for i in ratios:
-        by_col.setdefault(df.at[i, 'col'], ([], []))[0].append(i)
-    for i in read_ratios:
-        by_col.setdefault(df.at[i, 'col'], ([], []))[1].append(i)
-    out = {}
-    for _c, (emp, rd) in by_col.items():
-        if len(emp) >= min_col and len(rd) >= min_col:
-            lim = _thresholds([ratios[i] for i in emp], [read_ratios[i] for i in rd])
-        else:
-            lim = table
-        for i in emp:
-            out[i] = lim
-    return out
-
-
 def retry_empty_comp(df, image, img):
     """読めなかった組成部のセルのうち，**字のあるものだけ**読み直す
 
@@ -309,11 +266,14 @@ def retry_empty_comp(df, image, img):
                          df.at[i, 'x1'], df.at[i, 'x2'])
 
     ratios = {i: ratio(i) for i in empty}
-    read_ratios = {i: ratio(i) for i in read}
-    limits = empty_limits(df, ratios, read_ratios)
+    blank = float(np.percentile(list(ratios.values()), 10))
+    full = float(np.median([ratio(i) for i in read])) if read else blank * 6
+    if full <= blank:
+        full = blank * 6 or 0.05
+    limit = blank + (full - blank) * RETRY_AT
+    thin_at = blank + (full - blank) * THIN_AT
     n = 0
     for i in empty:
-        limit, thin_at = limits[i]
         if ratios[i] <= limit:
             continue
         box = (df.at[i, 'x1'], df.at[i, 'y1'], df.at[i, 'x2'], df.at[i, 'y2'])
