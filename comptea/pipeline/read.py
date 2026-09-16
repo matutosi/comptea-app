@@ -331,6 +331,33 @@ def reasons_for(row, suspect, reader='easyocr'):
     return out
 
 
+def push_left_rule(df, work):
+    """**組成部の左端の列を，左の縦罫線より右へ押し出す** (切り出しだけ．2026-09-16)
+
+    格子 (`located.csv`) はそのまま残し，読む箱だけを動かす
+    (理由は `comptea/left_rule.py`)．罫線が当たらない表では何もしない．
+    """
+    from comptea import ink, left_rule, source
+
+    comp = df[df['obj_name'] == 'comp']
+    if comp.empty or 'col' not in comp.columns:
+        return df
+    try:
+        img = source.open_image(df, workdir=work)
+    except FileNotFoundError:
+        return df
+    dark = ink.binarize(img)
+    rule = left_rule.fit_rule(dark, comp)
+    if rule is None:
+        return df
+    out, moved = left_rule.push_first_column(df, rule, dark=dark)
+    if moved:
+        print(f'組成部の左端の列 {moved} セルの左の境を，縦罫線より右へ押し出した'
+              f'(罫線 x = {rule[0] * 1000:+.1f}/1000・y + {rule[1]:.0f})．'
+              '格子のファイルは変えず，読む箱だけを動かす')
+    return out
+
+
 def main(argv=None):
     args = parse_args(argv)
     work, = _common.setup([args.workdir])
@@ -344,6 +371,7 @@ def main(argv=None):
         from comptea import ocr  # import に時間がかかる(EasyOCR のモデルを読む)
 
     df = pd.read_csv(work / 'located.csv')
+    df = push_left_rule(df, work)
     # --only で読み直すときは，前の結果を残したまま該当セルだけ差し替える
     base = None
     if args.only and (work / 'ocred.csv').is_file():
