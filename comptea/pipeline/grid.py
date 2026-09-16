@@ -899,6 +899,14 @@ def main(argv=None):
     if failed:
         print(f'\n表 {", ".join(str(i) for i, _ in failed)} は格子にできなかった'
               '(上の理由を読む)')
+    from comptea import deskew as _deskew
+    for work in done:
+        # **版と設定を書き残す** (2026-09-16．比べるときに設定の違いに気づくため)
+        _common.write_run_info(work, 'grid', {
+            'weights': Path(str(args.weights)).name if args.weights else 'default',
+            'imgsz': args.imgsz, 'conf': args.conf, 'conf_col': args.conf_col,
+            'deskew_lag_pitch': _deskew.LAG_PITCH,
+            'deskew_min_rows': _deskew.DESKEW_MIN_ROWS})
     print('\n次: 下の overlay.png を見て判断する(段階1)')
     for work in done:
         print(f'  {work / "overlay.png"}')

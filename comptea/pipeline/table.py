@@ -180,6 +180,12 @@ def main(argv=None):
     out.append('--- 検査 ---')
     check(df_long, df_plot, out)
 
+    _common.write_run_info(work, 'table', {})
+    # **版と設定を先頭に出す** (2026-09-16)．別の日の通しと比べるとき，
+    # 1 行見れば「コミットしていない状態で回した」「余白が違う」と気づける
+    info = _common.run_info_line(work)
+    if info:
+        out.insert(0, info)
     text = '\n'.join(out)
     print(text)
     _common.show_warnings(df_long.attrs.get('warnings', []), '--- comp_table の警告 ---')

@@ -137,3 +137,83 @@ def show_warnings(warnings, head='--- warnings ---'):
         print(f'  ! {w}')
     if must:
         print(f'  ({len(must)} 件が要確認 / {len(note)} 件は参考)')
+
+
+def code_version(root=None):
+    """いまのコードの版 (コミットの短い名と，**未コミットの変更があるか**)
+
+    2026-09-16 に足した．保存した通しの結果が**コミットしていない作業ツリーの
+    状態**で回されていたのに気づかず，「17_p1 が 22 件後退した」と取り違えた
+    (実際は読み直しの余白が 3 ではなく広いままだった)．版と変更の有無が
+    結果に残っていれば，比べる前に 1 行で気づける．
+
+    Returns:
+        {'commit': 短い名, 'dirty': bool} か，git が無い環境では None
+    """
+    import subprocess
+    root = Path(root) if root else package_dir().parent
+    try:
+        head = subprocess.run(['git', '-C', str(root), 'rev-parse', '--short', 'HEAD'],
+                              capture_output=True, text=True, timeout=10)
+        if head.returncode != 0:
+            return None
+        # **中核のコードだけ**を見る (文書や的の変更は結果を変えない)
+        st = subprocess.run(['git', '-C', str(root), 'status', '--porcelain',
+                             '--', 'comptea'],
+                            capture_output=True, text=True, timeout=10)
+        return {'commit': head.stdout.strip(),
+                'dirty': bool(st.stdout.strip()) if st.returncode == 0 else None}
+    except Exception:                                   # noqa: BLE001
+        return None                                     # git が無い・時間切れ
+
+
+RUN_INFO = 'run_info.json'
+
+
+def write_run_info(work, stage, settings=None):
+    """作業ディレクトリの `run_info.json` に，その段の版と設定を書き足す
+
+    段ごとに上書きする (段階 2 をやり直せば段階 2 の記録だけが新しくなる)．
+    """
+    import json
+    from datetime import datetime
+    p = Path(work) / RUN_INFO
+    info = {}
+    if p.is_file():
+        try:
+            info = json.loads(p.read_text(encoding='utf-8'))
+        except (ValueError, OSError):
+            info = {}
+    info[stage] = {'time': datetime.now().isoformat(timespec='seconds'),
+                   'version': code_version(),
+                   'settings': settings or {}}
+    p.write_text(json.dumps(info, ensure_ascii=False, indent=1), encoding='utf-8')
+    return info[stage]
+
+
+def run_info_line(work):
+    """`run_info.json` を 1〜2 行にまとめる (`checks.txt` の先頭に出す)．無ければ ''"""
+    import json
+    p = Path(work) / RUN_INFO
+    if not p.is_file():
+        return ''
+    try:
+        info = json.loads(p.read_text(encoding='utf-8'))
+    except (ValueError, OSError):
+        return ''
+    parts, dirty = [], False
+    for stage in ('grid', 'read', 'table'):
+        v = (info.get(stage) or {}).get('version')
+        if not v:
+            continue
+        mark = '*' if v.get('dirty') else ''
+        dirty = dirty or bool(v.get('dirty'))
+        parts.append(f'{stage} {v.get("commit")}{mark}')
+    lines = []
+    if parts:
+        lines.append('版     : ' + ' / '.join(parts)
+                     + ('  (* は未コミットの変更あり)' if dirty else ''))
+    rs = (info.get('read') or {}).get('settings') or {}
+    if rs:
+        lines.append('設定   : ' + ' '.join(f'{k}={v}' for k, v in sorted(rs.items())))
+    return '\n'.join(lines)

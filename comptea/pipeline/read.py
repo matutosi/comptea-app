@@ -489,6 +489,12 @@ def main(argv=None):
         if len(review) and review['reason'].str.contains(key).any():
             print(f'  * {key}: {text}')
 
+    from comptea import left_rule as _lr
+    _common.write_run_info(work, 'read', {
+        'reader': args.reader, 'device': args.device or 'auto',
+        'retry_pad': RETRY_PAD, 'retry_rounds': RETRY_ROUNDS,
+        'left_rule_margin': _lr.RULE_MARGIN,
+        'retry': not args.no_retry})
     print(f'\n書いた: {work / "ocred.csv"} / {work / "review.tsv"}')
     print('次: crop_cells.py で切り出して目で読む(段階2)')
     if args.reader in ('ai', 'both'):
