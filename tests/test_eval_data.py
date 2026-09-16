@@ -76,8 +76,12 @@ def test_データが見あたらなければ止める(mod, here, monkeypatch):
 def test_物差しは全部この部品を呼ぶ():
     """1 本でも呼び忘れると，その物差しだけ置き場が効かない"""
     root = pathlib.Path(conftest.ROOT) / 'eval'
+    # **データの置き場を使わない道具は除く** (2026-09-16)．`compare_runs.py` は
+    # ラベルも正解表も読まず，比べる置き場を引数で受け取る．`use_data_dir()` で
+    # 作業ディレクトリが移ると，**渡した相対パスが壊れる**
+    no_data = {'_data.py', 'compare_runs.py'}
     for p in sorted(root.glob('*.py')):
-        if p.name == '_data.py':
+        if p.name in no_data:
             continue
         s = p.read_text(encoding='utf-8')
         assert 'from _data import use_data_dir' in s, p.name
