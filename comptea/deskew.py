@@ -19,6 +19,8 @@ DESKEW_MIN_ROWS = 0.3     # 左右のずれが行の高さのこの倍未満な�
 DESKEW_MAX_DEG = 1.5      # これを超える推定は信じない(測り損ね．実在する傾きは最大 1.06°．
                           # 04_p2 は −2.27° を採用して 122 行 → 34 行・種名 0 になった)
 MAX_LAG_RATIO = 0.05      # ずれを探す範囲(帯の高さに対する比)
+LAG_PITCH = 0.5           # 行の高さが分かるときは，その倍まで (行の周期に
+                          # ロックしないため．19_p2 は 3 倍の所を選んでいた)
 
 
 def _shift(a, b, max_lag):
@@ -35,21 +37,39 @@ def _shift(a, b, max_lag):
     return best
 
 
-def estimate(img, box=None):
-    """(傾きの度, 左右のずれ px) を返す．`box` は測る範囲 (x1, y1, x2, y2)"""
-    dark = ink.binarize(img)
+def estimate(img, box=None, pitch=None):
+    """(傾きの度, 左右のずれ px) を返す．`box` は測る範囲 (x1, y1, x2, y2)
+
+    **探す範囲は行の高さで抑える** (2026-09-16)．組成部は行が周期的に並ぶので，
+    広く探すと相互相関が**行の高さの整数倍にロック**する．19_p2 は帯の高さの
+    5% (302 px) まで探して 136 px (行の高さ 44.5 px の 3 倍) を選び，
+    **−7.9 度**という推定になった．`DESKEW_MAX_DEG` に引っかかって捨てられ，
+    **傾きがあるのに直さない**結果になっていた (探索幅を半行にすると +0.29 度)．
+
+    Args:
+        pitch: 行の高さ (px)．渡すと探す範囲をその半分までにする
+    """
+    # **大きさは二値化の前に見る** (2026-09-16)．あとで見ると，小さすぎる画像でも
+    # 二値化を通ることになり，真っ白な小さい画像で落ちる (`All-NaN slice`)
+    w, h = img.size
     if box is not None:
         x1, y1, x2, y2 = (int(v) for v in box)
-        dark = dark[y1:y2, x1:x2]
-    h, w = dark.shape
+        w, h = x2 - x1, y2 - y1
     if w < 300 or h < 100:
         return 0.0, 0
+    dark = ink.binarize(img)
+    if box is not None:
+        dark = dark[y1:y2, x1:x2]
+    h, w = dark.shape
     w3 = w // 3
     left = dark[:, :w3].sum(axis=1).astype(float)
     right = dark[:, -w3:].sum(axis=1).astype(float)
     if not left.any() or not right.any():
         return 0.0, 0
-    dy = _shift(left, right, max(5, int(h * MAX_LAG_RATIO)))
+    max_lag = int(h * MAX_LAG_RATIO)
+    if pitch and pitch > 0:
+        max_lag = min(max_lag, int(pitch * LAG_PITCH))
+    dy = _shift(left, right, max(5, max_lag))
     return float(np.degrees(np.arctan2(dy, w - w3))), int(dy)
 
 
@@ -69,7 +89,7 @@ def deskew_to(image, out, box, pitch, min_rows=DESKEW_MIN_ROWS, max_deg=DESKEW_M
         (使う画像の場所, 直した角度)．直さなければ (元の場所, 0.0)
     """
     img = Image.open(image)
-    deg, dy = estimate(img, box)
+    deg, dy = estimate(img, box, pitch=pitch)
     if pitch <= 0 or abs(dy) < pitch * min_rows or abs(deg) > max_deg:
         return image, 0.0
     # `estimate` は右が上がっていると負．PIL の rotate は反時計回りが正なので，
