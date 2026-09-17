@@ -11,20 +11,20 @@ description: 植生学の組成表(vegetation composition table)をスキャン�
 以前は private の `comptea/.claude/skills/` にも同じものがあり，
 **2 か所に置いた結果，中身が離れた**(公開側に枝番の話が無かった)．
 
-コードは `comptea-app`，**データ**(`labelme_data/`・`truth/`・`work*/`・
-`weights/`)は**このリポジトリの外**にある(著作権のため公開していない)．
-下のコマンドは，**データを置いたディレクトリを作業ディレクトリにして**書いてある．
+コードはこのリポジトリにあり，**資料**(スキャン画像・`labelme_data/`・`truth/`)は
+**このリポジトリの外**にある(著作権のため公開していない)．
+下のコマンドはリポジトリの根からの相対で書いてある．
+作業ディレクトリ(`work/`)は，`--workdir` を省くと**いまいる場所**にできる．
 
-**場所は環境変数で指す**．`COMPTEA_DATA` を設定しておけば，
-物差し(`eval/`)はどこから呼んでも動く．**実際の場所はここに書かない**
-(人によって違い，公開する情報でもない)．
+**場所は環境変数で指す**(一覧は [README の「環境変数」](../../../README.md#環境変数))．
+**実際の場所はここに書かない**(人によって違い，公開する情報でもない)．
 
 ## このスキルの立ち位置
 
 **測れるものは Python が測り，判断が要るところを目で見る**．
 
-`../comptea-app` の `comptea` パッケージが，検出・格子・辞書補正・被度の検証・
-表の組み立てをすでに持っている(**コードの正はそちら**)．このスキルはそれを呼び出す薄い層で，
+`comptea` パッケージが，検出・格子・辞書補正・被度の検証・
+表の組み立てをすでに持っている．このスキルはそれを呼び出す薄い層で，
 **アルゴリズムを新しく書かない**．代わりに，自動化しないと決めた判断
 (領域が「1回出現種」か「調査地の記載」か，段落がどこで終わるか，
 崩れた文字が何と書いてあるか)を，画像を見て決める．
@@ -40,14 +40,14 @@ description: 植生学の組成表(vegetation composition table)をスキャン�
 
 ## 前提
 
-- Python に ultralytics / easyocr / pandas / Pillow が入っていること
+- 入れ方(extra の選び方)は [README の「入れ方」](../../../README.md#入れ方)．
+  `run_pipeline.py`・`run_ocr.py`・`build_table.py`・`link_pages.py` は入れていなくても
+  どこからでも呼べるが，**`crop_cells.py`・`apply_text.py`・`export_data.py` は
+  `pip install -e .` が要る**
+- 外の読み手(yomitoku・NDLOCR-Lite)は任意．入っていなければ黙って飛ばす
 - 重みはパッケージに同梱してある(`comptea/weights/comptea.pt`)．
   試作の重みを使うときだけ `--weights` で指す
 - 中間物は `work/<画像名>/` に置かれる(`--workdir` で変えられる)
-
-**中核は，入れていなくてもどこから呼んでもよい**
-(場所が違うときは環境変数 `COMPTEA_CORE`)．
-**物差し(`eval/`)が使うデータの場所は `COMPTEA_DATA`** で指す．
 
 ## 流れ
 
@@ -92,7 +92,7 @@ export_data.py   →  (何枚も通したあと．結果を 1 か所にまとめ
 - 通し終えたら `link_pages.py` で表につなぐ
 
 ```bash
-python ../comptea-app/cli/link_pages.py work --out out
+python cli/link_pages.py work --out out
 ```
 
 **つなぐのは，文字列としてつないでから一度だけ解析するため**．そうすると
@@ -111,22 +111,25 @@ A0 級の折り込み(`s01115` の 23 枚)には，**1枚に表が2つ3つ載っ
 1枚のまま渡しても行が1本も取れないので，先に切り分ける．
 
 ```bash
-py -3.12 -m comptea.split_sheet <PDF か画像> --outdir <置き場> [--dry-run]
+python -m comptea.split_sheet <PDF か画像> --outdir <置き場> [--dry-run]
 ```
+
+(`-m` で呼ぶので，リポジトリの根で動かすか `pip install -e .` しておく．PDF には `sheet` extra が要る)
 
 `<画像名>_p1.png`・`_p2.png` … が並び，**左の段から，段の中は上から**の順になる．
 以後の工程は，切ったあとの1枚ずつを渡す．
 `--dry-run` で切らずに数だけ数えられるので，まずこれで見当を付ける．
 
-**`locate.split_tables()` が扱う「1ページに表が2つ」とは別のもの**．
+**`blocks.split_tables()` が扱う「1ページに表が2つ」とは別のもの**．
 あちらは1枚の**ページの中**で縦に並ぶ表を分ける(置き場は `_t1`・`_t2`)．
 こちらは**1枚のシートに離れて置かれた表**を，画像の段階で切り分ける．
 
 `--imgsz` は既定の `auto` のままでよい(切ったあとの大きさから決まる)．
 `auto` が**上限で頭打ち**と出たら，学習時より縮尺が小さく，行が取れないことがある．
 
-**地点が 10 を超える横長の表は，`run_pipeline.py` が自分で短冊に分けて検出する**
-(`split_wide.py`)．そうしないと `row` が1本も取れない．
+**地点の多い横長の表は，`run_pipeline.py` が自分で短冊に分けて検出する**
+(`strips.py`．`col` の検出が 20 本以上で `row` が 5 本未満のとき)．
+そうしないと `row` が1本も取れない．
 分けたときは警告に「組成部を N つに分けて検出した」と出るので，
 **段階1では短冊の境目の列**を必ず見る．
 併せて，**列の境が印字の地点の隙間から離れていないか**を機械で測っており，
@@ -143,7 +146,7 @@ py -3.12 -m comptea.split_sheet <PDF か画像> --outdir <置き場> [--dry-run]
 ### 1. 検出と格子(段階1)
 
 ```bash
-python ../comptea-app/cli/run_pipeline.py <画像> [--conf 30] [--conf-col 20]
+python cli/run_pipeline.py <画像> [--conf 30] [--conf-col 20]
 ```
 
 `work/<画像名>/overlay.png` を **Read して目で確かめる**．
@@ -165,8 +168,8 @@ python ../comptea-app/cli/run_pipeline.py <画像> [--conf 30] [--conf-col 20]
 ### 2. 読み取り(段階2)
 
 ```bash
-python ../comptea-app/cli/run_ocr.py work/<画像名> [--reader easyocr|ai|both]
-python ../comptea-app/cli/crop_cells.py work/<画像名>
+python cli/run_ocr.py work/<画像名> [--reader easyocr|multi|ai|both] [--no-retry] [--device cpu|cuda]
+python cli/crop_cells.py work/<画像名>
 ```
 
 `run_ocr.py` が全セルを EasyOCR で読み，辞書と規則で補正して，
@@ -178,6 +181,7 @@ python ../comptea-app/cli/crop_cells.py work/<画像名>
 | 値 | 動き | 使いどころ |
 |:---|:---|:---|
 | `easyocr` (既定) | EasyOCR が読み，怪しいセルだけ AI に回す | 通常．安く再現性がある |
+| `multi` | 領域を外の読み手(NDLOCR-Lite・yomitoku)でも読み，質の通るものを採る | 和名・学名が読めない資料．入っていない読み手は飛ばす |
 | `ai` | EasyOCR を動かさず，**全セルを AI が読む** | 古い印刷で EasyOCR が崩れる資料 |
 | `both` | 両方で読み，**補正後の値が食い違ったセルだけ**を残す | 精度を測るとき．費用は倍 |
 
@@ -185,19 +189,20 @@ python ../comptea-app/cli/crop_cells.py work/<画像名>
 まで通して初めて値が入る．`both` では `apply_text.py` が EasyOCR の読みと
 突き合わせ，`ocred.csv` の `agree` 列に `ok` / `disagree` を残す．
 
-正解表3枚 (`truth/`) と `../comptea-app/eval/eval_read.py` で比べた結果 (組成部のセル)．
+読む前後に，機械がやっていることがある(詳しくは
+[pipeline.md の 8 節](../../../docs/pipeline.md#8-セルを読む-段階-2))．
+目視で見る値の出どころなので，名前だけ知っておく．
 
-| ページ | easyocr | ai |
-|:---|---:|---:|
-| `example.jpg` (6地点) | 0.944 | **1.000** |
-| `kinki_047` (1地点・2段) | 1.000 | — |
-| `kinki_010` (9地点) | 0.952 | — |
+- **読む箱を縦罫線から外す**(`read.move_off_rules`．格子のファイルは変えない)
+- **読めなかったセルのうち，形で字がありそうなものだけ読み直す**(`ink.glyph_gate`．
+  差し替えたセルは `note` に `retry`)
+- **それでも読めない組成のセルは NDLOCR-Lite で読み直す**(`note` に `ndl`．
+  入っていなければ飛ばす．`--no-retry` で切れる)
 
-**EasyOCR も，読めなかった組成部のセルを字種を絞って読み直すようにした**
-(2026-09-01)．それまでは単独の `+` が読めず，`kinki_047` は 0.446 だった．
-`both` の食い違いは `example.jpg` で 31 セルなので，目で見る量は 216 → 31 に減る．
+精度は正解表(`truth/`)と `eval/eval_read.py` で測る([eval/README.md](../../../eval/README.md)．
+非公開の資料が要る)．
 
-`crop_cells.py` がそれを切り出す．
+`crop_cells.py` が目視に回すセルを切り出す．
 
 - `crops/region_*.png` — 表頭・1回出現種の領域．**原寸**．丸ごと読む
 - `crops/sheet_*.png` — 小さいセル．`#cell_id` を焼き込んで1枚にまとめてある
@@ -205,7 +210,7 @@ python ../comptea-app/cli/crop_cells.py work/<画像名>
 **要確認のセルだけを読み直すときは，クラスごとに分ける**．
 
 ```bash
-python ../comptea-app/cli/crop_cells.py work/<画像名> --what review --by-class
+python cli/crop_cells.py work/<画像名> --what review --by-class
 ```
 
 `sheet_NN_<クラス>.png` になり，**1枚が1クラスだけ**になる．
@@ -217,8 +222,8 @@ python ../comptea-app/cli/crop_cells.py work/<画像名> --what review --by-clas
 **そのまま渡せる形**にしてある(**誰が読んでも同じ文面を使う**．
 2 か所に置くと必ずずれるため)．
 
-量の目安は，手元の全コーパスで要確認 **2,051 セル**(105 表)，
-24 セル/枚で **約 85 枚**．1 表なら数枚に収まるので，
+量の目安は，手元の全 147 表で要確認 **924 件**(2026-09-17 時点)，
+24 セル/枚で **40 枚ほど**．1 表なら数枚に収まるので，
 **表ごとに読んで `apply_text.py` まで通し，次の表へ進む**
 (何十枚もまとめて読むと，どの番号がどの表か分からなくなる)．
 
@@ -235,7 +240,7 @@ cell_id	text
 (無理に埋めない)．
 
 ```bash
-python ../comptea-app/cli/apply_text.py work/<画像名> --tsv fixes.tsv
+python cli/apply_text.py work/<画像名> --tsv fixes.tsv
 ```
 
 流し込んだ文字は EasyOCR のときと同じ補正を通る．
@@ -244,7 +249,7 @@ python ../comptea-app/cli/apply_text.py work/<画像名> --tsv fixes.tsv
 ### 3. 表に組んで検査(段階3)
 
 ```bash
-python ../comptea-app/cli/build_table.py work/<画像名>
+python cli/build_table.py work/<画像名>
 ```
 
 出力は `comp_table_long.csv`(正)，`comp_table_wide.csv`(確認用)，
@@ -253,7 +258,9 @@ python ../comptea-app/cli/build_table.py work/<画像名>
 
 - **地点番号の超過** — 1回出現種の目印(`in N :`)を読み違えた徴候．いちばん効く
 - **同じ地点に同じ種** — 階層が違えば正当．同じなら誤り
-- **被度として読めない形** — その `cell_id` を切り出して読み直す
+- **被度として読めない形** — その `cell_id` を切り出して読み直す．
+  流し込み・1回出現種・見出しの行は読めなくて当たり前なので，
+  `checks.txt` の「見るべきは N 件」の方だけを見る
 - **表頭で読めていない項目** — 領域を読み直す
 
 直すときは段階2に戻る(`crop_cells.py --ids ...` → 読む → `apply_text.py`)．
@@ -264,7 +271,7 @@ python ../comptea-app/cli/build_table.py work/<画像名>
 何枚も通したあとは，結果を 1 か所にまとめる．
 
 ```bash
-python ../comptea-app/cli/export_data.py work --out work_out --tag kinki
+python cli/export_data.py work --out work_out --tag kinki
 ```
 
 作業ディレクトリの親を渡せば，その下の表を全部拾う．出力は次の 5 つ．
@@ -275,29 +282,27 @@ python ../comptea-app/cli/export_data.py work --out work_out --tag kinki
 - `_need_check/<表>/<cell_id>.png` — **Need Check のセルの画像**
 - `_need_check/<表>/once_species.png` — 1回出現種の流し込み
 
-**Need Check の行には `image` 列でフルパスが入る**ので，どのセルを見れば
+**Need Check の行には `image` 列に切り出した画像の場所が入る**ので，どのセルを見れば
 よいかが CSV だけで分かる．作業ディレクトリは一時のものなので，
 渡す前にここへ写しておく．
 
 ## 出力の見方
 
 `comp_table_long.csv` は1行 = 1地点 × 1種．
+列と，`status`・`note` の値の一覧は [README の「出力の形」](../../../README.md#出力の形)
+にある(一覧はそちらだけに置く)．目視で特に効くのは次の点．
 
-| 列 | 中身 |
-|:---|:---|
-| `plot` | 地点番号(組成部の列の順) |
-| `row_no` | 表の行番号(`overlay.png` の番号と同じ) |
-| `j_name` `s_name` | 和名・学名(辞書で補正済み) |
-| `layer` | 階層．複数のときは `S;K` のまま持つ |
-| `cover` `sociability` | 被度・群度．`+` は `+・1` の略なので群度1を補う |
-| `status` | `OK` / `Need Check` |
-| `note` | 位置決めで気になった点(`interpolated` / `snapped` / `on_text`) |
-| `source` | `body`(表の中) / `once`(表の下の1回出現種) |
+- `status` が `OK` 以外(`Need Check`・`suggested`・`multi`)の行は目視に回す
+- `cover` `sociability` — `+` は `+・1` の略なので，Python が群度1を補う
+- `note` の `retry`・`ndl` は読み直しで差し替えたセル．**値の形が通っていても誤りうる**
 
 ## 参照
 
 - `references/checkpoints.md` — 3つの関門で何を見るか
 - `references/failure-modes.md` — 既知の崩れ方と直し方
 - `references/reading-guide.md` — 画像を読むときの約束(被度・階層・学名)
-- `docs/vegetation_science.md` — 分野の背景知識．用語が出たらまずここ
-- `.claude/CLAUDE.md` — 進捗と決定の記録
+- `references/read-cells-prompt.md` — 読み手に渡す文面
+- [README.md](../../../README.md) — 入れ方・環境変数・コマンド・出力の列
+- [docs/pipeline.md](../../../docs/pipeline.md) — 工程の流れとアルゴリズム
+- [docs/lessons.md](../../../docs/lessons.md) — 規則づくりの知見と，測って取り下げた案
+- [docs/vegetation_science.md](../../../docs/vegetation_science.md) — 分野の背景知識．用語が出たらまずここ
