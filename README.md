@@ -21,55 +21,107 @@
 - セルを読み，種名の辞書と被度の規則で補正する
 - 縦持ちの表 (1 行 = 1 地点 × 1 種) に組み，機械でできる検査にかける
 
-実際の資料 148 表で通したときの成績は，**縦持ち 47,756 行・95.6% が検証を通る**
-状態です (残りは目視に回します)．
+実際の資料の全 147 表で通すと，**縦持ち 47,097 行・要確認 (`Need Check`) 1,018 件**
+でした (2026-09-16 時点．要確認は目視に回します)．
 
-## 2 つの使い方
+## 入れ方
 
-### CUI (まとめて処理する)
+**Python 3.10 以上**が要ります．
 
 ```bash
 pip install -e .[all]        # 中核だけなら pip install -e .
-
-python cli/run_pipeline.py <画像> --workdir work/<名前>   # 格子を作る
-python cli/run_ocr.py work/<名前>                          # セルを読む
-python cli/build_table.py work/<名前>                      # 縦持ちに組む
-python cli/export_data.py work --out out --tag <資料名>    # まとめて書き出す
-
-# 続きのページがあるとき(ファイル名に枝番を付けておく)
-python cli/run_pipeline.py <画像>-2.jpg --workdir work/<名前>-2  # 塊を切り出す
-python cli/link_pages.py work --out out                          # 表につなぐ
 ```
 
-**入れなくても動きます** (`cli/` は，入っていなければリポジトリの置き場を
-自分で `sys.path` に足します)．依存は工程ごとに分けてあり，
-`.[detect]` は検出 (torch・ultralytics)，`.[read]` は読み取り (easyocr)，
-`.[sheet]` は PDF (PyMuPDF)，`.[web]` は Streamlit です．
+依存は工程ごとに分けてあり，必要なものだけを足せます．
 
-**読み手を足す (任意)**．EasyOCR に加えて，外の読み手を重ねられます．
+| extra | 中身 | 使う工程 |
+|:---|:---|:---|
+| `detect` | torch・torchvision・ultralytics・OpenCV | 段階 1 (検出) |
+| `read` | easyocr・OpenCV | 段階 2 (読み取り) |
+| `sheet` | PyMuPDF | PDF の読み込み・折り込みの切り分け |
+| `web` | Streamlit | GUI |
+| `dev` | pytest | テスト |
+| `all` | `detect`・`read`・`sheet`・`web` | — |
+
+`run_pipeline.py`・`run_ocr.py`・`build_table.py`・`link_pages.py`・`read_once_page.py` は，
+入れていなくてもリポジトリの置き場を自分で `sys.path` に足します．
+**`crop_cells.py`・`apply_text.py`・`export_data.py` は足さない**ので，
+`pip install -e .` してから使ってください．
+
+### 外の読み手 (任意)
+
+EasyOCR に加えて，外の読み手を重ねられます (`run_ocr.py --reader multi`)．
 **読み手ごとに落とすセルが違う**ので，重ねると読めるセルが増えます
 (和名 277 → 428，学名 462 → 548 のセルが辞書に当たるようになりました)．
-
-```bash
-python cli/run_ocr.py work/<名前> --reader multi     # 入っている読み手を重ねる
-python cli/run_ocr.py work/<名前> --device cpu       # GPU が無いとき (既定は自動)
-```
-
-- **yomitoku** — 語ごとに位置つきで返すので，格子のセルに割り当てるのに向きます．
-  主環境を汚さないよう別の環境に入れます
-  (`python -m venv --system-site-packages <置き場>/venv_yomi` して
-  `pip install yomitoku`)．場所は環境変数 `COMPTEA_YOMI_PY` でその python を
-  指します．
-- **NDLOCR-Lite** — **ONNX で GPU が要りません**．repo を置いて，場所を
-  環境変数 `COMPTEA_NDLOCR` で指します．
-
-置き場は**環境変数だけ**で決めます (コードに既定のパスは持ちません)．
-毎回指さなくて済むよう，環境に登録しておくと楽です
-(Windows は `setx COMPTEA_YOMI_PY <その python>`，
-POSIX は `~/.profile` などに `export`)．
-
 **どちらも，入っていなければ黙って飛ばします**．入れていない環境でも
 `--reader multi` は落ちず，EasyOCR だけで読みます．
+
+| 読み手 | 入れ方 |
+|:---|:---|
+| yomitoku | 主環境を汚さないよう別の環境に入れます．`python -m venv --system-site-packages <置き場>/venv_yomi` して `pip install yomitoku==0.14.0`．**`--system-site-packages` は主環境の torch を使い回すため**です (入れ直すと数 GB)．重みは初回の呼び出しで取りに行きます |
+| NDLOCR-Lite | [ndl-lab/ndlocr-lite](https://github.com/ndl-lab/ndlocr-lite) を置いて `pip install ordered-set` を足すだけです．**ONNX で GPU が要りません** |
+
+### 環境変数
+
+置き場は**環境変数だけ**で決めます (公開リポジトリなので，コードに既定のパスは持ちません．
+`tests/test_no_local_paths.py` が見張ります)．毎回指さなくて済むよう，
+環境に登録しておくと楽です (Windows は `setx`，POSIX は `~/.profile` などに `export`)．
+
+| 変数 | 指すもの |
+|:---|:---|
+| `COMPTEA_YOMI_PY` | yomitoku を入れた環境の python |
+| `COMPTEA_NDLOCR` | NDLOCR-Lite を置いた場所 |
+| `COMPTEA_DEVICE` | 読み手を動かす装置 (`cpu` / `cuda`)．`--device` が優先し，どちらも無ければ自動 |
+| `COMPTEA_CORE` | 中核 (`comptea` パッケージ) の場所を上書きする (古い名前 `COMPTEA_YOLO` も読みます) |
+| `COMPTEA_DATA` | `eval/` だけが使う，正解データの置き場 ([eval/README.md](eval/README.md)) |
+
+## CUI (まとめて処理する)
+
+**途中に 3 つの段階**を経ます．格子・読み取り・組み上がりを目で確かめてから
+先へ進む作りです．作業ディレクトリ (`--workdir`) を省くと，
+**いまいる場所**の `work/<画像名>/` に書きます．
+
+```bash
+# 段階 1: 格子を作る (located.csv と，格子を描いた画像)
+python cli/run_pipeline.py <画像> --workdir work/<名前>
+
+# 段階 2: セルを読む (ocred.csv と，目視に回すセルの一覧 review.tsv)
+python cli/run_ocr.py work/<名前>                    # --reader multi・--device cpu も可
+python cli/crop_cells.py work/<名前> --what review    # 目視に回すセルを work/<名前>/crops/ に切り出す
+python cli/apply_text.py work/<名前> --tsv fixes.tsv # 目で読んだ字 (cell_id と text) を戻す
+
+# 段階 3: 縦持ちに組む (comp_table_long.csv)
+python cli/build_table.py work/<名前>                # 非出現のセルも残すなら --keep-absent
+
+# まとめて書き出す (Need Check のセルを画像に切り出し，CSV から辿れるようにする)
+python cli/export_data.py work --out out --tag <資料名>
+```
+
+`apply_text.py` で戻した読みは，EasyOCR の読みと**同じ補正**を通します．
+
+折り込みを切り分けるだけなら `python -m comptea.split_sheet <PDF> --outdir <置き場>`．
+
+### 続きのページ
+
+組成表の下の流し込み (出現1回の種・調査地・調査年月日・出典) は，紙面に
+収まらないと**次のページへあふれます**．どのページが続きかは
+**ファイル名の枝番で示します** (`xxx-1.jpg` が組成表，`xxx-2.jpg` が続き．枝番は読む順)．
+
+```bash
+python cli/run_pipeline.py <画像>-2.jpg --workdir work/<名前>-2  # 表が無くても止まらず，塊を切り出す
+python cli/link_pages.py work --out out                          # つないでから一度だけ解析する
+```
+
+枝番を付けずに 1 枚だけ扱うときは `read_once_page.py` を使います
+(塊を切り出す → 読んだ文字列から行を作る，の 2 回に分けて呼びます)．
+
+```bash
+python cli/read_once_page.py <画像> --out <置き場>
+python cli/read_once_page.py <画像> --out <置き場> --text <置き場>/once.txt --table <続き元の表> --start-plot <地点番号>
+```
+
+なぜ枝番なのか (ノンブルの順では決められない理由) と，つなぐと何が解けるかは
+[docs/pipeline.md の 11 節](docs/pipeline.md#11-続きのページをつなぐ) にあります．
 
 ### ライブラリとして
 
@@ -82,47 +134,11 @@ code, log = pipeline.run('grid', ['表.png', '--workdir', 'work/x'])
 ```
 
 辞書と重みはパッケージに同梱してあるので，**どこから呼んでも開けます**．
-折り込みを切り分けるだけなら `python -m comptea.split_sheet <PDF> --outdir <置き場>`．
 
-**途中に 3 つの段階**を経ます．格子・読み取り・組み上がりを目で確かめてから
-先へ進む作りです．`export_data.py` は，`Need Check` のセルを画像に切り出して
-CSV から辿れるようにします．
-
-組成表の下の流し込み (出現1回の種・調査地・調査年月日・出典) は，紙面に
-収まらないと**次のページへあふれます**．あふれた先は本文や写真だけのページに
-見えるので，そのままでは格子の段で「組成表が無い」として止まります
-(検出クラス `once_species` は，表の下にある形でしか学習していないため，
-単独で置かれた塊は出ません)．**ファイル名に枝番を付けておけば止まりません**
-(下記)．枝番を付けない一枚だけを扱うときは `read_once_page.py` を使います．
-
-### 続きのページは，ファイル名の枝番で示す
-
-どのページが続きかはノンブル (紙面のページ番号) の順で分かるはずですが，
-**紙面の配置の都合で崩れることがあります**．そこで**ファイル名で明示**します．
-
-```
-組成表だけ        xxx.jpg
-組成表と続き      xxx-1.jpg (組成表)   xxx-2.jpg (続き)
-```
-
-枝番は 1 から，**読む順**に振ります．組成表が 2 ページ以上に渡っても構いません
-(そのときは本体の行がページごとに出ます．`link_pages.py` が知らせます)．
-
-枝番が付いていれば，`run_pipeline.py` は**表が無くても止まりません**．
-続きのページとして塊と注記を切り出し，`link_pages.py` が表につなぎます．
-
-```bash
-python cli/link_pages.py work --out out
-```
-
-つなぐのは**文字列としてつないでから一度だけ解析する**ためです．そうすると
-地点の引き継ぎ・ページで割れた種名・前ページに残った注記の見出しが，
-いずれも自動で解けます (1 ページずつ解析すると，どれも解けません)．
-
-### GUI (Streamlit — 1 枚ずつ試す)
+## GUI (Streamlit — 1 枚ずつ試す)
 
 工程ごとにアプリを分けてあります．重いもの (検出・読み取り) を分けることで，
-無料枠でも動かせるようにしています．
+無料枠でも動かせるようにしています．**アプリごとに `apps/*/requirements.txt`** があります．
 
 | アプリ | やること | 入力 → 出力 |
 |:---|:---|:---|
@@ -132,11 +148,15 @@ python cli/link_pages.py work --out out
 | `apps/4_table` | 縦持ちに組んで検査 | `read.zip` → `table.zip` |
 
 ```bash
+streamlit run apps/1_split/streamlit_app.py
 streamlit run apps/2_grid/streamlit_app.py
+streamlit run apps/3_read/streamlit_app.py
+streamlit run apps/4_table/streamlit_app.py
 ```
 
 **工程のあいだは zip で受け渡します**．次の工程に要るものが一式入っているので，
-入れ忘れが起きません．工程の分け方は，CUI の 3 つの段階とそのまま対応しています．
+入れ忘れが起きません．工程の分け方は，CUI の 3 つの段階とそのまま対応しています
+(CUI との違いは [docs/pipeline.md の「CUI と GUI の対応」](docs/pipeline.md#cui-と-gui-の対応))．
 
 **2・3・4 には見本が入っている**ので，前の工程を通さずにその場で試せます
 (`examples/sample.jpg`・`sample_grid.zip`・`sample_read.zip`)．
@@ -157,12 +177,13 @@ share.streamlit.io に登録したあと，Secrets に次のように書いて�
 4_table = "https://....streamlit.app"
 ```
 
-**扱える大きさには上限があります** (無料枠のメモリに合わせて測って決めました)．
+**扱える大きさには上限があります** (無料枠のメモリに合わせて，CPU 版の torch で測って決めました)．
 
 | アプリ | 上限 | 測った山 |
 |:---|:---|---:|
 | 1 切り分け | **150 Mpx** (A0 の折り込み 9344 x 12873 = 120 Mpx は通る) | 520 MB |
-| 2 格子・3 読み取り | 学習時と同じ縮尺で検出できること (長辺 6600 px ほど) | 432-781 MB |
+| 2 格子 | 検出の縮尺 `imgsz` 2560 まで (紙面の長辺 6600 px ほど) | 432 MB (imgsz 1280) - 781 MB (2560) |
+| 3 読み取り | 同上 | 507 MB (見本) |
 
 **折り込みは 1 で表ごとに切ってから 2 へ渡してください**．
 1 の画面には，切り出した表ごとに「2 に渡せるか」が出ます
@@ -172,83 +193,92 @@ share.streamlit.io に登録したあと，Secrets に次のように書いて�
 **1 枚の紙面に表が 2 つ以上あるときは，2 が表ごとに分けて出します**．
 別々の表なので，1 つずつ 3 へ渡してください．
 
+## 出力の形
+
+`comp_table_long.csv` は縦持ちで，1 行が 1 地点 × 1 種です
+(`export_data.py` は全部の表を縦に積んで `comp_table_long_<tag>.csv` に書きます)．
+
+| 列 | 中身 |
+|:---|:---|
+| `source_image` | 格子を作った画像 |
+| `plot` | 地点番号 (左から 1, 2, …) |
+| `row_no` | 格子の行番号 (1 回出現種の行では空) |
+| `j_name` / `s_name` | 和名 / 学名 |
+| `layer` | 階層 (`B1` `B2` `S` `K` など) |
+| `layer_raw` | 階層として読めなかった読み (あるときだけ列ができる) |
+| `cover` / `sociability` | 被度 / 群度 |
+| `constancy` | 常在度 (群落の要約列のとき) |
+| `comp_raw` | 組成のセルの読み (分ける前) |
+| `status` | 検証の結果 (下の表) |
+| `note` | セルごとの疑わしさ (下の表．複数は `;` でつなぐ) |
+| `source` | `body` (表の本体) / `once` (1 回出現種の流し込み) |
+
+### `status`
+
+| 値 | 意味 |
+|:---|:---|
+| `OK` | 規則と辞書で検証が通った |
+| `Need Check` | 値として読めない形．辞書に無い種名や，短すぎて候補を採らなかった読みは印字のまま残す |
+| `suggested` | 種名を辞書の近い名前に寄せた (候補が複数なら `;` でつなぐ．別種に化けうるので目視に回す) |
+| `multi` | 階層が複数 (`S;K` など)．誤りとは限らないが目視で確かめる |
+| `absent` | 非出現のセル．`build_table.py --keep-absent` のときだけ残る |
+
+### `note`
+
+| 値 | 付ける所 | 意味 |
+|:---|:---|:---|
+| `interpolated` | `axes.py`・`blocks.align_block_bottoms` | 検出の無い所を内挿した境 (格子の画像で金色) |
+| `snapped` | `axes.py` | 字を避けて谷へずらした境 (橙) |
+| `on_text` | `axes.py` | ずらしても字に重なったままの境 (赤) |
+| `row_fixed` | `row_heights.py` | 行の高さをそろえて直した行 |
+| `y_shifted:±N` / `y_followed` / `y_fitted` | `row_track.py` | 列ごとの行のずれを追って動かしたセル |
+| `heading` / `name_only` / `legend` | `row_kinds.py` | 見出し・学名だけの行・凡例 (行は落とさない) |
+| `flow` | `comp_table.mark_flow` | 表に入り込んだ流し込みの文章 |
+| `retry` | `ocr.py`・`pipeline/read.py` | 読み直して差し替えたセル |
+| `roman` | `ocr.py` | ローマ数字として読み直したセル |
+| `ndl` | `pipeline/read.py` | NDLOCR-Lite で読めたセル (読みは `text_ndl`) |
+| `moved` | `comp_table.py` | 隣のセルにまたがった値を分け直した |
+| `sname_from_jname` | `comp_table.py` | 空の学名を和名から補った |
+| `hand` | `apps/3_read` | 画面で人が直した |
+
 ## テスト
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                # 実データの要らないもの(数秒)
-pytest --runslow      # 検出と読み取りも実際に走らせる(30 秒ほど)
+pytest                # 実データの要らないもの (数秒)
+pytest --runslow      # 検出と読み取りも実際に走らせる (`slow` の印．30 秒ほど)
 ```
 
 **実データが無くても走ります**．辞書と見本 (`examples/`) だけで完結し，
 画像の要るものは印字を模した小さな配列を組み立てて確かめます．
+実データの格子を使うもの (`test_known_defects.py`・`test_table_find.py` の一部など) は，
+環境変数 `COMPTEA_GRIDS`・`COMPTEA_PARTS`・`COMPTEA_SCAN` (`test_row_track.py` は `COMPTEA_WORK`)
+で置き場を指したときだけ走り，無ければ飛ばします．
 
-| ファイル | 見るもの |
-|:---|:---|
-| `tests/test_correct_text.py` | 被度・常在度・階層・表頭の値の補正 |
-| `tests/test_names.py` | 種名の辞書との突き合わせ |
-| `tests/test_comp_table.py` | 括弧付きのセルの読み分け・割れた値の繕い |
-| `tests/test_header.py` | 項目名の寄せ・文章形式の表頭・1 回出現種 |
-| `tests/test_ink.py` | 黒画素から測る道具 (画数・罫線・破線) |
-| `tests/test_geometry.py` | 等間隔の格子・境が字を割る回数 |
-| `tests/test_checks.py` | 格子の検査 4 つ (鳴るべきときに鳴るか) |
-| `tests/test_wiring.py` | モジュールをまたぐ参照が実在するか (移し忘れを捕まえる) |
-| `tests/test_grid_parts.py` | 短冊・種名の列・階層の列 (組み立てた紙面で) |
-| `tests/test_row_heights.py` | 行の高さをそろえる後処理 (細い行・位相・半分の刻み・上下端) |
-| `tests/test_row_skew.py` | 紙面の傾きをセルの座標だけで直す後処理 (傾いた紙面・水平な紙面・列の少ない表) |
-| `tests/test_row_track.py` | 行を単位の連なりとして追う後処理 (列ごとの y のずれ・拍による行数の検算．`slow` は実データ) |
-| `tests/test_header_cols.py` | 表頭の独文と和文を分ける縦の境 (票の谷・表題の行・罫線・和文が無い表) |
-| `tests/test_row_kinds.py` | 行の種類の見分け (見出し・学名だけの行・凡例・枠線・行を落とさないこと) |
-| `tests/test_row_track_rules.py` | 傾いた縦罫線の消し方と，単位を切るときの雑音の床 |
-| `tests/test_header_lines.py` | 表頭の項目行を OCR の検出器の箱から作る (束ね方・帯・表題の除外．`slow` は描いた表頭で検出器を走らせる) |
-| `tests/test_header_pairs.py` | 表頭の境を項目名の行と値の行の対応で置き直す (値が 2 行の項目・1 行ずつは触らない・つながった項目名の行) |
-| `tests/test_edge_ink.py` | 境が画像の外にあっても落ちない (幅で切られた並びの長さで数える) |
-| `tests/test_noyolo.py` | 検出器を使わない別案 (行の高さの推定・粗い行と列・文字の型から役割・辞書による確認と表頭の切り分け) |
-| `tests/test_rotation_check.py` | 90 度回して組まれた紙面の検査 (正しい向き・横倒し・小さい切れ端) |
-| `tests/test_blob_split.py` | 縮小した塊での切り分け (細い隙間・注記を残す・覆う塊は切らない・段落に割れる紙面) |
-| `tests/test_col_reach.py` | 組成部の右端の外の列を足す (本体と表頭の両方に字・常在度のはみ出し・次の段・画像の端) |
-| `tests/test_block_bottom.py` | 折り返した右の段の下端を左の段にそろえる (左の行を写す・右が長ければ触らない) |
-| `tests/test_stray_anchor.py` | 段の目印の偽物を縦の重なりで捨てる (縦に分かれた検出は 1 つの段にまとめる) |
-| `tests/test_header_synth.py` | `header_col` が無くても項目名の字があれば項目名の列を補う (罫線だけ・狭い領域では補わない) |
-| `tests/test_apps.py` | Streamlit の 4 アプリを画面まで走らせる |
-| `tests/test_shared.py` | 工程のあいだの受け渡し (zip・見本・検出の返り) |
-| `tests/test_pipeline.py` | 見本 1 枚の通し (`slow` は 3 段を続けて回す) |
+`tests/test_<モジュール名>.py` が，おおむね `comptea/<モジュール名>.py` に対応します．
+このほかに，横断で見るものがあります．
+
+- `test_wiring.py` — モジュールをまたぐ参照が実在するか (移し忘れを捕まえる)
+- `test_no_local_paths.py` — 文書とコードに手元のパスが無いか
+- `test_apps.py`・`test_shared.py`・`test_pipeline.py` — 4 アプリ・工程の受け渡し・見本 1 枚の通し
 
 歯止めにしているのは，**実物を見て決めた判断**です
 (`III(+-4)` を `III(1-4)` にしない，1 文字の読みは完全一致だけ採る，など)．
 どれも「黙って別の値になる」型で，通してみても気づけません．
 経緯は [docs/lessons.md](docs/lessons.md) にあります．
 
-## 出力の形
-
-`comp_table_long.csv` は縦持ちで，1 行が 1 地点 × 1 種です．
-
-| 列 | 中身 |
-|:---|:---|
-| `plot` | 地点番号 (左から 1, 2, …) |
-| `row_no` | 表の中の行番号 |
-| `j_name` / `s_name` | 和名 / 学名 |
-| `layer` | 階層 (`B1` `B2` `S` `K` など) |
-| `cover` / `sociability` | 被度 / 群度 |
-| `constancy` | 常在度 (群落の要約列のとき) |
-| `status` | `OK` / `Need Check` / `suggested` / `absent` |
-| `note` | セルごとの疑わしさ (`interpolated` `snapped` `retry` `roman` …) |
-| `source` | `body` (表の本体) / `once` (1 回出現種の流し込み) |
-
-## 仕組み
+## 文書
 
 - [docs/pipeline.md](docs/pipeline.md) — 工程の流れとアルゴリズム
+- [docs/architecture.md](docs/architecture.md) — コードの構成と約束事
 - [docs/lessons.md](docs/lessons.md) — 規則づくりの知見と，測って取り下げた案
 - [docs/vegetation_science.md](docs/vegetation_science.md) — 分野の背景 (被度階級・階層・常在度)
-- [docs/architecture.md](docs/architecture.md) — コードの構成
+- [eval/README.md](eval/README.md) — 物差し (**非公開の資料が要るので，ここからは動きません**)
 - [.claude/skills/comptea/](.claude/skills/comptea/) — Claude Code から通しで回すスキル．
   段階ごとの見どころ (`references/checkpoints.md`)，崩れ方と直し方
   (`references/failure-modes.md`)，画像を読むときの約束
   (`references/reading-guide.md`)，読み手に渡す文面
   (`references/read-cells-prompt.md`)．**このリポジトリが正**です
-- [eval/README.md](eval/README.md) — 物差し (**非公開の資料が要るので，ここからは動きません**)
-
-作業ディレクトリを省くと，**いまいる場所**の `work/<画像名>/` に書きます．
 
 ## 重み
 

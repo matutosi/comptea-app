@@ -7,7 +7,7 @@ dropped) is in [lessons.md](lessons.md); the stage-by-stage walkthrough is in
 
 ## Project Overview
 
-**comptea** (Composite Table to Data Easy) extracts structured data from scanned images of vegetation composition tables found in books and reports. The pipeline: image preprocessing → object detection (YOLO11) → region location → OCR → text correction → tabular output.
+**comptea** (Composition Table to Data Easy) extracts structured data from scanned images of vegetation composition tables found in books and reports. The pipeline: image preprocessing → object detection (YOLO11) → region location → OCR → text correction → tabular output.
 
 The project is bilingual (Japanese/English) and targets ecological vegetation survey data.
 
@@ -17,7 +17,7 @@ The project is bilingual (Japanese/English) and targets ecological vegetation su
 |:---|:---|
 | `comptea/` | The core modules. Two files that had grown to hold several concerns each were split by concern: `split_wide.py` (1,673 lines) into `strips.py` (wide tables), `col_edges.py` (column boundaries), `table_split.py` (telling two tables apart on one sheet), `body_rows.py` (the body's vertical extent and row boundaries) and `checks.py` (the independent checks); `locate.py` (1,558 lines) into `filters.py` (throwing out what must not be built on), `blocks.py` (cutting a sheet into tables and blocks), `axes.py` (building and nudging the boundaries of one axis) and `locate.py` itself (assembling the grid). It is a package: modules import each other relatively (`from . import ink`), the dictionaries and weights are resolved against the package directory, and **nothing needs a particular working directory** any more (until 2026-09-07 everything had to run inside `comptea/`) |
 | `comptea/web/` | The older all-in-one Streamlit pages, kept as they were |
-| `comptea/pipeline/` | The three stages themselves — `grid.py`, `read.py`, `table.py` — with `common.py` shared between them. `pipeline.run(stage, argv)` drives one **in the calling process**: until 2026-09-07 the apps spawned a new Python per stage and paid the torch import (5 s) every time. Measured with the CPU wheel Streamlit Cloud installs, detection peaks at 432 MB and reading at 507 MB, which fits the ~1 GB free tier (the local CUDA build reaches 1,375 MB and is what made this look impossible) |
+| `comptea/pipeline/` | The three stages themselves — `grid.py`, `read.py`, `table.py` — with `common.py` shared between them. `pipeline.run(stage, argv)` drives one **in the calling process**: until 2026-09-07 the apps spawned a new Python per stage and paid the torch import (5 s) every time. Measured with the CPU wheel Streamlit Cloud installs, detection peaks at 432 MB on the sample page (781 MB at the apps' `imgsz` cap of 2560) and reading at 507 MB, which fits the ~1 GB free tier (the local CUDA build reaches 1,375 MB and is what made this look impossible) |
 | `cli/` | Thin command-line entry points over those stages, one per stage (`run_pipeline` = stage 1, the grid → `run_ocr` → `build_table`), plus `crop_cells`, `apply_text`, `export_data`, `link_pages` for the run-on blocks, and `read_once_page` for a single continuation page without a branch number |
 | `apps/` | One Streamlit app per stage, each with its own `requirements.txt` |
 | `eval/` | The yardsticks. **They need the labelled scans and truth tables, which are not published**, so they cannot be run from this repository |
@@ -157,23 +157,10 @@ history; neither is included here.
 | 読む箱を罫線から外す | `read.move_off_rules` → `left_rule.py` (左端の列を左の縦罫線より右へ)・`cell_rule.py` (セルごと) | 既定 | 格子 (`located.csv`) は変えず，読む箱だけを動かす (2026-09-16・09-17) |
 | 装置 | `device.py`．`--device` → `COMPTEA_DEVICE` → 自動 | 自動 | 自動は torch，無ければ `nvidia-smi` |
 
-**外の読み手の入れ方** (どちらも**入っていなければ黙って飛ばす**ので，
-入れていない環境でも工程は動く)．
-
-| 読み手 | 置き場の決め方 | 入れ方 |
-|:--|:--|:--|
-| yomitoku (`yomi.py`) | 環境変数 `COMPTEA_YOMI_PY` | `python -m venv --system-site-packages <置き場>/venv_yomi` して `pip install yomitoku==0.14.0`．**`--system-site-packages` は主環境の torch を使い回すため** (入れ直すと数 GB)．重みは初回の呼び出しで取りに行く |
-| NDLOCR-Lite (`ndl.py`) | 環境変数 `COMPTEA_NDLOCR` | repo を置いて `ordered-set` を足すだけ．**ONNX で GPU 不要** |
-
-**【正式導入 2026-09-14】yomitoku を恒久の置き場に据えた**．それまでは
-セッションの一時ディレクトリに作った環境を指しており，**ジョブを消すと
-読み手ごと消える**状態だった．
-
-**置き場はコードに書かない** (2026-09-14 ユーザ決定)．公開リポジトリなので，
-手元の実際のパスを既定値に持たせず，**環境変数だけ**で決める
-(`yomi.DEFAULT_PYS`・`ndl.DEFAULT_DIRS` は空)．毎回指さずに済むよう，
-環境に登録しておく (`setx` など)．この規則は `tests/test_no_local_paths.py`
-が字面で見張る．
+**外の読み手の入れ方と置き場を指す環境変数**は [README の「外の読み手」](../README.md#外の読み手-任意)
+が正 (入れ方・版・依存はそちらだけに書く)．コードの側の約束は，置き場を
+**環境変数だけ**で決めること (`yomi.DEFAULT_PYS`・`ndl.DEFAULT_DIRS` は空．
+2026-09-14 ユーザ決定)．`tests/test_no_local_paths.py` が字面で見張る．
 
 #### 4. 後処理 (段階 3)
 
@@ -673,9 +660,9 @@ that, from this repository — and can be called from anywhere without changing 
 working directory (`COMPTEA_CORE` overrides where the core is looked for; the old
 name `COMPTEA_YOLO` is still read).
 
-Environment variables: `COMPTEA_CORE` (above), `COMPTEA_DEVICE` (`cpu` / `cuda`),
-`COMPTEA_YOMI_PY` and `COMPTEA_NDLOCR` (the external readers), and, for `eval/` only,
-`COMPTEA_DATA` (where the labelled scans and truth tables are).
+Environment variables (`COMPTEA_CORE`, `COMPTEA_DEVICE`, `COMPTEA_YOMI_PY`,
+`COMPTEA_NDLOCR`, and `COMPTEA_DATA` for `eval/` only) are listed in the
+[README](../README.md#環境変数), which owns that list.
 
 ## Key dependencies
 
@@ -688,7 +675,7 @@ pipeline; it does not include streamlit) and, per stage, in `apps/*/requirements
 
 - Output is **long format**: one row per plot × species (`comp_table.py`). `to_wide()` exists only for eyeballing.
 - Stages report trouble through `df.attrs['warnings']` rather than failing silently — `locate.py` and `comp_table.py` both do this, and the Streamlit pages display it.
-- Per-cell doubts travel in a `note` column (several values joined by `;`), drawn in colour on the grid overlay (the first three) and carried through OCR into the long table. Values: `interpolated` / `snapped` / `on_text` (`axes.py`, `blocks.align_block_bottoms`), `row_fixed` (`row_heights.py`), `y_shifted:±N` / `y_followed` / `y_fitted` (`row_track.py`), `heading` / `name_only` / `legend` (`row_kinds.py`), `retry` / `roman` (`ocr.py`), `ndl` (`pipeline/read.py`), `flow` / `moved` / `sname_from_jname` (`comp_table.py`).
+- Per-cell doubts travel in a `note` column (several values joined by `;`), drawn in colour on the grid overlay (the first three) and carried through OCR into the long table. The full list of values, and of `status` values and output columns, is in the [README](../README.md#出力の形), which owns it.
 - Domain background (composition tables, cover-abundance classes, layer codes) is in `docs/vegetation_science.md`. Read it before looking up vegetation-science terms elsewhere.
 - YOLO model weights ship with the package at `comptea/weights/comptea.pt` (`comptea.WEIGHTS`)
 - `comptea` is an ordinary package; `pip install -e .` makes it importable, and when it is not installed `run_pipeline.py`, `run_ocr.py`, `build_table.py`, `link_pages.py` and `read_once_page.py` put the repository on `sys.path` themselves (`crop_cells.py`, `apply_text.py` and `export_data.py` do not), and `comptea.pipeline.common.setup()` does the same from `package_dir()`
