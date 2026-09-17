@@ -1,684 +1,243 @@
-# comptea architecture
+# コードの構成
 
-This file describes the codebase — architecture, commands, conventions. The
-narrative of how the rules were arrived at (and which ideas were measured and
-dropped) is in [lessons.md](lessons.md) (principles and the adoption record) and
-[lessons_history.md](lessons_history.md) (dated details); the stage-by-stage walkthrough is in
-[pipeline.md](pipeline.md).
+comptea のコードがどこに何を置き，どうつながっているかの地図である．
+ここにはコードの構成だけを書き，ほかは次の文書に分けてある．
 
-## Project Overview
-
-**comptea** (Composition Table to Data Easy) extracts structured data from scanned images of vegetation composition tables found in books and reports. The pipeline: image preprocessing → object detection (YOLO11) → region location → OCR → text correction → tabular output.
-
-The project is bilingual (Japanese/English) and targets ecological vegetation survey data.
-
-## Layout
-
-| Directory | What is in it |
+| 知りたいこと | 文書 |
 |:---|:---|
-| `comptea/` | The core modules. Two files that had grown to hold several concerns each were split by concern: `split_wide.py` (1,673 lines) into `strips.py` (wide tables), `col_edges.py` (column boundaries), `table_split.py` (telling two tables apart on one sheet), `body_rows.py` (the body's vertical extent and row boundaries) and `checks.py` (the independent checks); `locate.py` (1,558 lines) into `filters.py` (throwing out what must not be built on), `blocks.py` (cutting a sheet into tables and blocks), `axes.py` (building and nudging the boundaries of one axis) and `locate.py` itself (assembling the grid). It is a package: modules import each other relatively (`from . import ink`), the dictionaries and weights are resolved against the package directory, and **nothing needs a particular working directory** any more (until 2026-09-07 everything had to run inside `comptea/`) |
-| `comptea/web/` | The older all-in-one Streamlit pages, kept as they were |
-| `comptea/pipeline/` | The three stages themselves — `grid.py`, `read.py`, `table.py` — with `common.py` shared between them. `pipeline.run(stage, argv)` drives one **in the calling process**: until 2026-09-07 the apps spawned a new Python per stage and paid the torch import (5 s) every time. Measured with the CPU wheel Streamlit Cloud installs, detection peaks at 432 MB on the sample page (781 MB at the apps' `imgsz` cap of 2560) and reading at 507 MB, which fits the ~1 GB free tier (the local CUDA build reaches 1,375 MB and is what made this look impossible) |
-| `cli/` | Thin command-line entry points over those stages, one per stage (`run_pipeline` = stage 1, the grid → `run_ocr` → `build_table`), plus `crop_cells`, `apply_text`, `export_data`, `link_pages` for the run-on blocks, and `read_once_page` for a single continuation page without a branch number |
-| `apps/` | One Streamlit app per stage, each with its own `requirements.txt` |
-| `eval/` | The yardsticks. **They need the labelled scans and truth tables, which are not published**, so they cannot be run from this repository |
-| `tests/` | Runs on the dictionaries and `examples/` alone — no source material needed |
+| 入れ方・環境変数・CUI と GUI の使い方・出力の列と値 | [README](../README.md) |
+| 段ごとのアルゴリズムと規則 (順序・閾値と定数名) | [pipeline.md](pipeline.md) |
+| 規則づくりの原則と，測って決めた採否 | [lessons.md](lessons.md) |
+| 実験の数字と経緯 (日付順) | [lessons_history.md](lessons_history.md) |
+| 物差し (`eval/`) の使い方 | [eval/README.md](../eval/README.md) |
+| 分野の用語 (組成表・被度・階層) | [vegetation_science.md](vegetation_science.md) |
 
-An earlier R implementation and a Detectron2 prototype exist in the project's private
-history; neither is included here.
+## 全体の形
 
-## Pipeline stages
+スキャンした組成表の画像から，縦持ちの表 (1 行 = 1 地点 × 1 種) を作る．
+工程は **格子 → 読み取り → 組み上げ** の 3 段で，段ごとに人が目で確かめてから先へ進む
+(段の中身は [pipeline.md の全体像](pipeline.md#全体像))．
 
-1. **Input** (`split_sheet.load_page`): a scanned page as an image, or a PDF — the
-   fold-out sheets (`s01115`, A0 at 300 dpi) come as one PDF page each, which is
-   rendered to an image before anything else. Everything downstream works on images
-2. **Orientation** (`split_sheet.check_rotation`, `grid.deskew_page`): a sheet set
-   sideways is turned upright **before detection**, since the detector never saw
-   rotated tables (of 157 pages only `kinki_014` needs it; the direction is decided
-   by detecting both ways and keeping the one with more `row`). The remaining tilt
-   (0.1–0.8°) is corrected on a copy (`<workdir>_deskew.png`), and **the grid records
-   which image it was built on** (`located.csv`'s `source_image`) — never assume the
-   original
-3. **Sheet splitting** (`split_sheet.find_tables`, `blocks.py`, `table_split.py`,
-   `strips.py`): an A0 sheet carries two to five separate tables, and feeding it whole
-   to the detector loses every row (a 9344 × 12873 page yields 0 `row`). The geometric
-   split cuts at the blank gutters, then the detections themselves separate tables
-   stacked vertically and set side by side (a divider can be narrower than a gap
-   *inside* one table). See **段ごとの版** below for what else was measured here
-4. **Detection** (`detect.py`): YOLO object detection. Confidence thresholds are per class (see `detect.filter_by_conf()`). The command-line path and the yardsticks all pass `--conf 30 --conf-col 20`: at 30 the `col` of a whole block is lost on some pages (kinki_047's left block scores 0.24), which drops every row in that block. `imgsz` defaults to `auto`, which scales it with
-   the longest side so the page meets the detector at the scale it was trained on
-   (long side 3300 px ↔ `imgsz` 1280): a book page still resolves to 1280, an
-   oversized fold-out to 1856–2560. Feeding a 4809-px-tall table at 1280 costs two
-   thirds of its rows
-5. **Location** (`locate.py`, with `blocks.py` and `axes.py`): Turns the detected `row` / `col` boxes into cell coordinates. A page can hold more than one block — a single-plot table is often set in two columns — so `blocks.split_blocks()` divides the page at the species-name columns and builds a grid per block; a page can also hold more than one **table**, stacked vertically, which is a different thing entirely (separate header, separate plots, never merged), and `blocks.split_tables()` cuts those apart at the top of each header, the caller keeping one workdir per table; `locate.number_cells()` then numbers rows continuously across blocks and columns within each. Boundaries come from the detections themselves; only the gaps where a row or column went undetected are interpolated (`axes.locate_edges()`). A boundary that lands on text is nudged to the middle of the nearest gap in the ink profile (`axes.snap_edges()`). Removes duplicate overlapping detections and reports what it could not resolve via `df.attrs['warnings']`
-6. **OCR** (`ocr.py`, driven by `pipeline/read.py`): EasyOCR (ja+en) reads text from each located cell region. Images are binarized and trimmed before OCR. Before reading, `read.move_off_rules()` shifts the composition cells' **read boxes** off vertical rules — the first body column past the left rule (`left_rule.py`), then per cell (`cell_rule.py`) — leaving `located.csv` untouched. An unread cell is re-read only when `ink.glyph_gate()` sees a glyph larger than `・` (or two or more blobs) once rules are removed (this replaced the ink-ratio threshold `RETRY_AT` on 2026-09-17). Cells that still fail are re-read with NDLOCR-Lite (`read.retry_until_stable()` → `retry_cells()` on `retry_targets()`, padding `RETRY_PAD` = 3, repeated until nothing changes; `--no-retry` turns it off)
-7. **Text correction** (`correct_text.py`): Post-OCR corrections for species names (edit distance against `j_name.txt` / `s_name.txt`), layer codes, and composition values. Each correction validates its own result and returns a `status` (`OK` / `Need Check` / `suggested` / `multi`). A composition cell may also be a **constancy** value — `IV(+-3)`, meaning "constancy IV, cover range +–3" — which appears when the sheet is a synoptic table whose columns are communities rather than plots (2 of the 68 fold-out tables). `correct_constancy()` normalises it (`+`/`r` are legitimate heads for occurrences below constancy I; a missing hyphen inside the brackets is restored; a Roman numeral read inside the brackets is a `1`, since only cover ranges live there; a trailing stray character is the closing bracket misread). What it does **not** do is decide what the cell means: a bracketed cell is `IV(+-3)` (constancy IV, cover range) in a community column and `2(3-4)` (cover 2, sociability range) in a single-plot column, **and one table holds both** — 9 of 22_p2's 25 columns are single plots, 7 of 11_p1's 14. Reading a printed `2` as `II` cost those columns their cover values. `comp_table.column_head_kinds()` votes per column on whether the heads are Roman or Arabic, and `split_comp(kind=…)` fills either `constancy` + cover range or `cover` + `sociability` accordingly; the vote also settles the `1`/`I` confusion the glyphs make unavoidable cell by cell. A table with both kinds is flagged in the warnings
-8. **Running-text parsing** (`parse_text.py`, `plot_table.py`): The header of a
-   single-plot table and the once-only species list below the table are set as running
-   text, so they cannot be cut into rows and columns. The whole region is OCR'd, the
-   fragments are re-joined in reading order (`reading_order`), and only then parsed —
-   an item or a species name can straddle a line. `plot_table.py` turns the parsed
-   header into a separate table, one row per plot, columns being the header items
-   (plot number, date, altitude, …). Japanese item names win over the German ones:
-   they OCR more reliably
-9. **Table assembly** (`comp_table.py`): Builds the long-format table — one row per plot × species
+**物体検出 (YOLO11) は領域 (表頭・種名の列・組成部) までにとどめ，行と列の境は
+黒画素から決める**．このため，格子を組むモジュールの多くは検出の箱と画像の両方を受け取る．
 
-### 段ごとの版 (どれが正で，どれが控えか)
+## ディレクトリ
 
-同じ仕事に**複数の実装**がある段がある (検出器を使うもの・使わないもの，幾何で
-決めるもの・OCR の内容で決めるもの)．2026-09-14 に棚卸しした一覧．
-**「工程」の列が `正` のものだけが `cli/run_pipeline.py` から呼ばれる**．
-`控え` は import されていない (的だけがある)．
+| 置き場 | 中身 |
+|:---|:---|
+| `comptea/` | 中核のパッケージ．モジュールどうしは相対 import (`from . import ink`) |
+| `comptea/pipeline/` | 段の入口 (`grid.py`・`read.py`・`table.py`) と共通の準備 (`common.py`) |
+| `comptea/web/` | 以前の一体型の Streamlit ページ (`comptea_web.py` ほか)．当時のまま残してある |
+| `comptea/weights/` | 検出の重み `comptea.pt` (`comptea.WEIGHTS`) |
+| `comptea/*.txt` | 種名の辞書 (`j_name.txt`・`s_name.txt`・`js_name.txt`) |
+| `cli/` | 段ごとの薄い CUI |
+| `apps/` | 段ごとの Streamlit アプリ (`1_split`〜`4_table`) と共通の `_shared.py`．アプリごとに `requirements.txt` を持つ |
+| `eval/` | 物差し．**正解ラベルと正解表は公開していない**ので，この repo だけでは回せない |
+| `tests/` | 辞書と `examples/` だけで回る試験 |
+| `examples/` | 出典を添えて引用した見本の 1 ページ (`sample.jpg`) と，段ごとの結果の zip |
+| `.claude/skills/comptea/` | Claude Code から工程を回すスキル (段階の手引き・読み取りの手引き・失敗の型) |
 
-#### 1. 折込の切り分け (A0 の紙面 → 表ごとの画像)
+## 段と入口
 
-| 版 | 実体 | 工程 | 実測の水準 |
-|:--|:--|:--|:--|
-| 幾何 (空白の帯 + 黒画素の塊) | `split_sheet.find_tables`・`blob_boxes`．`split_sheet.py` 自身が CLI を持ち，工程の**前**に回す | **正** | **23 枚すべてで箱の数が真値と一致** (68 箱 = 68 表)．2026-09-15 に高さの歯止め (`MIN_HEIGHT`) を足して，残っていた低い切れ端 2 つを落とした |
-| 検出の手掛かりで分ける | `blocks.split_tables` (縦に重なる表)・`table_split.split_side_by_side` (左右に並ぶ表)・`grid.resplit_parts` (部分画像に切り出してやり直す) | **正** | 表と表の仕切りが 23〜50 px の紙面は空白では切れない．幾何のあとに掛ける |
-| 目印 (OCR) から組み立てる | `table_find.find_by_marks`・`columns`・`count_tables`・`structure_boxes`・`split_between_heads`・`recheck_boxes` | 控え | 箱 73 のうち**表頭がちょうど 1 つ入る箱 69**．ただし 23 枚中 11 枚に端から端まで通る隙間が無く，**幾何を置き換えられない** (2026-09-14 の結論)．**検算として工程につなぐ案も 2026-09-15 に取り下げた** (下の 1b) |
-| 注記の切り出し | `split_sheet.note_boxes` → `<stem>_p<i>_note.png` | **正** | 表の画像には**含めない** (高さが変わると検出の縮尺が動く) |
+同じ段を CUI と GUI から呼ぶ．**段の本体は `comptea/pipeline/` の 1 か所だけ**にあり，
+`cli/` と `apps/` はそれを呼ぶだけである (CUI と GUI の違いは
+[pipeline.md の「CUI と GUI の対応」](pipeline.md#cui-と-gui-の対応))．
 
-#### 1b. 切り分けは幾何と目印の 2 つだけにする (2026-09-14 ユーザ決定)
+| 段 | 本体 | CUI | GUI |
+|:---|:---|:---|:---|
+| 切り分け (段の前) | `split_sheet.main` | `python -m comptea.split_sheet` | `apps/1_split` |
+| 段階 1 格子 | `pipeline/grid.py` | `cli/run_pipeline.py` | `apps/2_grid` |
+| 段階 2 読み取り | `pipeline/read.py` | `cli/run_ocr.py` (目視は `crop_cells.py` → `apply_text.py`) | `apps/3_read` |
+| 段階 3 組み上げ | `pipeline/table.py` | `cli/build_table.py` | `apps/4_table` |
+| 続きのページ | `grid.save_continuation` (`page_group.py`・`once_page.py`) | `cli/link_pages.py`・`cli/read_once_page.py` | `apps/2_grid` (切り出しまで) |
+| まとめて書き出す | — | `cli/export_data.py` | — |
 
-**【決定 2026-09-14・ユーザ指示】折込の切り分けは幾何と目印の 2 つを残し，
-外部のレイアウト解析 (D yomitoku・E DocLayout-YOLO) は候補から外す**．
-下の実測で，**どちらも幾何・目印が外す紙面を 1 枚も救わない**と分かったため．
-以後この 2 つは切り分けの候補として検討しない (**本のページの表全体の検出**や
-**読み取り**での値打ちは別の話で，`yomi.py` の OCR は段階 2・3 で使い続ける)．
+- `pipeline.run(stage, argv)` は段を**呼んだプロセスの中で**動かし，`(終了コード, ログ)` を返す．
+  アプリはこれを使う (段ごとに Python を起こすと，そのたびに torch の読み込みを払う)．
+- `run_pipeline.py` は名前に反して**段階 1 だけ**を回す．
+- 続きのページ (枝番 `xxx-1`・`xxx-2`) の扱いは [pipeline.md の 11 節](pipeline.md#11-続きのページをつなぐ) が正．
+  コードの側では，`grid.save_continuation` が表の無い枝番付きのページを止めずに塊を切り出し，
+  `link_pages.py` がつないでから解析する．
 
-- 工程にも repo にも**コードは入っていない** (`yomi.py` が使うのは `OCR` と
-  `DocumentAnalyzer` だけで，`LayoutAnalyzer` は呼んでいない)．消すものは無く，
-  この決定で候補から落ちる．
-- DocLayout-YOLO は読み手の別環境 (`tmp/venv_yomi`) に入れた `doclayout-yolo`
-  パッケージだけが残る．主環境は最初から触っていない．
+### 段階 1 の中の順序
 
-以下が根拠の実測．真値は隅の札を読んだ `s01115_tables.tsv` (23 枚・**68 表**)．
+`grid.main` → `deskew_page` (傾いていれば回して検出し直す) → `split_page` (表ごとに分ける) →
+`build_tables` → 表ごとに `build_one`．
+`build_one` の中は次の順で，**順序に意味がある** (理由は pipeline.md の各節)．
 
-| 手法 | 表の数が真値と一致 | 箱の合計 | 外す紙面 |
-|:--|--:|--:|:--|
-| A 幾何 `split_sheet.find_tables` | **21/23** → **23/23** (2026-09-15) | 70 → 68 | 16・21 の余分な切れ端は高さの歯止めで落とした |
-| C 目印 `table_find` | **22/23** | 67 | 17 |
-| D yomitoku のレイアウト | 13/23 | 71 | 10 枚 |
-| E DocLayout-YOLO | 9/23 | 81 | 14 枚 |
+1. `filters.looks_like_fragment` (切れ端なら止める)
+2. `_clean_detections`: `table_split.drop_stray_plot_rows`・`drop_stray_name_cols` → `name_col.name_columns_from_ink` → `one_plot.columns_from_ink`
+3. `locate.locate_items` → `filters.looks_like_no_table` → `locate.number_cells` → `layer_col.fix_columns`
+4. `body_rows.rows_from_body` (行が大きく落ちていたら格子を組み直す)
+5. `row_heights.fix_row_heights` → `blocks.align_block_bottoms`
+6. `_polish_grid`: `col_edges.fix_column_edges` → `fix_edges_by_crossings` → `align_header_columns` →
+   `checks.*` → `row_skew.fix_skew` → `row_track.check_beats`・`fix_offsets` →
+   `col_edges.fix_name_layer_edge` → `layer_col.refit_layer_width` → `join_layer_comp_edge` →
+   `row_kinds.mark_rows` → `header_lines.shear_header_values`
+7. `located.csv` と重ね描きの画像を書く
 
-**答え: 対応できる．ただし要るのは 2 つ (A + C) だけで，実質は A でほぼ足りる**
-(この結果を受けて，上のとおり D・E を候補から外した)．
+`split_page` の中で，左右に並ぶ表 (`table_split.split_side_by_side` → `grid.resplit_parts`) と
+地点の多い表 (`strips.detect_wide`) は検出をやり直す．
 
-- **A が外していた 2 枚は「表が足りない」のではなく「余分」だった** (高さの歯止めを
-  足す前)．16_p1 (1782x656)・21_p2 (3041x527) は表ではない切れ端で，格子ができないので
-  工程には響かない．2026-09-15 からは `MIN_HEIGHT` で箱の段階で落ちる．
-  **格子ができた表で数えると 23/23 枚**が真値と一致する．
-- **C が外すのは 17 の 1 枚だけ**．A0 1 枚が丸ごと 1 表で，表頭に**縦書きの
-  調査地名**が混じるため項目名が 6 個しか読めず，まとまりが作れない (箱 0)．
-  A はこの紙面を正しく 1 箱にする．
-- **D・E は 1 枚も救わない**．A が外す 16・21，C が外す 17 のどれも当てられず，
-  足しても覆う枚数は増えない (割りすぎる紙面が多い．E は横倒しの 04 が 0 箱)．
-- A の 70 箱を C の目印で検算すると (`table_find.check_boxes`)，
-  **表頭がちょうど 1 つ 61 箱**，**表頭 2 つ 3 箱** (04・14・21)，
-  **表頭 0 つ 6 箱** (うち 2 つは上の細い切れ端で，これは正しい)．
-- **【2026-09-15 に取り下げ】この検算は工程につながない**．`split_sheet` に
-  つないで全 23 枚で当てたところ，**表の数が真値と合う紙面が 21 → 19 枚に
-  悪くなった** (箱 70 → 73)．切り直した 3 箱はすべて誤りで，04 は横倒しの
-  紙面 (目印は元の向きで記録される既知の罠)，14・21 は凡例が 2 つ目の
-  「表頭のまとまり」に見えたもの．警告だけにしても当たりが 0/3 で騒がしい．
-  経緯は [lessons_history.md「切り分けの『検算』は，当てると悪くなる」](lessons_history.md#2026-09-15-切り分けの検算は当てると悪くなる--工程にはつながない)．
+## モジュールの地図
 
-**数え方の落とし穴**: 工程の成果物 (切り出した画像・格子) を数えると，
-切り分けの出来を見誤る．08 は「4 表しか無い」ように見えるが，これは
-2026-09-10 のユーザ指示で **08_p2 を切り分け後に削除**したためで，
-`find_tables` 自体は 5 箱を正しく出している．
+1 行に 1 つ．「主な関数」は外から呼ばれるもの．
 
-#### 2. 格子の作成
+### 入力と切り分け
 
-| 版 | 実体 | 工程 | 備考 |
-|:--|:--|:--|:--|
-| 検出器 (YOLO) から | `detect.py` → `locate.py` | **正** | 学習データ 121 件はすべて活字．折込は 0 件 |
-| 検出器を使わない | `noyolo.py` (`guess_parts`・`guess_parts_v2`) | 控え | 工程では未使用．`table_find` が `guess_pitch` だけ借りている |
-| 1 調査区の 2 段組 | `one_plot.py` | **正**の分岐 | 段ごとに発動 (kinki_001・047・053・077 の 4 表) |
-| 地点が多く行が取れない表 | `strips.py` (短冊に分けて検出し直す) | **正**の分岐 | 手元の本のページ 88 枚は通らない |
-| 種名の列が検出されないとき | `name_col.py` (組成部の左の黒画素の帯) | **正**の補い | 検出が 1 件でもあれば何もしない |
-| 表頭の縦の境 | 検出枠 `header_col` の右端 → **`header_cols.py` (黒画素)** | **正** | 検出から黒画素へ移した例．境が字を横切る行 1016 → 167 |
-| 表頭の行 | OCR の箱 (`header_lines`) ／ 投影 (`locate._header_bands_from_names`) | **正**．箱が 3 行未満なら投影へ**戻す** | 対策 A |
-| (参考) 段階 1 の読み手 | **EasyOCR だけ** | — | yomitoku を足す 2 案を 2026-09-14 に測って取り下げた ([lessons_history.md「格子と行の境に yomitoku は足さない」](lessons_history.md#2026-09-14-格子と行の境に-yomitoku-は足さない)) |
-| 組成部の行 | 検出の内挿 (`axes.locate_edges`) → 黒画素の格子 (`row_heights`・`body_rows.lattice_rows`) → 列ごとのずれの吸収 (`row_track`) の 3 段重ね | **正** | `--no-snap`・`--no-track` で後ろ 2 段を切れる |
+| モジュール | 受け持ち | 主な関数 |
+|:---|:---|:---|
+| `split_sheet.py` | 紙面 (画像・PDF) を読み，折り込みを表ごとの画像と注記の画像に切る．検出の `imgsz` を決める | `load_page`・`find_tables`・`blob_boxes`・`split_by_blobs`・`note_boxes`・`check_rotation`・`cut_table`・`auto_imgsz` |
+| `deskew.py` | 組成部の左右の黒画素から紙面の傾きを測る | `estimate`・`deskew_to` |
+| `preprocess_image.py` | 画像の前処理 (旧 GUI 用) | `correct_skew` |
 
-#### 3. 読み取り (段階 2)
+### 検出と領域
 
-`--reader` で選ぶ．**入れていない読み手は黙って飛ばす**ので，どの環境でも動く．
+| モジュール | 受け持ち | 主な関数 |
+|:---|:---|:---|
+| `detect.py` | YOLO の結果を表にし，クラスごとのしきい値で絞る | `filter_by_conf`・`yolo_results2csv` |
+| `strips.py` | 地点の多い表を短冊に分けて検出し，元の座標へ戻す | `needs_strips`・`detect_wide` |
+| `table_split.py` | 1 枚に載る別々の表を検出の手掛かりで見分ける．表頭の外の項目行を捨てる | `split_side_by_side`・`name_band_cuts`・`drop_stray_plot_rows`・`drop_stray_name_cols` |
+| `filters.py` | 組んではいけないもの (切れ端・表の無いページ・重複・流し込みの中の行) を外す | `looks_like_fragment`・`looks_like_no_table`・`remove_dup_ranges` |
+| `blocks.py` | 紙面を**表** (決してまとめない) と**段** (折り返し) に分ける | `split_tables`・`split_blocks`・`drop_stray_anchors`・`align_block_bottoms` |
+| `name_col.py` | 検出されなかった種名の列を黒画素の山から作る | `name_columns_from_ink` |
+| `one_plot.py` | 1 調査区を 2 段に組んだ紙面で，階層と被度の列を黒画素から作る | `columns_from_ink` |
 
-| 版 | 実体 | 既定 | 備考 |
-|:--|:--|:--|:--|
-| `easyocr` | `ocr.py`．セルを 1 つずつ読む | **既定** | GPU があれば速い |
-| `multi` | `read_region.py` が領域を 1 回読み，`ndl.py` (NDLOCR-Lite．**GPU 不要**)・`yomi.py` (yomitoku) を重ねる．クラスごとの順で質の通る読みを採る | | 辞書に当たるセルが 和名 277 → **428**，学名 462 → **548** |
-| `ai`・`both` | 段階 2 で AI が読む | | |
-| 折込の分割読み | `tiles.py` (A3〜A4 に分けて読み，原点を足して戻す) | `multi` の中で自動 | 辞書に当たる語が 200 倍 |
-| 読み直し | `read.retry_until_stable` → `retry_cells` (組成のセルを NDLOCR-Lite で．対象は `retry_targets` = 要確認と判定の付いていない字のあるセル．変わらなくなるまで最大 `RETRY_ROUNDS` 巡．余白 `RETRY_PAD` = 3) | 既定で入る | `--no-retry` で切る．522 セルが読めた．読みは `text_ndl` に残す |
-| 読むかの判定 | `ink.glyph_gate` (縦線・横線を除いた塊の大きさと数) | 既定 | 2026-09-17 に黒画素の割合の閾値 (`RETRY_AT`) から替えた |
-| 読む箱を罫線から外す | `read.move_off_rules` → `left_rule.py` (左端の列を左の縦罫線より右へ)・`cell_rule.py` (セルごと) | 既定 | 格子 (`located.csv`) は変えず，読む箱だけを動かす (2026-09-16・09-17) |
-| 装置 | `device.py`．`--device` → `COMPTEA_DEVICE` → 自動 | 自動 | 自動は torch，無ければ `nvidia-smi` |
+### 格子 (行・列・組み立て)
 
-**外の読み手の入れ方と置き場を指す環境変数**は [README の「外の読み手」](../README.md#外の読み手-任意)
-が正 (入れ方・版・依存はそちらだけに書く)．コードの側の約束は，置き場を
-**環境変数だけ**で決めること (`yomi.DEFAULT_PYS`・`ndl.DEFAULT_DIRS` は空．
-2026-09-14 ユーザ決定)．`tests/test_no_local_paths.py` が字面で見張る．
+| モジュール | 受け持ち | 主な関数 |
+|:---|:---|:---|
+| `locate.py` | 上を呼んで**格子を組む本体**．表頭の帯・階層の列・上下端の補いを含む | `locate_items`・`number_cells` |
+| `axes.py` | 1 つの軸の境を検出から組み立て，字を避けてずらす | `locate_edges`・`snap_edges`・`ink_profile` |
+| `body_rows.py` | 組成部の縦の範囲 (流し込みの手前まで) と，行の刻みと境 | `body_extent`・`body_bottom`・`running_text_top`・`find_gutter`・`body_extent_ink`・`expected_row_edges`・`lattice_rows`・`rows_from_body` |
+| `row_heights.py` | 行の高さをそろえ，半分の刻みを直し，上下端を埋める | `fix_row_heights`・`refine_pitch`・`is_half_pitch` |
+| `row_skew.py` | 残った傾きをセルの座標だけで直す | `fix_skew` |
+| `row_track.py` | 行を単位の連なりとして追い，列ごとの y のずれを直す．拍で行数を検算する | `fix_offsets`・`check_beats`・`clean_rules` |
+| `row_kinds.py` | 行の種類 (見出し・学名だけの行・凡例・流し込み) を `note` に付ける | `mark_rows` |
+| `col_edges.py` | 列の境 (印字の隙間の格子・字を割らない位置・表頭の列の合わせ・和名と階層の境) | `plot_gaps`・`fix_column_edges`・`fix_edges_by_crossings`・`crossing_counts`・`align_header_columns`・`fix_name_layer_edge` |
+| `col_reach.py` | 検出の外 (右端・左端) にある地点の列を足す | `reach_right`・`reach_left` |
+| `layer_col.py` | 階層の列を見つけ，組成部の先頭と右端の地点でない列を整理する | `fix_columns`・`find_layer_column`・`refit_layer_width`・`join_layer_comp_edge` |
+| `header_lines.py` | 表頭の帯 (項目名の行と値の行) を作り，境を字の隙間へ寄せる | `header_bands`・`bands_from_value_lines`・`bands_from_pairs`・`slant_profile`・`extend_top`・`shear_header_values` |
+| `header_cols.py` | 表頭の独文と和文を分ける縦の境 | `split_x` |
+| `checks.py` | できた格子を独立した尺度で検査する | `check_grid_rows`・`check_grid_columns`・`check_row_heights`・`check_header_rows`・`check_source_image` |
+| `count_plots.py` | 表頭の帯から地点数を数える物差し (検出にも格子にも依らない) | `plots_from_header` |
 
-#### 4. 後処理 (段階 3)
+### 読み取り
 
-ここは**版の選択ではなく段の重なり**で，分岐は `--no-notes`・`--keep-absent` だけ．
+| モジュール | 受け持ち | 主な関数 |
+|:---|:---|:---|
+| `ocr.py` | EasyOCR でセルを読む．字種を絞った読み直し・常在度の頭の数え直しを含む．読み手は初めて使うときに作る | `get_reader`・`ocr_images_df`・`retry_empty_comp`・`fix_roman_heads` |
+| `left_rule.py` | 組成部の左端の列の読む箱を，左の縦罫線より右へ押し出す (格子は変えない) | `fit_rule`・`push_first_column` |
+| `cell_rule.py` | セルごとに読む箱の端の縦罫線を外す (格子は変えない) | `trim_rules` |
+| `read_region.py` | 領域を 1 回読み，位置でセルに割り当てて読み手を重ねる | `read_cells`・`assign`・`pick` |
+| `tiles.py` | 大きな紙面を分けて読み，元の座標へ戻す | `read_tiled` |
+| `ndl.py`・`yomi.py` | 外の読み手 (NDLOCR-Lite・yomitoku)．置き場は環境変数で指し，無ければ飛ばす | `NdlReader`・`YomiReader` |
+| `device.py` | 読み手を動かす装置を 1 か所で決める (`--device` → `COMPTEA_DEVICE` → 自動) | `pick`・`forget` |
+| `ink.py` | 二値化と黒画素の測り方 (各段で共有) | `binarize`・`ratio`・`erase_box_lines`・`dashed_rows`・`head_strokes`・`glyph_gate` |
 
-`correct_text` (読みの補正) → `row_kinds` (見出し・流し込みの印) →
-`comp_table` (縦持ち・`mark_flow`) → `plot_table` (表頭から地点の表) →
-`site_notes` (**表の下の注記**から地点情報を差し込む．読みは yomitoku．
-`<画像>.paras.json` に取り置く)．**表頭の値は上書きせず，空いた所だけ埋める**．
+段階 2 の本体 `pipeline/read.py` は，`move_off_rules` (読む箱を罫線から外す)・
+`retry_targets` → `retry_cells` → `retry_until_stable` (NDLOCR-Lite での読み直し)・
+`recorrect_cells` (読み直さずに補正だけ当て直す) を持つ．
 
-#### 5. 使われていないもの
+### 補正と組み上げ
 
-いまのところ無い．**`crop_image.py` は 2026-09-14 に消した** (repo のどこからも
-参照されておらず，中身も `"images/example.jpg"` を直に書いた初期の下書きだった)．
-セルの切り出しは `cli/crop_cells.py` の `crop()` が行う．
+| モジュール | 受け持ち | 主な関数 |
+|:---|:---|:---|
+| `correct_text.py` | 辞書と規則で補正し，その場で検証して `status` を付ける | `correct_cell`・`correct_comp`・`correct_constancy`・`correct_layer`・`correct_name`・`correct_header_value` |
+| `download_species_names.py` | 維管束植物和名チェックリストから辞書を作る | `download_species_names` |
+| `comp_table.py` | 縦持ちの表に組む．括弧付きのセルの意味を列の多数決で決める | `comp_table`・`column_head_kinds`・`split_comp`・`mark_flow`・`to_wide` (目で見る用) |
+| `parse_text.py` | 流し込み (表頭・1 回出現の種・注記) を読み順に並べて解析する | `reading_order`・`parse_header_text`・`parse_once_species`・`parse_site_notes` |
+| `plot_table.py` | 表頭から地点ごとの属性の表を組む | `plot_table` |
+| `site_notes.py` | 表の下の注記から調査地・調査年月日・出典を差し込む | `apply_notes`・`read_site_info`・`usable_value` |
+| `page_group.py` | ファイル名の枝番からページの組を作る | `split_name`・`group_parts` |
+| `once_page.py` | 表の無いページから 1 回出現の種の塊を探す | `find_block` |
 
-### Object classes detected
+### 道具と約束の番人
 
-The 12 classes the detector was trained on (the labelled dataset itself is not
-published; the counts are from it):
+| モジュール | 受け持ち | 主な関数 |
+|:---|:---|:---|
+| `source.py` | 格子を作ったのと同じ画像を開く (`source_image` 列) | `open_image`・`check` |
+| `compare.py` | 2 つの通しを比べる物差し (`eval/compare_runs.py` が使う) | `diff_long`・`boundary_ink`・`boundary_ink_halves` |
+| `pipeline/common.py` | 段の準備と，段ごとの版と設定の記録 (`run_info.json`) | `setup`・`workdir`・`write_run_info`・`run_info_line` |
+| `draw_rect.py` | 箱を `note` で色分けして描く | `draw_rects_df` |
+| `util_file.py` | ファイル操作 (時刻付きの名前・zip) | `now`・`zip_now` |
+| `progress.py` | 標準出力を Streamlit に流す | `st_capture_stdout` |
 
-| Class | Description | Labels |
-|-------|-------------|-------:|
-| `row` | Data rows (species) | 675 |
-| `plot_row` | Header item rows | 209 |
-| `col` | Data columns (plots) | 138 |
-| `sname` | Scientific name column | 44 |
-| `species_col` | Japanese name column | 43 |
-| `header` | Header block (tabular or running text) | 33 |
-| `table` | Entire composition table | 25 |
-| `layer` | Vegetation layer column | 22 |
-| `header_col` | Header item-name column | 22 |
-| `once_species` | Listing of species occurring once, below the table | 15 |
-| `plot_no`, `date` | Folded into `plot_row` | 0 |
+### 控え (工程につないでいない別案)
 
-`comp` (a single cell of the composition body) is **not** a detected class: `locate.py`
-computes it as a grid from `col` × `row`. The header **columns** are not labelled —
-`col` spans the header on the tabular pages — but the header **rows** are, as
-`plot_row`: they look like `row` and leaving them unlabelled taught the detector to
-read the same thing as both foreground and background. `plot_no` and `date` were the
-same object under two more names and are folded in; their ids stay so the rest do not
-shift.
+| モジュール | 中身 | 使われ方 |
+|:---|:---|:---|
+| `table_find.py` | 検出器を使わず，タイル分割 OCR の目印で表全体の箱を作る (`find_by_marks`・`check_boxes`) | 工程では使わない．試験だけ |
+| `noyolo.py` | 検出器を使わず，粗い区切りと OCR の文字列から部分を推定する (`guess_parts`・`guess_parts_v2`・`guess_layout`) | 工程では使わない．`table_find` が `guess_pitch` だけ借りる |
 
-### Shared utilities
+控えにした理由は [lessons.md の採否の記録](lessons.md#採否の記録) (切り分け・格子) にある．
 
-- `split_sheet.py`: Cuts an oversized fold-out sheet into one image per table, and
-  works out the `imgsz` that puts the page back at the scale the detector was trained
-  at. A sheet like `s01115` (A0, 9344 × 12873 at 300 dpi) carries two or three separate
-  tables and is 16× the area of a book page; fed in whole, the detector finds no rows
-  at all. The cut is made at blank bands — **vertically first, then horizontally inside
-  each vertical part**, never the other way round, or the gap between the species-name
-  column and the composition body would split a single table. Loads PDFs through
-  PyMuPDF, lifting the embedded scan rather than re-rendering it.
-  A blank band has to cross the whole sheet, so a gap narrower than the 120 px floor
-  leaves tables joined (s01115_09's is 64 px, and its 5 tables came out as 3), which is
-  what `blob_boxes()` / `split_by_blobs()` fix (2026-09-10, user's idea): **shrink the
-  page and one table becomes one connected component**. The shrink is what matters —
-  a block of 8×8 counts as ink when **4 or more of its pixels** are dark; averaging
-  instead washes out a body of nothing but dots and leaves blobs made of titles and
-  names only. No dilation is applied: "ink if any" already acts as one, and dilating on
-  top of it merges the whole sheet (blob count across 23 sheets goes 74 → 144). Blobs
-  alone do not beat bands (bands 64/68 tables and 17/23 sheets exact, blobs 74/68 and
-  18/23), because they also split single tables, so they are applied **only inside a box
-  the bands already produced**, and only when the division is unambiguous: 2–4 blobs,
-  each ≥ 5 % of the box (10 % would lose Tab.51 on 09, which is 5.5 %), together
-  ≤ 85 % of it. Each blob is then stretched down to the next blob below it, or to the
-  bottom of the box — the note under a table (survey site, date, source: the only place
-  the plot information appears when the header lacks it) sits below the table with a gap
-  and would otherwise be cropped away; it is never stretched sideways, which would
-  swallow the neighbouring table. Against the truth (68 tables read off the sheets'
-  corner labels) this goes from 64/68 tables and 17/23 sheets to **70/68 and 21/23**;
-  the two extra pieces (16, 21) were bands over-cutting into low slivers, and since
-  2026-09-15 a height floor (`MIN_HEIGHT` = 0.08 of the sheet) drops them, giving
-  **68/68 and 23/23** (`grid.resplit_parts` calls it with `min_height=0`, since its
-  boxes are parts of one table)
-- `strips.py`: Detects a table with far more plots than the detector was trained on
-  by cutting the composition body into groups of plots, the species-name columns kept
-  at the head of each strip, then mapping the boxes back to the original coordinates so
-  `locate.py` never learns the table was wide. Not a scale problem: a 37-plot table
-  yields **zero** `row` detections at any `imgsz`, because a row box that wide is
-  outside the training distribution — the same table at 8 plots per strip detects 102.
-  Strips overlap by one plot so a plot never lands on a strip edge, and when the page
-  holds more than one table stacked vertically the strip is cut to that table's height
-  (`y_range`), or the strip re-detects the other table and undoes the split. It also splits
-  **two tables set side by side** on one sheet (their gutter can be 23 px, narrower
-  than the gaps between plots, so `split_sheet.py` cannot see it): two species-name
-  columns each with their own header means two tables, whereas one table folded into
-  two blocks has a single header. A name column the detector missed altogether
-  (sheet 23, the two tables 50 px apart) still shows in the ink: a band of body
-  columns three times as dark as the rest is a species-name column, and
-  `name_band_cuts()` cuts there. The strips' own `header` / `plot_row` boxes are
-  trusted only inside the header band of the whole-table detection
-  (`drop_stray_plot_rows(ref=…)`): strips invent headers inside the body, and one
-  such header cost a table the bottom quarter of its rows. Whenever a left/right cut
-  is found, `run_pipeline.py` does **not** divide the detections: it crops each side
-  out of the image (`grid.resplit_parts()`), runs `split_sheet.find_tables()` on the crop
-  to catch tables stacked below that a full-height neighbour had hidden from the
-  whitespace pass, and re-runs itself on each piece at that piece's own scale
-  (workdirs `_s1`, `_s2`, `_s1p2`). `check_grid_columns()` then compares the finished
-  grid's column edges against the ink gaps — an independent measure — and warns when
-  they disagree, while `fix_column_edges()` rebuilds those edges from the gaps when
-  that measurably reduces the ink the boundaries land on (one column too many makes
-  the pitch a few px short and every boundary drifts into the values further right:
-  22_p2 had 26 columns of 118 px where the print has 25 of 125). It runs **after**
-  the rows are settled and keeps the outer edges: swapping columns while the grid is
-  being built moved the body's left edge and halved the row count on another table.
-  The header can also sit a few tens of px to the side of the body, so
-  `axes._shift_edges_to_band()` slides the header's copy of the boundaries (never
-  changing their number, or the header items would stop lining up with the plots). The vertical extent of the body (`body_extent()`) is taken from the
-  `col` detections at **both** ends, then cut below the header that straddles the top
-  and above the once-only species; taking the top from the grid itself left the first
-  species group under the header unread in 28 of 68 fold-out tables (~371 rows), and
-  since `check_grid_rows()` counted its valleys inside the same extent, the row check
-  could not see it. The bottom is where the once-only species' running text
-  begins (`body_bottom()`): a band is running text when the column boundaries
-  are filled **and** the gutter between the name columns and the body (found from
-  the ink of the upper half, `find_gutter()`) is filled — a dense row of values
-  fills the boundaries but not the gutter, a group heading fills the gutter but
-  not the boundaries, and horizontal rules (long runs of ink, skewed or not) are
-  stripped first. That test needs the boundaries to be **countably** filled, which
-  a wide table defeats: across 17_p1's 116 plots even running text leaves 62% of
-  the boundaries in the gaps between letters, against 80% for the body — a real
-  difference, but rescaling it per table cuts at the first run of dense rows
-  instead (128 rows lost). What separates them is the **spacing of the letters**
-  (`running_text_top()`): dilate each band horizontally by a third of a cell
-  width and running text barely grows (1.5–1.7×, its letters already nearly
-  touch) while a row of values grows 2.4–5.7× — even 05_p2's `4.3 4.3 …` rows
-  grow 2.4×. The list is always at the foot of the table, so the search runs
-  **upwards** from the bottom and stops when the run stops being mostly
-  text-like; walking down from the top, or allowing a couple of stray bands
-  without that density floor, chains through the body (12_p1 lost 152 rows).
-  Letter spacing alone is not enough either: a synoptic table's own values
-  (`III(+-2)`, eight characters) are as tightly set as prose, and 11_p1 lost
-  35 rows of body to it, so a band must **also** fill the gutter between the
-  name columns and the body — prose crosses it, the body never does (11_p1's
-  body measures 0.000, 17_p1's once-only list 0.54–1.00).
-  `fix_edges_by_crossings()` then nudges each interior column boundary to
-  where it splits the fewest printed characters. Values are set around a
-  centre dot (`2・3`), so a boundary a few px off drops the last glyph into
-  the next cell and neither cell reads as a value — 52% of the remaining
-  doubtful cells had ink touching a boundary. The objective **counts blobs
-  rather than weighing ink**: a body that is nine tenths `・` puts every
-  boundary in a relative valley (17_p1 scored 0.56 of the median) while still
-  cutting the rare values. The room to move is a twelfth of a column: over
-  49 tables, ±0.08 of the pitch un-splits 2,337 values at the cost of 135
-  moving to a neighbouring plot, where ±0.22 un-splits 3,462 but moves 962
-  (21_p3's `III(+-4)` shifted from plot 13 to 14). Below 12 columns the rule
-  is off entirely — kinki_047 has two interior boundaries and 90-px columns,
-  and free movement cost it its perfect truth-table score (1.000 → 0.625) Rows, when the detector's `row` boxes fall short, are rebuilt
-  from the fact that **row height is constant within a table**
-  (`expected_row_edges()`): candidate pitches are the autocorrelation peaks of
-  the ink profile, measured on the body (dashed box borders masked out, or
-  they add a half period) and on the name columns separately — either one
-  alone can double: the body when it is all `・`, the names when a species
-  spans two layer rows and the name is printed only on the first. A peak
-  counts only if it stands out from the flat baseline (prominence ≥ 0.15 —
-  a `・`-only body has no period at all and its "peaks" are noise), the
-  shortest pitch within 0.1 of the most prominent wins, and a table shorter
-  than 12 rows keeps the detector's row height (too little signal). The grid
-  then walks down at that pitch, snapping each edge to the nearest ink
-  minimum of the **body** (values sit a few px off the names in typewritten
-  tables; the names are used only on rows where the body is blank). Scoring
-  candidates by the ink under their edges was tried and dropped — a longer
-  pitch has more freedom to find a gap and always looks better.
-  Ink valleys alone
-  over-split (a dirty gap yields three valleys) and under-split (a run of
-  `・`-only rows is one valley). `drop_stray_plot_rows(heads=False)` runs on every table, not only
-  the strips: header item rows are detected all down the body, and left in they cut
-  the body's rows a second time as header values and widen the header band until the
-  layer column (blank header) can no longer be told apart. `check_row_heights()`
-  (coefficient of variation of row heights) and `check_header_rows()` (header rows
-  inside the body) are the two checks that catch the failure modes the row and column
-  counts both pass
-- `deskew.py`: Fold-out sheets are scanned up to 1° off (9 of 68 tables shift
-  by 0.3–1.0 row heights between the left and right end of the body), and a
-  horizontal row boundary then cuts values at one end whatever the pitch. The
-  angle is the cross-correlation lag between the row-ink profiles of the left
-  and right third of the **body** (measured on the page as a whole, or on the
-  `col` boxes with the header inside, the estimate can even flip sign), and the
-  page is rotated and re-detected only when the shift exceeds 0.3 rows — an
-  angle threshold fired on 17 book pages and cost one of them two columns.
-  When the row pitch is known the lag search is capped at half of it (`LAG_PITCH`,
-  2026-09-16): the rows are periodic, and a wider search locked onto a multiple of
-  the pitch (19_p2 came out −7.9°, which `DESKEW_MAX_DEG` then discarded without a
-  warning). Across 120 tables six such estimates became plausible and the number of
-  tables actually rotated stayed at 4.
-  Coordinates downstream refer to the rotated copy `<work>_deskew.png`
-- `ocr.py`: a composition cell whose reading does not validate as a value is
-  re-read with the character set narrowed to `0-9 + r ・` (typewritten
-  `2.2` reads as `ムっム` otherwise; 08_p2 went from 35 to 7 unreadable
-  values), the replacement flagged `retry` in `note` so it reaches the
-  reviewer — narrowing can also turn `+` into `4`. A cell that still fails
-  is read once more with brackets and Roman numerals added
-  (`CONSTANCY_ALLOW`): without them a bracketed `2(3-4)` came back as
-  `36+23`, and not one of 22_p2's 451 doubtful cells could be recovered.
-  The narrow set is tried first, so a table without brackets reads exactly
-  as before; 22_p2 went from 451 doubtful cells to 124. Box borders crossing a cell
-  are erased first, **horizontal lines only**: erasing thin vertical lines took
-  the typewritten `1` with them. Vertical rules are instead kept out by moving the
-  read box (`pipeline/read.move_off_rules()`, the grid file unchanged): `left_rule.py`
-  fits a line to the rule left of the body and pushes the first column's left edge
-  past it (2026-09-16; 19_p2's rule drifts 55 px over the body, and 65 of its 70
-  doubtful cells were plot 1), and `cell_rule.py` then trims a rule inside each
-  box, telling it from a `1` by whether it continues above and below the box
-  (2026-09-17; 931 cells had a rule in the box, read as `1`). Which unread cells are
-  re-read is decided by shape, `ink.glyph_gate()` — a blob at least 0.30 of the cell
-  height, or two blobs, after removing rules — rather than by the ink ratio against
-  a table-wide threshold (`RETRY_AT`, removed 2026-09-17), which dropped hundreds of
-  clear `+`. What EasyOCR still cannot read is re-read by NDLOCR-Lite in
-  `pipeline/read.py` (`retry_until_stable()` over `retry_cells()`; targets from
-  `retry_targets()`, i.e. `Need Check` plus cells with text but no status; padding
-  `RETRY_PAD` = 3 — wider padding reads the neighbouring column)
-- `name_col.py`: When `sname` or `species_col` is missing — either both (3 tables) or
-  just one (28 of the 68 fold-out tables, which is why one sheet had no Japanese names
-  at all) — builds the missing box from the ink left of the body: the scientific-name and Japanese-name columns
-  are two hills in the column-wise ink profile with a valley between them that never
-  reaches zero (long names and group headings straddle the gutter, so a blank
-  threshold cannot split them). Left is always the scientific name — true of all 33
-  labelled pages — and the valley matched the detector's own boundary within 60 px on
-  every table that had one
-- `eval/eval_grid.py` measures the raw grid (`locate_items` only) against the labelled
-  pages; it does not run `rows_from_body`, `fix_columns` or the extent logic, so a
-  change there must be measured by running the pipeline over the full set of tables
-  (147 as of 2026-09-16) and comparing the work directories (`eval/compare_runs.py`)
-- `count_plots.py`: The column yardstick for fold-outs — counts the plots from the
-  header band, taking the most evenly spaced row of ink blobs (the running plot-number
-  row), and compares that against the grid's column count. Independent of both the
-  detections and the ink gaps the grid is built from
-- `filters.looks_like_fragment()`: A cut-out with neither a header nor a species-name
-  column (a sheet's corner label, a title and legend band) is stopped before it grows a
-  grid from a few stray `row` / `col` boxes and is counted as a table
-- `layer_col.py`: Finds the layer column when it sits inside the composition body
-  rather than in the gap `locate._guess_layer_column()` looks in. The tell is the
-  header: plot number, date and altitude fill every plot column and leave the layer
-  column blank — 0.07–0.16 of the other columns' ink against 0.85 and up for a real
-  plot. Retyping those cells as `layer` is enough; `comp_table.py` re-ranks the
-  remaining columns, so plot numbering fixes itself. `fix_columns()` walks the
-  leading body columns in order and also throws out what is not a plot column at
-  all: a column sitting on a species-name box (or three times wider than the
-  rest), and the blank gutter between the names and the body (blank header *and*
-  blank body); a blank-header column that does carry ink is the layer column,
-  even when a gutter column precedes it
-- `row_heights.py`: Evens out the body rows after the grid is built. Body rows are
-  the same height throughout a table (a user constraint, 2026-09-08 — with some slack,
-  never an exact multiple), but rows come from `row` detections plus interpolation,
-  so one missed box leaves a 10 px sliver and every row below it is off by one
-  (s01115_01_p3). Per-row tolerance is not enough: 36→40→54→46 px are each within
-  ±25 % while the phase drifts until text straddles the edges (07_p1). So when any
-  row is outside the tolerance the block is re-laid as a lattice at the **median**
-  detected row height (robust, unlike autocorrelation, which halves or doubles), each
-  edge snapped to an ink valley; then all edges are shifted together to the phase with
-  the least ink on them. Two more things the pass knows: a grid at **half** the printed
-  pitch (dots and underlines make a half-period; 23_p1_t1_s2 came out 231 rows of 20 px
-  for a 38 px sheet) shows as no autocorrelation at the grid pitch and a strong one at
-  twice it, and is re-laid at double — but only with 30 rows or more and only when the
-  body has text runs for at most 0.6 of its rows (autocorrelation alone halved three
-  correct 56 px tables of 8–14 rows; losing the row correspondence is the worst
-  possible error, so the check is deliberately hard to trigger); and on typed sheets the letters and the `•`
-  sit about 10 px apart on the same line. The row edges are nevertheless **shared**
-  by the body and the name/layer columns (user decision, 2026-09-08 — a per-column
-  offset was tried and dropped: it put the name boxes almost a row above the body on
-  14_p1; a blank Japanese-name row under a multi-layer species is how the sheet is
-  printed, not a misalignment), and the phase stays on the body's valleys — the values
-  are what gets read, and the names lose a few pixels at the top. Two compromises were
-  measured on all 146 tables (share of rows whose edge runs through ink; baseline
-  names 32 %, layer 28 %, body 3 %) and dropped: minimising the summed per-column count
-  of cut rows (names 23 %, layer 21 %, body 13 % — the sum falls, but on 14_p1 the
-  edges land through the middle of the Latin names), and dividing the block's ink
-  extent evenly by the row count (perfectly uniform heights, but the sheet's stretch
-  puts the edges through ink at the far end — body 46 %). On the 9 worst tables the
-  rows outside ±25 % went from 329 to 38. The same pass fixes the **top and bottom** of the grid: the grid's
-  vertical range comes from `row` detections, `_extend_rows_to_block()` adds at most
-  two rows per end and stops at the median of the column boxes, so when the `col`
-  boxes stop short the rows below are lost whole (07_p2 lost four). The pass takes
-  `body_extent_ink(names=True)` — the extent widened to the species-name boxes and
-  then cut back to just above the running text — and fills up to it at the row
-  height, adding a bottom row only when the **composition columns** carry ink or both
-  name columns do (the "once-occurring species" heading below a table has ink in one
-  name column only and used to be added as a row: 02_p1_s2, 04_p2, 06_p1, 06_p2;
-  faint typed dots can vanish in binarisation — 14_p1's last row had 16 dark pixels
-  across 400 px — so the body alone would drop a real species row); a trailing row that
-  passes neither test is dropped, and so is a trailing remainder shorter than 3/4 of a
-  row (the lattice leaves 0.5–1.5 rows at the end). Ink is measured in the middle half
-  of the band (an underline from the row above and the tops of the running text below
-  both intrude on the edges), and running text is recognised by the column boundaries
-  being filled (fewer than 70 % blank — the first line of the running text has word
-  gaps that happen to land on boundaries, so 50 % was not enough on 04_p2). The top is
-  judged on full-width ink because a table's first row is often a species-group
-  heading with an empty body
-- `row_skew.py`: Corrects the sheet's residual skew **in the cell coordinates only**,
-  as the last step before `located.csv` is written. `deskew_page()` rotates the image
-  and re-detects, which is restricted to single-table sheets, skips shifts under 0.3 of
-  a row and reverts whenever the re-detection loses landmarks — so it took effect on 5
-  of 146 tables and 0.1–0.8° remained, cutting cells in the leftmost body columns
-  (05_p2: 22 % of them). The pass measures the slope from the **ink centroids of the
-  cells of each row** fitted against x (median over rows — the left/right
-  cross-correlation used by `deskew.py` is ambiguous beyond half a row because the
-  dots are periodic), then shifts every cell's y by `slope × (x − body centre)`; the row
-  edges become sloping lines, row numbers are untouched, and nothing is re-detected.
-  Measured per cell (edge running through ink) on 10 typed tables: Japanese names
-  40 % → 34 %, layer 40 % → 31 %, body unchanged at 1 %
-- `row_track.py`: Treats a row as a **run of units** rather than a line (2026-09-09).
-  Across 146 tables the row *count* is already right (row recall 1.000 against the
-  labelled truth; the beats of the anchor columns agree with the grid within ±2 rows in
-  93 % of blocks), but the assignment of *ink to rows* is not: sharing one boundary
-  across all columns and phasing it on the body's valleys cuts the names on typed
-  sheets, where a line's characters sit ~10 px above its dots (25 % of scientific-name
-  cells, 24 % of Japanese names, against 2 % for the body). The per-column offset is
-  near-constant per table (−10 to +12 px, IQR 2–12 px), so one median absorbs it.
-  `fix_offsets()` cuts units out of each column's band (vertical runs of the projection,
-  after erasing underlines ≥ max(80 px, 2p) and vertical rules > 3p, dropping units
-  taller than 1.5p), assigns them to the nearest row centre, subtracts the median and
-  re-assigns (subtracting first matters: it moves 7.5 % of the units to a different row,
-  30 % on 14_p1, and raises the share of name/Japanese-name pairs landing on one row
-  from 93 % to 98 %), then shifts that column's y by the median — row ids stay shared.
-  A shift is applied only if it is ≥ 2 px, ≤ 0.45p, its IQR ≤ 0.4p, the column has
-  enough units, and **the number of boundaries running through ink does not grow**;
-  that last guard is what keeps letterpress sheets (already at 3–4 %) from being made
-  worse. `check_beats()` counts rows from the anchor columns (layer plus the three
-  leftmost body columns — layer alone matches the grid in only 54 % of typed blocks and
-  a single body column in 81 %, their median in 94 %) and warns when the grid's height
-  divided by the beat spacing differs by 3 rows or more (13_p2 has 66 rows where 63
-  fit). It runs right after `row_skew` so only the residual offset is measured
-- `row_kinds.py`: Labels body rows that are not species rows — group **headings**
-  ("Kenn- u. Trennarten d. Ass.:", "群集標徴種"), **name-only** rows (a scientific name
-  set in two lines, with its Japanese name and values on the next row) and **legends** —
-  by writing `heading` / `name_only` / `legend` into `note` (2026-09-09). Rows are never
-  dropped: the grid matches the labelled truth at row recall 1.000 and marking is
-  advisory for stage 2. A heading has ink on the name side and none in the body, but
-  "none in the body" has to be judged **relative to the species rows** (below 0.35 of
-  their median): a heading's band catches the box drawn around the neighbouring group
-  and parts of its values, so an absolute threshold reads it as filled — on kinki_010-1
-  the three headings carry 269–397 ink against 1000–6900 for species rows, and the
-  relative test is what takes that table from 2 to the truth's 5. Rules and box lines
-  are erased **over the block's full height** (erasing within a one-row band leaves a
-  table-spanning vertical line looking short), which leaves a few pixels at the corners,
-  so the ink floor scales with the row height. Headings are told from name-only rows by
-  the **length of the underline** (136–560 px against 17–23 px), falling back to whether
-  the next row carries a Japanese name and values. A legend cannot be found by "spans
-  columns" alone — 47 % of species rows do too — so it must be a single run crossing
-  **from the name side into the body**, which cut false positives on typed sheets from
-  26 to 4. Across 146 tables: 273 headings, 177 name-only rows, 106 legends
-- `header_cols.py`: Places the **vertical divider between the header's German and
-  Japanese item names** from ink rather than from the detector (2026-09-09). The only
-  divider used to be the right edge of the `header_col` box, which is detected twice on
-  most of the broken sheets, so their union either cut into the Japanese text (splitting
-  a name across two columns on kinki_004-1/027/032/036/071/085/088) or sat to its right,
-  merging German and Japanese into one column (kinki_025/038/069/081-1, s01115_01_p3,
-  02_p1_s1); on 9 tables the box reached the value columns and no Japanese column was
-  built at all. Taking the widest valley of the ink projection does not work: on 9 of 20
-  tables the gap between Japanese and values is wider, and a single title or
-  scientific-name line crossing above the Japanese text fills the real valley
-  (kinki_004-1: 87 px → 15 px). Two changes fix it — count, per x, **how many item rows
-  carry ink** (a vote, so one crossing line cannot fill a valley), and select by the
-  valley's **right edge in relative terms**, which is 0.44–0.77 for the German/Japanese
-  gap against 0.98+ for the Japanese/value gap. The threshold starts at 1 vote and rises
-  only if no valley qualifies (103 of 146 tables settle at 1). Across 146 tables the
-  divider crosses ink on 9 tables instead of 43, the ink share of the Japanese column
-  rises on 109 of 112, and 9 tables gain a Japanese column. The detector box is kept
-  only to fix the region's left edge, as in `col_edges.fix_column_edges`
-- `header_lines.py`: Builds the header's item rows from the boxes of EasyOCR's
-  **detector** (CRAFT, `reader.detect` — no recognition), 2026-09-09. The ink-projection
-  segmentation in `locate._header_bands_from_names()` breaks on typed sheets: no valley
-  between lines (16 items became 3 bands on 01_p2), short first lines below the
-  threshold (the plot-number row), descenders and punctuation split off as extra
-  bands. Connected components were tried and rejected (dots and dakuten chain lines
-  together). The detector groups characters into word/line boxes, so clustering the box
-  centres at **half the body row pitch** (median height of the `row` detections)
-  reproduces the item rows: 01_p2 3 → 16 (truth 16), 01_p1 13 → 15 (17), 07_p1 4 → 17
-  (18), kinki_041 11 → 6 (6). The region starts one row above the header box (the
-  leading items were being lost), boxes taller than 1.4 rows are split into as many
-  lines (the detector links two tight lines into one box), bands are the midpoints
-  between line centres, and leading/trailing bands with no ink on the value side are
-  dropped as title or legend lines. Do not use the box height as the clustering
-  threshold (boxes can span two lines and merge neighbours) nor the box spacing to
-  estimate the pitch (German and Japanese on the same line sit 8 px apart and halve
-  it). Fewer than 3 lines falls back to the projection bands.
-  `bands_from_pairs()` then re-places a band edge using the **value side** (2026-09-10,
-  user's rule: build tentative cuts on the value side too, keep only those that
-  correspond to an item cut). Value lines come from the ink projection, not the
-  detector — value cells are digits in 25 columns, and clustering their boxes collapses
-  rows (20 → 13 on 22_p3, one 182 px lump for four lines) while the projection gives
-  twenty clean 24–27 px rows; the opposite of the item names. Each value row is
-  assigned to the nearest item line and an edge is moved into the gap between the
-  last value row of one item and the first of the next, but only when the edge cuts a
-  value row, the item spans two or more value rows, and neither neighbouring item line
-  is taller than 2 row pitches (a merged OCR line, 92 px on 05_p2, has a meaningless
-  centre and moving its edges fused 調査面積 and 海抜高 into one band). This fixes the
-  "date band should end below the date" tables (22_p3, 23_p1_t1_s2, 23_p1_t2) without
-  changing the row counts.
-  When no `header_col` box is detected at all, `locate._guess_header_col()` builds the
-  item-name region from the `header` box's left edge to the first value column
-  (2026-09-10): item names are on the sheet but undetected on 11 typed tables
-  (s01115_14_p5, 15_p1, 15_p2, 15_p4, 21_p3, …), which left the header as values only.
-  The region is taken when it is at least 3 row pitches wide and 3 or more item bands
-  carry ink (thin vertical rules excluded); `header_cols.py` then places the
-  German/Japanese divider as usual
-- `col_reach.py`: Adds plot columns that lie **to the right of the last `col`
-  detection** (2026-09-10). `axes.locate_edges()` only interpolates between
-  detections, so an undetected edge column is lost outright (kinki_006 col 14, s01115_08_p2
-  col 24, 04_p2 cols 8–10, 15_p3 cols 25–28). Starting from the last boundary it steps
-  one column pitch at a time, ending each band at the nearest print gap
-  (`col_edges.plot_gaps`), and keeps the band only while it carries ink **both in the
-  body and in the header rows** (0.3 × the median of the existing columns); the three
-  tables with ink beyond the last column that is *not* a plot column are all constancy
-  text spilling over (10_p2's "II(+-2)", roman numerals on kinki_063-1 and 04_p1) and
-  have an empty header there. Without a header the test is the share of rows with ink
-  (≥ 0.3). A column cut by the page edge is added if 80 % of it fits (17_p1's col 120);
-  on a two-block sheet the next block's name column is the limit. Two companion rules
-  in `blocks.py`: `drop_stray_anchors()` removes a block anchor (`sname`/`species_col`)
-  that does not overlap the tallest anchor vertically — a note below the table detected
-  as `sname` on 04_p2 (149 px high at y 6447) was creating a second block whose left
-  edge blocked the reach; anchors of one column split into stacked boxes (01_p3, 12_p1)
-  overlap in x and are merged first, which a plain height ratio would have dropped —
-  and `align_block_bottoms()` extends the right block of a folded species list down to
-  the left block's bottom by copying the left block's row bands (user instruction,
-  2026-09-10: kinki_060's last right-hand row was outside its boxes and lost; blank
-  rows on genuinely shorter right blocks are accepted). It runs **after**
-  `row_heights.py`, because rows added before it were trimmed as ink-less trailing rows
-- `eval/make_labels.py` / `eval/build_dataset.py`: Turn a finished grid back into labelme and
-  YOLO annotations, cut into page-sized tiles, so a new source can be trained on
-  without labelling it by hand. Only tables whose checks pass are used, and the
-  existing train/val split is preserved so before/after comparisons stay honest
-- The rest of `eval/` (see `eval/README.md`): `eval_read.py` (the reading and the
-  assembled table against the hand-typed truth tables), `scan_blocks.py` (whether a
-  whole block went missing; needs no labels), `label_gaps.py` (cuts out extra bands
-  and adds the missed `row` labels), `compare_runs.py` (two runs compared table by
-  table: doubtful cells, changed cells, ink on the boundaries; reads `run_info.json`
-  first), and `_data.py`, which moves to the data directory named by the environment
-  variable `COMPTEA_DATA` (unset: the current directory)
-- `left_rule.py` / `cell_rule.py`: Move the composition cells' read boxes off vertical
-  rules for stage 2 only (see `ocr.py` above)
-- `compare.py`: The yardsticks behind `eval/compare_runs.py` — `diff_long()` compares
-  two long tables cell by cell (rows without a row number as a multiset per plot), and
-  `boundary_ink()` / `boundary_ink_halves()` count cells whose box edges land on ink,
-  from the grid alone in seconds
-- `ink.py`: Binarisation and ink measures shared across stages — `binarize()`,
-  `ratio()`, `erase_box_lines()`, `head_strokes()` (counting Roman numeral strokes),
-  `glyph_gate()`
-- `source.py`: Opens the image a grid was built on (`source.open_image(df, workdir)`,
-  from the `source_image` column), never the original in its place
-- `page_group.py`: Reads the branch numbers (`xxx-1`, `xxx-2`) that mark a table page
-  and its continuation (`split_name()`, `group_parts()`)
-- `once_page.py`: Finds the once-only species block on a page without a table, from
-  the text lines rather than the detector (`find_block()`, used by
-  `grid.save_continuation()` and `cli/read_once_page.py`)
-- `pipeline/common.py`: `setup()`, `workdir()`, and `write_run_info()`, which records
-  each stage's code version (commit and whether `comptea/` has uncommitted changes)
-  and settings in `run_info.json`; `run_info_line()` prints it at the head of
-  `checks.txt` (2026-09-16)
-- `util_file.py`: File operations (timestamped names, zip, directory management)
-- `preprocess_image.py` / `web/preprocess_image_web.py`: Image preprocessing (deskew, grayscale, binarization, noise removal)
-- `draw_rect.py`: Draws the boxes, colouring each by its `note` (`on_text` red /
-  `snapped` orange / `interpolated` gold — darkest first, most worth looking at first)
-- `progress.py`: Redirects stdout into a Streamlit widget so long runs show progress
-- `download_species_names.py`: Fetches the Japanese/scientific name list from the
-  Vascular Plant Japanese Name Checklist (ver. 1.10), the dictionary `correct_text.py`
-  matches against
+## 段ごとの版 (正と控え)
 
-### Command line (`cli/`)
+同じ仕事に複数の実装がある段の一覧．**「正」だけが工程から呼ばれる**．
 
-The same pipeline driven from the command line rather than Streamlit, one script per
-stage: `run_pipeline.py` (stage 1 only, the grid — it calls `pipeline.grid.main()`;
-despite the name it does not run the later stages), `run_ocr.py` (stage 2),
-`build_table.py` (stage 3), with `crop_cells.py` and `apply_text.py` for the review in
-between, `export_data.py`, `link_pages.py` and `read_once_page.py`. They are thin wrappers: the stages
-themselves live in `comptea/pipeline/` (`grid.py`, `read.py`, `table.py`), with
-`comptea/pipeline/common.py` shared between them, so the CLI and the Streamlit apps
-run exactly the same code.
-`link_pages.py` joins the run-on blocks: the footnote under a table (the species that
-occurred once, the localities, the dates, the sources) spills onto the next page when
-it does not fit, and **the user marks the pair with a branch number in the file name**
-(`xxx-1.jpg` the table, `xxx-2.jpg` the continuation). Page numbers cannot decide this:
-the scans are single pages, but a left-hand and a right-hand page form one spread and
-the footnote runs right to left along its foot, so ordering by page number reverses it.
-`comptea/page_group.py` reads the branch numbers; `grid.save_continuation()` keeps a
-page with a branch number from failing when it holds no table.
-Three stages — the grid, the reading, the assembled table — are rendered as images to
-be eyeballed before the run continues; `.claude/skills/comptea/references/` holds the
-stage guide, the reading guide, the prompt handed to whoever reads the crops, and the
-known failure modes. OCR is EasyOCR-led. The skill that drives all this from Claude
-Code lives in `.claude/skills/comptea/` in **this** repository: it used to be kept in
-the private one as well, and the two copies drifted apart.
+| 仕事 | 正 | 控え・分岐 |
+|:---|:---|:---|
+| 折り込みの切り分け | `split_sheet.find_tables` (空白の帯 + 縮めた塊) | `table_find` (目印)．yomitoku・DocLayout-YOLO のレイアウト解析は候補から外した (コードは無い) |
+| 1 枚に載る別々の表 | `blocks.split_tables` (縦)・`table_split.split_side_by_side` (横) → `grid.resplit_parts` | — |
+| 格子 | `detect.py` → `locate.py` | `noyolo.py` |
+| 格子の分岐 | `one_plot.py` (1 調査区の 2 段組)・`strips.py` (地点の多い表)・`name_col.py` (種名の列の補い) | 条件に当たる表だけで働く |
+| 表頭の縦の境 | `header_cols.py` (黒画素) | 検出の `header_col` は領域の左端だけに使う |
+| 表頭の行 | `header_lines.bands_from_value_lines` (値の行ごと) | 値の行が足りなければ項目名の箱から (`bands_from_pairs`)，それも足りなければ投影 (`locate._header_bands_from_names`) |
+| 組成部の行 | `axes.locate_edges` → `row_heights`・`body_rows.lattice_rows` → `row_track` | `--no-snap`・`--no-track` で後ろを切れる |
+| 読み取り | `--reader easyocr` (既定) | `multi` (`read_region` + `ndl`・`yomi`，折り込みは `tiles`)・`ai`・`both` |
+| 段階 1 の読み手 | EasyOCR だけ (`header_lines` の `reader.detect` など) | — |
+| 後処理 (段階 3) | `correct_text` → `comp_table` (`row_kinds` の印を使う) → `plot_table` → `site_notes` | `--no-notes`・`--keep-absent` |
 
-## Running it
+## 検出のクラス
 
-```bash
-python cli/run_pipeline.py <image> --workdir work/<name>   # the grid
-python cli/run_ocr.py work/<name>                          # read the cells
-python cli/build_table.py work/<name>                      # assemble
+検出器が学習したのは次の 12 クラス (正解ラベルは公開していない)．
 
-streamlit run apps/2_grid/streamlit_app.py                 # or one stage in the browser
-```
+| クラス | 中身 |
+|:---|:---|
+| `row` | 組成部の行 (種) |
+| `plot_row` | 表頭の項目行 |
+| `col` | 組成部の列 (地点) |
+| `sname` | 学名の列 |
+| `species_col` | 和名の列 |
+| `header` | 表頭 (表の形か流し込み) |
+| `table` | 組成表の全体 |
+| `layer` | 階層の列 |
+| `header_col` | 表頭の項目名の列 |
+| `once_species` | 表の下の 1 回出現の種 |
+| `plot_no`・`date` | `plot_row` にまとめた (番号は残し，他のクラスの番号をずらさない) |
 
-The entry points import the package — installed (`pip install -e .`) or, failing
-that, from this repository — and can be called from anywhere without changing the
-working directory (`COMPTEA_CORE` overrides where the core is looked for; the old
-name `COMPTEA_YOLO` is still read).
+組成部のセル `comp` は検出クラスではなく，`locate.py` が `col` × `row` から計算する擬似クラスである．
+表頭の**列**はラベルを付けていない (`col` が表頭まで伸びる)．表頭の**行**は `plot_row` として付ける
+(付けないと，`row` と同じ見かけのものを前景と背景の両方として学ぶ)．
 
-Environment variables (`COMPTEA_CORE`, `COMPTEA_DEVICE`, `COMPTEA_YOMI_PY`,
-`COMPTEA_NDLOCR`, and `COMPTEA_DATA` for `eval/` only) are listed in the
-[README](../README.md#環境変数), which owns that list.
+## 物差し (`eval/`) との関係
 
-## Key dependencies
+- `eval/eval_grid.py` は**素の格子** (`locate_items` まで) を正解ラベルと比べる．
+  `rows_from_body`・`fix_columns`・上下端の処理は通らないので，そこを変えたら全表を通して
+  `eval/compare_runs.py` で置き場ごと比べる．
+- `eval/eval_read.py` は読み取りと組み上がった表を正解表と比べる．`scan_blocks.py` は段の丸ごとの
+  落ちを数え，`label_gaps.py` は付け漏れた `row` のラベルを補う．
+- `eval/make_labels.py`・`build_dataset.py` は，検査を通った格子から教師データ (labelme・YOLO) を作る．
+  既存の train / val の分け方は保つ．
+- データの置き場は `eval/_data.py` が環境変数で決める ([eval/README.md](../eval/README.md))．
 
-ultralytics (YOLO11), streamlit, easyocr, python-Levenshtein, rapidfuzz, PIL/Pillow,
-pandas, numpy, torch, opencv, PyMuPDF — pinned in `requirements.txt` (the command-line
-pipeline; it does not include streamlit) and, per stage, in `apps/*/requirements.txt`
-(which add `streamlit>=1.36`).
+## 設計上の約束
 
-## Notes
-
-- Output is **long format**: one row per plot × species (`comp_table.py`). `to_wide()` exists only for eyeballing.
-- Stages report trouble through `df.attrs['warnings']` rather than failing silently — `locate.py` and `comp_table.py` both do this, and the Streamlit pages display it.
-- Per-cell doubts travel in a `note` column (several values joined by `;`), drawn in colour on the grid overlay (the first three) and carried through OCR into the long table. The full list of values, and of `status` values and output columns, is in the [README](../README.md#出力の形), which owns it.
-- Domain background (composition tables, cover-abundance classes, layer codes) is in `docs/vegetation_science.md`. Read it before looking up vegetation-science terms elsewhere.
-- YOLO model weights ship with the package at `comptea/weights/comptea.pt` (`comptea.WEIGHTS`)
-- `comptea` is an ordinary package; `pip install -e .` makes it importable, and when it is not installed `run_pipeline.py`, `run_ocr.py`, `build_table.py`, `link_pages.py` and `read_once_page.py` put the repository on `sys.path` themselves (`crop_cells.py`, `apply_text.py` and `export_data.py` do not), and `comptea.pipeline.common.setup()` does the same from `package_dir()`
-- The source material (scans, labels, truth tables) is not published, for copyright; `examples/sample.jpg` is a single page quoted with its source
-- GPU (CUDA) is optional for inference but recommended for training
+- **手元のパスを持たない**．辞書と重みはパッケージの中を基準に開き (`comptea.data_path`)，
+  外の読み手とデータの置き場は環境変数だけで指す (`yomi.DEFAULT_PYS`・`ndl.DEFAULT_DIRS` は空)．
+  `tests/test_no_local_paths.py` が字面で見張る．環境変数の一覧は [README](../README.md#環境変数) が正．
+- **作業ディレクトリに依らない**．入口は入れたパッケージか repo の中核を import する
+  (`sys.path` を足す入口の別は README の「入れ方」)．`common.setup` も `package_dir` から同じことをする．
+- **重いものは import 時に読まない**．`comptea/__init__.py` は torch・ultralytics・easyocr を読まず，
+  使う関数の中で読む (`ocr.get_reader` など)．依存は extras (`detect`・`read`・`sheet`・`web`) に分けてある (README の「入れ方」)．
+- **外の読み手は任意**．入っていなければ黙って飛ばし，工程は EasyOCR だけで進む．
+- **座標は画像に紐づく**．格子の座標は `located.csv` の `source_image` が指す画像 (傾きを直した写し・
+  部分画像) のもので，突き合わせは必ず `source.open_image` を通す (元画像で代用しない)．
+- **失敗は黙らない**．段は `df.attrs['warnings']` で警告を返し，セルごとの疑いは `note` 列 (`;` 区切り) で
+  下流へ運ぶ．値の一覧は [README の「出力の形」](../README.md#出力の形) が正．
+- **出力は縦持ち** (`comp_table.py`)．`to_wide` は目で見るためだけにある．
+- **同じ処理を写さない**．表の切り出しは `split_sheet.cut_table`，装置の選び方は `device.py` に 1 つだけ置く．
+  関数の移動や分割は `tests/test_wiring.py` が字面で見張る．
+- **結果には版と設定を残す** (`run_info.json`)．
+- 資料 (スキャン・ラベル・正解表) は著作権のため公開しない．`examples/sample.jpg` だけを出典付きで置く．
