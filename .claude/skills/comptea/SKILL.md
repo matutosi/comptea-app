@@ -304,5 +304,6 @@ python cli/export_data.py work --out work_out --tag kinki
 - `references/read-cells-prompt.md` — 読み手に渡す文面
 - [README.md](../../../README.md) — 入れ方・環境変数・コマンド・出力の列
 - [docs/pipeline.md](../../../docs/pipeline.md) — 工程の流れとアルゴリズム
-- [docs/lessons.md](../../../docs/lessons.md) — 規則づくりの知見と，測って取り下げた案
+- [docs/lessons.md](../../../docs/lessons.md) — 規則づくりの原則と，測って決めた採否の表
+- [docs/lessons_history.md](../../../docs/lessons_history.md) — その詳しい経緯 (日付順)
 - [docs/vegetation_science.md](../../../docs/vegetation_science.md) — 分野の背景知識．用語が出たらまずここ

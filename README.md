@@ -265,13 +265,14 @@ pytest --runslow      # 検出と読み取りも実際に走らせる (`slow` �
 歯止めにしているのは，**実物を見て決めた判断**です
 (`III(+-4)` を `III(1-4)` にしない，1 文字の読みは完全一致だけ採る，など)．
 どれも「黙って別の値になる」型で，通してみても気づけません．
-経緯は [docs/lessons.md](docs/lessons.md) にあります．
+経緯は [docs/lessons.md の「採否の記録」](docs/lessons.md#採否の記録) にあります．
 
 ## 文書
 
 - [docs/pipeline.md](docs/pipeline.md) — 工程の流れとアルゴリズム
 - [docs/architecture.md](docs/architecture.md) — コードの構成と約束事
-- [docs/lessons.md](docs/lessons.md) — 規則づくりの知見と，測って取り下げた案
+- [docs/lessons.md](docs/lessons.md) — 規則づくりの原則と，測って決めた採否の表
+- [docs/lessons_history.md](docs/lessons_history.md) — その詳しい経緯 (日付順)
 - [docs/vegetation_science.md](docs/vegetation_science.md) — 分野の背景 (被度階級・階層・常在度)
 - [eval/README.md](eval/README.md) — 物差し (**非公開の資料が要るので，ここからは動きません**)
 - [.claude/skills/comptea/](.claude/skills/comptea/) — Claude Code から通しで回すスキル．

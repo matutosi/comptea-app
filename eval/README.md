@@ -37,7 +37,8 @@ python eval/eval_grid.py --split val
 **実際の場所はここに書きません**．人によって違い，公開する情報でもありません．
 
 読むだけでも，何をどう測ってきたかは分かります．
-判断の経緯は [../docs/lessons.md](../docs/lessons.md) にまとめてあります．
+判断の経緯は [../docs/lessons.md](../docs/lessons.md) (原則と採否の表) と
+[../docs/lessons_history.md](../docs/lessons_history.md) (日付順の詳細) にまとめてあります．
 
 **重みの採否は，必ず通しで決めてください**．`eval_grid.py` はラベル済みの
 33 枚の生の格子しか見ておらず，`rows_from_body` や `fix_columns` を通らないので，

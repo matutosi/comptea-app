@@ -2,7 +2,8 @@
 
 This file describes the codebase — architecture, commands, conventions. The
 narrative of how the rules were arrived at (and which ideas were measured and
-dropped) is in [lessons.md](lessons.md); the stage-by-stage walkthrough is in
+dropped) is in [lessons.md](lessons.md) (principles and the adoption record) and
+[lessons_history.md](lessons_history.md) (dated details); the stage-by-stage walkthrough is in
 [pipeline.md](pipeline.md).
 
 ## Project Overview
@@ -121,7 +122,7 @@ history; neither is included here.
   悪くなった** (箱 70 → 73)．切り直した 3 箱はすべて誤りで，04 は横倒しの
   紙面 (目印は元の向きで記録される既知の罠)，14・21 は凡例が 2 つ目の
   「表頭のまとまり」に見えたもの．警告だけにしても当たりが 0/3 で騒がしい．
-  経緯は lessons.md「切り分けの『検算』は，当てると悪くなる」．
+  経緯は [lessons_history.md「切り分けの『検算』は，当てると悪くなる」](lessons_history.md#2026-09-15-切り分けの検算は当てると悪くなる--工程にはつながない)．
 
 **数え方の落とし穴**: 工程の成果物 (切り出した画像・格子) を数えると，
 切り分けの出来を見誤る．08 は「4 表しか無い」ように見えるが，これは
@@ -139,7 +140,7 @@ history; neither is included here.
 | 種名の列が検出されないとき | `name_col.py` (組成部の左の黒画素の帯) | **正**の補い | 検出が 1 件でもあれば何もしない |
 | 表頭の縦の境 | 検出枠 `header_col` の右端 → **`header_cols.py` (黒画素)** | **正** | 検出から黒画素へ移した例．境が字を横切る行 1016 → 167 |
 | 表頭の行 | OCR の箱 (`header_lines`) ／ 投影 (`locate._header_bands_from_names`) | **正**．箱が 3 行未満なら投影へ**戻す** | 対策 A |
-| (参考) 段階 1 の読み手 | **EasyOCR だけ** | — | yomitoku を足す 2 案を 2026-09-14 に測って取り下げた (lessons.md「格子と行の境に yomitoku は足さない」) |
+| (参考) 段階 1 の読み手 | **EasyOCR だけ** | — | yomitoku を足す 2 案を 2026-09-14 に測って取り下げた ([lessons_history.md「格子と行の境に yomitoku は足さない」](lessons_history.md#2026-09-14-格子と行の境に-yomitoku-は足さない)) |
 | 組成部の行 | 検出の内挿 (`axes.locate_edges`) → 黒画素の格子 (`row_heights`・`body_rows.lattice_rows`) → 列ごとのずれの吸収 (`row_track`) の 3 段重ね | **正** | `--no-snap`・`--no-track` で後ろ 2 段を切れる |
 
 #### 3. 読み取り (段階 2)
