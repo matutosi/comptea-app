@@ -35,6 +35,31 @@ def test_手元の絶対パスを書かない(path):
                      + ' / '.join(bad))
 
 
+# 文書・テスト・評価の道具も公開される．字面のドライブ名で確かめる
+# (2026-09-17．範囲が comptea/・cli/ だけで，文書とテストの docstring に漏れていた)
+DRIVE = re.compile(r'(?<![A-Za-z0-9])[A-Za-z]:[\\/]+[A-Za-z]')
+# テストの中の架空の置き場は許す
+FAKE = re.compile(r'[A-Za-z]:[\\/]+(no[\\/]such|Users[\\/]+x[\\/]|w[\\/])')
+
+OTHERS = sorted(
+    p for pat in ('*.md', 'docs/**/*.md', 'eval/**/*.md', 'eval/*.py',
+                  'apps/**/*.py', 'tests/*.py', '.claude/skills/**/*.md')
+    for p in glob.glob(os.path.join(ROOT, pat), recursive=True)
+    if 'worktrees' not in os.path.relpath(p, ROOT)
+    and os.path.basename(p) != os.path.basename(__file__))
+
+
+@pytest.mark.parametrize('path', OTHERS,
+                         ids=[os.path.relpath(p, ROOT) for p in OTHERS])
+def test_文書とテストにも手元のパスを書かない(path):
+    bad = []
+    for i, line in enumerate(io.open(path, encoding='utf-8'), 1):
+        s = FAKE.sub('', line)
+        if DRIVE.search(s) or HOME.search(s):
+            bad.append(f'{i}: {line.strip()[:80]}')
+    assert not bad, '手元のパスが書かれている: ' + ' / '.join(bad)
+
+
 def test_外の道具の既定は空():
     """既定値に置き場を書かない．`COMPTEA_*` で指す"""
     from comptea import ndl, yomi

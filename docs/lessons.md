@@ -2062,7 +2062,7 @@ yomitoku 13/23・DocLayout-YOLO 9/23．**外す紙面が重ならないのは幾
 セルへ配る** (`assign(split=True)`) と 368 → 431 に増えた．yomitoku は**語単位**で
 返すので，格子にはこちらが向く．
 
-**環境**: yomitoku は別 venv，NDLOCR-Lite は `D:\pf\dos\ndlocr-lite`．どちらも
+**環境**: yomitoku は別 venv，NDLOCR-Lite は環境変数 `COMPTEA_NDLOCR` で指す置き場にある．どちらも
 **外部プロセスで呼ぶ** (`comptea/ndl.py`)．主環境は変えていない．
 
 ### 読みは「重ねる」だけでは増えない．**質で選び，クラスごとに順を変える** (2026-09-12)

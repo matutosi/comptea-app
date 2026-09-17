@@ -34,7 +34,7 @@ all = ["comptea[detect,read,sheet,web]"]
 Homepage = "https://github.com/matutosi/comptea-app"
 
 [tool.setuptools]
-packages = ["comptea", "comptea.web"]
+packages = ["comptea", "comptea.pipeline", "comptea.web"]
 
 [tool.setuptools.package-data]
 # 種名の辞書と重みは同梱する(どこから呼んでも開けるように)

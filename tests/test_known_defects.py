@@ -15,7 +15,7 @@
 
     $env:COMPTEA_GRIDS = "...\\grids\\work_s2"
     $env:COMPTEA_PARTS = "...\\grids\\parts4"
-    $env:COMPTEA_SCAN  = "D:\\matu\\scan"
+    $env:COMPTEA_SCAN  = "...\\scan"
     py -3.12 -m pytest tests/test_known_defects.py -q
 """
 import os
