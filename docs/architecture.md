@@ -7,7 +7,7 @@ dropped) is in [lessons.md](lessons.md); the stage-by-stage walkthrough is in
 
 ## Project Overview
 
-**comptea** (Composite Table to Data Easy) extracts structured data from scanned images of vegetation composition tables found in books and reports. The pipeline: image preprocessing → object detection (YOLO/Detectron2) → region location → OCR → text correction → tabular output.
+**comptea** (Composite Table to Data Easy) extracts structured data from scanned images of vegetation composition tables found in books and reports. The pipeline: image preprocessing → object detection (YOLO11) → region location → OCR → text correction → tabular output.
 
 The project is bilingual (Japanese/English) and targets ecological vegetation survey data.
 
@@ -18,7 +18,7 @@ The project is bilingual (Japanese/English) and targets ecological vegetation su
 | `comptea/` | The core modules. Two files that had grown to hold several concerns each were split by concern: `split_wide.py` (1,673 lines) into `strips.py` (wide tables), `col_edges.py` (column boundaries), `table_split.py` (telling two tables apart on one sheet), `body_rows.py` (the body's vertical extent and row boundaries) and `checks.py` (the independent checks); `locate.py` (1,558 lines) into `filters.py` (throwing out what must not be built on), `blocks.py` (cutting a sheet into tables and blocks), `axes.py` (building and nudging the boundaries of one axis) and `locate.py` itself (assembling the grid). It is a package: modules import each other relatively (`from . import ink`), the dictionaries and weights are resolved against the package directory, and **nothing needs a particular working directory** any more (until 2026-09-07 everything had to run inside `comptea/`) |
 | `comptea/web/` | The older all-in-one Streamlit pages, kept as they were |
 | `comptea/pipeline/` | The three stages themselves — `grid.py`, `read.py`, `table.py` — with `common.py` shared between them. `pipeline.run(stage, argv)` drives one **in the calling process**: until 2026-09-07 the apps spawned a new Python per stage and paid the torch import (5 s) every time. Measured with the CPU wheel Streamlit Cloud installs, detection peaks at 432 MB and reading at 507 MB, which fits the ~1 GB free tier (the local CUDA build reaches 1,375 MB and is what made this look impossible) |
-| `cli/` | Thin command-line entry points over those stages (`run_pipeline` → `run_ocr` → `build_table`, plus `crop_cells`, `apply_text`, `export_data`, and `link_pages` for the run-on blocks) |
+| `cli/` | Thin command-line entry points over those stages, one per stage (`run_pipeline` = stage 1, the grid → `run_ocr` → `build_table`), plus `crop_cells`, `apply_text`, `export_data`, `link_pages` for the run-on blocks, and `read_once_page` for a single continuation page without a branch number |
 | `apps/` | One Streamlit app per stage, each with its own `requirements.txt` |
 | `eval/` | The yardsticks. **They need the labelled scans and truth tables, which are not published**, so they cannot be run from this repository |
 | `tests/` | Runs on the dictionaries and `examples/` alone — no source material needed |
@@ -49,8 +49,8 @@ history; neither is included here.
    (long side 3300 px ↔ `imgsz` 1280): a book page still resolves to 1280, an
    oversized fold-out to 1856–2560. Feeding a 4809-px-tall table at 1280 costs two
    thirds of its rows
-5. **Location** (`locate.py`): Turns the detected `row` / `col` boxes into cell coordinates. A page can hold more than one block — a single-plot table is often set in two columns — so `split_blocks()` divides the page at the species-name columns and builds a grid per block; a page can also hold more than one **table**, stacked vertically, which is a different thing entirely (separate header, separate plots, never merged), and `split_tables()` cuts those apart at the top of each header, the caller keeping one workdir per table; `number_cells()` then numbers rows continuously across blocks and columns within each. Boundaries come from the detections themselves; only the gaps where a row or column went undetected are interpolated (`locate_edges()`). A boundary that lands on text is nudged to the middle of the nearest gap in the ink profile (`snap_edges()`). Removes duplicate overlapping detections and reports what it could not resolve via `df.attrs['warnings']`
-6. **OCR** (`ocr.py`): EasyOCR (ja+en) reads text from each located cell region. Images are binarized and trimmed before OCR.
+5. **Location** (`locate.py`, with `blocks.py` and `axes.py`): Turns the detected `row` / `col` boxes into cell coordinates. A page can hold more than one block — a single-plot table is often set in two columns — so `blocks.split_blocks()` divides the page at the species-name columns and builds a grid per block; a page can also hold more than one **table**, stacked vertically, which is a different thing entirely (separate header, separate plots, never merged), and `blocks.split_tables()` cuts those apart at the top of each header, the caller keeping one workdir per table; `locate.number_cells()` then numbers rows continuously across blocks and columns within each. Boundaries come from the detections themselves; only the gaps where a row or column went undetected are interpolated (`axes.locate_edges()`). A boundary that lands on text is nudged to the middle of the nearest gap in the ink profile (`axes.snap_edges()`). Removes duplicate overlapping detections and reports what it could not resolve via `df.attrs['warnings']`
+6. **OCR** (`ocr.py`, driven by `pipeline/read.py`): EasyOCR (ja+en) reads text from each located cell region. Images are binarized and trimmed before OCR. Before reading, `read.move_off_rules()` shifts the composition cells' **read boxes** off vertical rules — the first body column past the left rule (`left_rule.py`), then per cell (`cell_rule.py`) — leaving `located.csv` untouched. An unread cell is re-read only when `ink.glyph_gate()` sees a glyph larger than `・` (or two or more blobs) once rules are removed (this replaced the ink-ratio threshold `RETRY_AT` on 2026-09-17). Cells that still fail are re-read with NDLOCR-Lite (`read.retry_until_stable()` → `retry_cells()` on `retry_targets()`, padding `RETRY_PAD` = 3, repeated until nothing changes; `--no-retry` turns it off)
 7. **Text correction** (`correct_text.py`): Post-OCR corrections for species names (edit distance against `j_name.txt` / `s_name.txt`), layer codes, and composition values. Each correction validates its own result and returns a `status` (`OK` / `Need Check` / `suggested` / `multi`). A composition cell may also be a **constancy** value — `IV(+-3)`, meaning "constancy IV, cover range +–3" — which appears when the sheet is a synoptic table whose columns are communities rather than plots (2 of the 68 fold-out tables). `correct_constancy()` normalises it (`+`/`r` are legitimate heads for occurrences below constancy I; a missing hyphen inside the brackets is restored; a Roman numeral read inside the brackets is a `1`, since only cover ranges live there; a trailing stray character is the closing bracket misread). What it does **not** do is decide what the cell means: a bracketed cell is `IV(+-3)` (constancy IV, cover range) in a community column and `2(3-4)` (cover 2, sociability range) in a single-plot column, **and one table holds both** — 9 of 22_p2's 25 columns are single plots, 7 of 11_p1's 14. Reading a printed `2` as `II` cost those columns their cover values. `comp_table.column_head_kinds()` votes per column on whether the heads are Roman or Arabic, and `split_comp(kind=…)` fills either `constancy` + cover range or `cover` + `sociability` accordingly; the vote also settles the `1`/`I` confusion the glyphs make unavoidable cell by cell. A table with both kinds is flagged in the warnings
 8. **Running-text parsing** (`parse_text.py`, `plot_table.py`): The header of a
    single-plot table and the once-only species list below the table are set as running
@@ -75,7 +75,7 @@ history; neither is included here.
 |:--|:--|:--|:--|
 | 幾何 (空白の帯 + 黒画素の塊) | `split_sheet.find_tables`・`blob_boxes`．`split_sheet.py` 自身が CLI を持ち，工程の**前**に回す | **正** | **23 枚すべてで箱の数が真値と一致** (68 箱 = 68 表)．2026-09-15 に高さの歯止め (`MIN_HEIGHT`) を足して，残っていた低い切れ端 2 つを落とした |
 | 検出の手掛かりで分ける | `blocks.split_tables` (縦に重なる表)・`table_split.split_side_by_side` (左右に並ぶ表)・`grid.resplit_parts` (部分画像に切り出してやり直す) | **正** | 表と表の仕切りが 23〜50 px の紙面は空白では切れない．幾何のあとに掛ける |
-| 目印 (OCR) から組み立てる | `table_find.find_by_marks`・`columns`・`count_tables`・`structure_boxes`・`split_between_heads`・`recheck_boxes` | 控え (**検算**) | 箱 73 のうち**表頭がちょうど 1 つ入る箱 69**．ただし 23 枚中 11 枚に端から端まで通る隙間が無く，**幾何を置き換えられない** (2026-09-14 の結論) |
+| 目印 (OCR) から組み立てる | `table_find.find_by_marks`・`columns`・`count_tables`・`structure_boxes`・`split_between_heads`・`recheck_boxes` | 控え | 箱 73 のうち**表頭がちょうど 1 つ入る箱 69**．ただし 23 枚中 11 枚に端から端まで通る隙間が無く，**幾何を置き換えられない** (2026-09-14 の結論)．**検算として工程につなぐ案も 2026-09-15 に取り下げた** (下の 1b) |
 | 注記の切り出し | `split_sheet.note_boxes` → `<stem>_p<i>_note.png` | **正** | 表の画像には**含めない** (高さが変わると検出の縮尺が動く) |
 
 #### 1b. 切り分けは幾何と目印の 2 つだけにする (2026-09-14 ユーザ決定)
@@ -104,8 +104,9 @@ history; neither is included here.
 **答え: 対応できる．ただし要るのは 2 つ (A + C) だけで，実質は A でほぼ足りる**
 (この結果を受けて，上のとおり D・E を候補から外した)．
 
-- **A が外す 2 枚は「表が足りない」のではなく「余分」**．16_p1 (1782x656)・
-  21_p2 (3041x527) は表ではない切れ端で，格子ができないので工程には響かない．
+- **A が外していた 2 枚は「表が足りない」のではなく「余分」だった** (高さの歯止めを
+  足す前)．16_p1 (1782x656)・21_p2 (3041x527) は表ではない切れ端で，格子ができないので
+  工程には響かない．2026-09-15 からは `MIN_HEIGHT` で箱の段階で落ちる．
   **格子ができた表で数えると 23/23 枚**が真値と一致する．
 - **C が外すのは 17 の 1 枚だけ**．A0 1 枚が丸ごと 1 表で，表頭に**縦書きの
   調査地名**が混じるため項目名が 6 個しか読めず，まとまりが作れない (箱 0)．
@@ -151,7 +152,9 @@ history; neither is included here.
 | `multi` | `read_region.py` が領域を 1 回読み，`ndl.py` (NDLOCR-Lite．**GPU 不要**)・`yomi.py` (yomitoku) を重ねる．クラスごとの順で質の通る読みを採る | | 辞書に当たるセルが 和名 277 → **428**，学名 462 → **548** |
 | `ai`・`both` | 段階 2 で AI が読む | | |
 | 折込の分割読み | `tiles.py` (A3〜A4 に分けて読み，原点を足して戻す) | `multi` の中で自動 | 辞書に当たる語が 200 倍 |
-| 読み直し | `read.retry_cells` (組成のセルを NDLOCR-Lite で) | 既定で入る | `--no-retry` で切る．522 セルが読めた |
+| 読み直し | `read.retry_until_stable` → `retry_cells` (組成のセルを NDLOCR-Lite で．対象は `retry_targets` = 要確認と判定の付いていない字のあるセル．変わらなくなるまで最大 `RETRY_ROUNDS` 巡．余白 `RETRY_PAD` = 3) | 既定で入る | `--no-retry` で切る．522 セルが読めた．読みは `text_ndl` に残す |
+| 読むかの判定 | `ink.glyph_gate` (縦線・横線を除いた塊の大きさと数) | 既定 | 2026-09-17 に黒画素の割合の閾値 (`RETRY_AT`) から替えた |
+| 読む箱を罫線から外す | `read.move_off_rules` → `left_rule.py` (左端の列を左の縦罫線より右へ)・`cell_rule.py` (セルごと) | 既定 | 格子 (`located.csv`) は変えず，読む箱だけを動かす (2026-09-16・09-17) |
 | 装置 | `device.py`．`--device` → `COMPTEA_DEVICE` → 自動 | 自動 | 自動は torch，無ければ `nvidia-smi` |
 
 **外の読み手の入れ方** (どちらも**入っていなければ黙って飛ばす**ので，
@@ -242,8 +245,10 @@ shift.
   and would otherwise be cropped away; it is never stretched sideways, which would
   swallow the neighbouring table. Against the truth (68 tables read off the sheets'
   corner labels) this goes from 64/68 tables and 17/23 sheets to **70/68 and 21/23**;
-  the two that remain (16, 21) are bands over-cutting, and their extra piece is a sliver
-  that produces no grid
+  the two extra pieces (16, 21) were bands over-cutting into low slivers, and since
+  2026-09-15 a height floor (`MIN_HEIGHT` = 0.08 of the sheet) drops them, giving
+  **68/68 and 23/23** (`grid.resplit_parts` calls it with `min_height=0`, since its
+  boxes are parts of one table)
 - `strips.py`: Detects a table with far more plots than the detector was trained on
   by cutting the composition body into groups of plots, the species-name columns kept
   at the head of each strip, then mapping the boxes back to the original coordinates so
@@ -264,7 +269,7 @@ shift.
   (`drop_stray_plot_rows(ref=…)`): strips invent headers inside the body, and one
   such header cost a table the bottom quarter of its rows. Whenever a left/right cut
   is found, `run_pipeline.py` does **not** divide the detections: it crops each side
-  out of the image (`resplit_parts()`), runs `split_sheet.find_tables()` on the crop
+  out of the image (`grid.resplit_parts()`), runs `split_sheet.find_tables()` on the crop
   to catch tables stacked below that a full-height neighbour had hidden from the
   whitespace pass, and re-runs itself on each piece at that piece's own scale
   (workdirs `_s1`, `_s2`, `_s1p2`). `check_grid_columns()` then compares the finished
@@ -276,7 +281,7 @@ shift.
   the rows are settled and keeps the outer edges: swapping columns while the grid is
   being built moved the body's left edge and halved the row count on another table.
   The header can also sit a few tens of px to the side of the body, so
-  `locate._shift_edges_to_band()` slides the header's copy of the boundaries (never
+  `axes._shift_edges_to_band()` slides the header's copy of the boundaries (never
   changing their number, or the header items would stop lining up with the plots). The vertical extent of the body (`body_extent()`) is taken from the
   `col` detections at **both** ends, then cut below the header that straddles the top
   and above the once-only species; taking the top from the grid itself left the first
@@ -350,6 +355,11 @@ shift.
   `col` boxes with the header inside, the estimate can even flip sign), and the
   page is rotated and re-detected only when the shift exceeds 0.3 rows — an
   angle threshold fired on 17 book pages and cost one of them two columns.
+  When the row pitch is known the lag search is capped at half of it (`LAG_PITCH`,
+  2026-09-16): the rows are periodic, and a wider search locked onto a multiple of
+  the pitch (19_p2 came out −7.9°, which `DESKEW_MAX_DEG` then discarded without a
+  warning). Across 120 tables six such estimates became plausible and the number of
+  tables actually rotated stayed at 4.
   Coordinates downstream refer to the rotated copy `<work>_deskew.png`
 - `ocr.py`: a composition cell whose reading does not validate as a value is
   re-read with the character set narrowed to `0-9 + r ・` (typewritten
@@ -362,7 +372,20 @@ shift.
   The narrow set is tried first, so a table without brackets reads exactly
   as before; 22_p2 went from 451 doubtful cells to 124. Box borders crossing a cell
   are erased first, **horizontal lines only**: erasing thin vertical lines took
-  the typewritten `1` with them
+  the typewritten `1` with them. Vertical rules are instead kept out by moving the
+  read box (`pipeline/read.move_off_rules()`, the grid file unchanged): `left_rule.py`
+  fits a line to the rule left of the body and pushes the first column's left edge
+  past it (2026-09-16; 19_p2's rule drifts 55 px over the body, and 65 of its 70
+  doubtful cells were plot 1), and `cell_rule.py` then trims a rule inside each
+  box, telling it from a `1` by whether it continues above and below the box
+  (2026-09-17; 931 cells had a rule in the box, read as `1`). Which unread cells are
+  re-read is decided by shape, `ink.glyph_gate()` — a blob at least 0.30 of the cell
+  height, or two blobs, after removing rules — rather than by the ink ratio against
+  a table-wide threshold (`RETRY_AT`, removed 2026-09-17), which dropped hundreds of
+  clear `+`. What EasyOCR still cannot read is re-read by NDLOCR-Lite in
+  `pipeline/read.py` (`retry_until_stable()` over `retry_cells()`; targets from
+  `retry_targets()`, i.e. `Need Check` plus cells with text but no status; padding
+  `RETRY_PAD` = 3 — wider padding reads the neighbouring column)
 - `name_col.py`: When `sname` or `species_col` is missing — either both (3 tables) or
   just one (28 of the 68 fold-out tables, which is why one sheet had no Japanese names
   at all) — builds the missing box from the ink left of the body: the scientific-name and Japanese-name columns
@@ -371,15 +394,15 @@ shift.
   threshold cannot split them). Left is always the scientific name — true of all 33
   labelled pages — and the valley matched the detector's own boundary within 60 px on
   every table that had one
-- `eval_grid.py` measures the raw grid (`locate_items` only) against the labelled
+- `eval/eval_grid.py` measures the raw grid (`locate_items` only) against the labelled
   pages; it does not run `rows_from_body`, `fix_columns` or the extent logic, so a
-  change there must be measured by running `run_pipeline.py` over the 88 pages and
-  comparing the work directories
+  change there must be measured by running the pipeline over the full set of tables
+  (147 as of 2026-09-16) and comparing the work directories (`eval/compare_runs.py`)
 - `count_plots.py`: The column yardstick for fold-outs — counts the plots from the
   header band, taking the most evenly spaced row of ink blobs (the running plot-number
   row), and compares that against the grid's column count. Independent of both the
   detections and the ink gaps the grid is built from
-- `locate.looks_like_fragment()`: A cut-out with neither a header nor a species-name
+- `filters.looks_like_fragment()`: A cut-out with neither a header nor a species-name
   column (a sheet's corner label, a title and legend band) is stopped before it grows a
   grid from a few stray `row` / `col` boxes and is counted as a table
 - `layer_col.py`: Finds the layer column when it sits inside the composition body
@@ -570,12 +593,39 @@ shift.
   2026-09-10: kinki_060's last right-hand row was outside its boxes and lost; blank
   rows on genuinely shorter right blocks are accepted). It runs **after**
   `row_heights.py`, because rows added before it were trimmed as ink-less trailing rows
-- `make_labels.py` / `build_dataset.py`: Turn a finished grid back into labelme and
+- `eval/make_labels.py` / `eval/build_dataset.py`: Turn a finished grid back into labelme and
   YOLO annotations, cut into page-sized tiles, so a new source can be trained on
   without labelling it by hand. Only tables whose checks pass are used, and the
   existing train/val split is preserved so before/after comparisons stay honest
+- The rest of `eval/` (see `eval/README.md`): `eval_read.py` (the reading and the
+  assembled table against the hand-typed truth tables), `scan_blocks.py` (whether a
+  whole block went missing; needs no labels), `label_gaps.py` (cuts out extra bands
+  and adds the missed `row` labels), `compare_runs.py` (two runs compared table by
+  table: doubtful cells, changed cells, ink on the boundaries; reads `run_info.json`
+  first), and `_data.py`, which moves to the data directory named by the environment
+  variable `COMPTEA_DATA` (unset: the current directory)
+- `left_rule.py` / `cell_rule.py`: Move the composition cells' read boxes off vertical
+  rules for stage 2 only (see `ocr.py` above)
+- `compare.py`: The yardsticks behind `eval/compare_runs.py` — `diff_long()` compares
+  two long tables cell by cell (rows without a row number as a multiset per plot), and
+  `boundary_ink()` / `boundary_ink_halves()` count cells whose box edges land on ink,
+  from the grid alone in seconds
+- `ink.py`: Binarisation and ink measures shared across stages — `binarize()`,
+  `ratio()`, `erase_box_lines()`, `head_strokes()` (counting Roman numeral strokes),
+  `glyph_gate()`
+- `source.py`: Opens the image a grid was built on (`source.open_image(df, workdir)`,
+  from the `source_image` column), never the original in its place
+- `page_group.py`: Reads the branch numbers (`xxx-1`, `xxx-2`) that mark a table page
+  and its continuation (`split_name()`, `group_parts()`)
+- `once_page.py`: Finds the once-only species block on a page without a table, from
+  the text lines rather than the detector (`find_block()`, used by
+  `grid.save_continuation()` and `cli/read_once_page.py`)
+- `pipeline/common.py`: `setup()`, `workdir()`, and `write_run_info()`, which records
+  each stage's code version (commit and whether `comptea/` has uncommitted changes)
+  and settings in `run_info.json`; `run_info_line()` prints it at the head of
+  `checks.txt` (2026-09-16)
 - `util_file.py`: File operations (timestamped names, zip, directory management)
-- `preprocess_image.py` / `preprocess_image_web.py`: Image preprocessing (deskew, grayscale, binarization, noise removal)
+- `preprocess_image.py` / `web/preprocess_image_web.py`: Image preprocessing (deskew, grayscale, binarization, noise removal)
 - `draw_rect.py`: Draws the boxes, colouring each by its `note` (`on_text` red /
   `snapped` orange / `interpolated` gold — darkest first, most worth looking at first)
 - `progress.py`: Redirects stdout into a Streamlit widget so long runs show progress
@@ -585,9 +635,11 @@ shift.
 
 ### Command line (`cli/`)
 
-The same pipeline driven from the command line rather than Streamlit, for reading a
-table end to end in one go: `run_pipeline.py` (the whole run), `crop_cells.py`,
-`run_ocr.py`, `apply_text.py`, `build_table.py`. They are thin wrappers: the stages
+The same pipeline driven from the command line rather than Streamlit, one script per
+stage: `run_pipeline.py` (stage 1 only, the grid — it calls `pipeline.grid.main()`;
+despite the name it does not run the later stages), `run_ocr.py` (stage 2),
+`build_table.py` (stage 3), with `crop_cells.py` and `apply_text.py` for the review in
+between, `export_data.py`, `link_pages.py` and `read_once_page.py`. They are thin wrappers: the stages
 themselves live in `comptea/pipeline/` (`grid.py`, `read.py`, `table.py`), with
 `comptea/pipeline/common.py` shared between them, so the CLI and the Streamlit apps
 run exactly the same code.
@@ -618,21 +670,27 @@ streamlit run apps/2_grid/streamlit_app.py                 # or one stage in the
 
 The entry points import the package — installed (`pip install -e .`) or, failing
 that, from this repository — and can be called from anywhere without changing the
-working directory (`COMPTEA_CORE` overrides where the core is looked for).
+working directory (`COMPTEA_CORE` overrides where the core is looked for; the old
+name `COMPTEA_YOLO` is still read).
+
+Environment variables: `COMPTEA_CORE` (above), `COMPTEA_DEVICE` (`cpu` / `cuda`),
+`COMPTEA_YOMI_PY` and `COMPTEA_NDLOCR` (the external readers), and, for `eval/` only,
+`COMPTEA_DATA` (where the labelled scans and truth tables are).
 
 ## Key dependencies
 
 ultralytics (YOLO11), streamlit, easyocr, python-Levenshtein, rapidfuzz, PIL/Pillow,
-pandas, numpy, torch, opencv, PyMuPDF — pinned in `requirements.txt` (whole pipeline)
-and, per stage, in `apps/*/requirements.txt`.
+pandas, numpy, torch, opencv, PyMuPDF — pinned in `requirements.txt` (the command-line
+pipeline; it does not include streamlit) and, per stage, in `apps/*/requirements.txt`
+(which add `streamlit>=1.36`).
 
 ## Notes
 
 - Output is **long format**: one row per plot × species (`comp_table.py`). `to_wide()` exists only for eyeballing.
 - Stages report trouble through `df.attrs['warnings']` rather than failing silently — `locate.py` and `comp_table.py` both do this, and the Streamlit pages display it.
-- Per-cell doubts travel in a `note` column set by `locate.py` (`interpolated` / `snapped` / `on_text`), drawn in colour on the grid overlay and carried through OCR into the long table.
+- Per-cell doubts travel in a `note` column (several values joined by `;`), drawn in colour on the grid overlay (the first three) and carried through OCR into the long table. Values: `interpolated` / `snapped` / `on_text` (`axes.py`, `blocks.align_block_bottoms`), `row_fixed` (`row_heights.py`), `y_shifted:±N` / `y_followed` / `y_fitted` (`row_track.py`), `heading` / `name_only` / `legend` (`row_kinds.py`), `retry` / `roman` (`ocr.py`), `ndl` (`pipeline/read.py`), `flow` / `moved` / `sname_from_jname` (`comp_table.py`).
 - Domain background (composition tables, cover-abundance classes, layer codes) is in `docs/vegetation_science.md`. Read it before looking up vegetation-science terms elsewhere.
 - YOLO model weights ship with the package at `comptea/weights/comptea.pt` (`comptea.WEIGHTS`)
-- `comptea` is an ordinary package; `pip install -e .` makes it importable, and `cli/_common.setup()` falls back to the repository path when it is not installed
+- `comptea` is an ordinary package; `pip install -e .` makes it importable, and when it is not installed `run_pipeline.py`, `run_ocr.py`, `build_table.py`, `link_pages.py` and `read_once_page.py` put the repository on `sys.path` themselves (`crop_cells.py`, `apply_text.py` and `export_data.py` do not), and `comptea.pipeline.common.setup()` does the same from `package_dir()`
 - The source material (scans, labels, truth tables) is not published, for copyright; `examples/sample.jpg` is a single page quoted with its source
 - GPU (CUDA) is optional for inference but recommended for training
