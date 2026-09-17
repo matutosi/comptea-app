@@ -305,6 +305,47 @@ def head_strokes(dark, box, join=HEAD_JOIN, taller=HEAD_TALLER,
     return None
 
 
+GLYPH_BIG = 0.30      # 塊の高さか幅がセルの高さのこの割合以上なら，`・` ではない
+GLYPH_VLINE = 0.85    # 上下のこの割合以上が黒い列は縦線 (罫線) として除く
+GLYPH_HLINE = 0.5     # 幅のこの割合以上が黒い行は横線として除く
+GLYPH_MIN_PX = 4      # これより黒画素の少ない塊は汚れ
+
+
+def glyph_gate(cell, big=GLYPH_BIG, vline=GLYPH_VLINE, hline=GLYPH_HLINE,
+               min_px=GLYPH_MIN_PX):
+    """セルの中に **`・` より大きい字がありそうか** (読み直すかの判定．2026-09-17)
+
+    読めなかったセルを読み直すかは，これまで**黒画素の割合**を表全体の統計と
+    比べて決めていた．それでは**はっきりした `+` が数百セル**，閾値の手前で
+    落ちていた (表全体でも列ごとでも．`docs/lessons.md`)．`+` と `・` は
+    量ではなく**大きさと形**が違うので，セルの中だけで決める．
+
+    縦線と横線を除いたインクを横の並びで塊に分け，塊の高さか幅が
+    セルの高さの `big` 倍以上，または塊が 2 つ以上なら True．
+    09-17 の的 (はっきりした `+` 1,761 セル) をすべて拾い，
+    読み直すセルは 1.45 倍．
+    """
+    if cell.size == 0 or not cell.any():
+        return False
+    h, w = cell.shape
+    keep = cell.copy()
+    keep[:, keep.mean(axis=0) >= vline] = False
+    keep[keep.mean(axis=1) >= hline, :] = False
+    prof = keep.any(axis=0)
+    if not prof.any():
+        return False
+    idx = np.flatnonzero(np.diff(np.concatenate(([False], prof, [False])).astype(np.int8)))
+    n, size = 0, 0.0
+    for a, b in zip(idx[0::2], idx[1::2]):
+        part = keep[:, a:b]
+        if int(part.sum()) < min_px:
+            continue
+        rows = np.flatnonzero(part.any(axis=1))
+        n += 1
+        size = max(size, max(b - a, rows[-1] - rows[0] + 1) / h)
+    return n >= 2 or size >= big
+
+
 LETTER_MIN = 0.4      # いちばん大きいかたまりに対する比．これ未満は区切りや汚れ
 LETTER_JOIN = 4       # このすき間までは同じ字とみなす
 

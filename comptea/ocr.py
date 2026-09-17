@@ -110,9 +110,10 @@ CONSTANCY_ALLOW = COMP_ALLOW + 'IViv()-'
 #   絞る    : `S・`(K は下線で読めない)，`K` は正しく読める
 # 見出しの行が列に掛かったセルは空で返るので，そのときだけ絞らずに読む
 LAYER_ALLOW = 'TSKBHM12・.,;'
-# 「何も無いセル」と「値のあるセル」の黒画素の間に，2つの高さを置く．
-#   RETRY_AT より濃ければ読み直す / THIN_AT より薄ければ1文字の値しか認めない
-RETRY_AT = 0.15
+# 「何も無いセル」と「値のあるセル」の黒画素の間に高さを置き，
+# THIN_AT より薄ければ1文字の値しか認めない．
+# (読み直すかを決めていた RETRY_AT = 0.15 は 2026-09-17 に外した．
+#  はっきりした `+` を落としていたので，形で決める `ink.glyph_gate` に替えた)
 THIN_AT = 0.5
 
 
@@ -237,7 +238,11 @@ def ocr_images_df(df):
 def retry_empty_comp(df, image, img):
     """読めなかった組成部のセルのうち，**字のあるものだけ**読み直す
 
-    非出現のセルは読めなくて当たり前なので，黒画素の量で選り分ける．
+    非出現のセルは読めなくて当たり前なので，**形で選り分ける**
+    (`ink.glyph_gate`．`・` より大きい塊か，塊が 2 つ以上あるセルだけ)．
+    2026-09-17 までは黒画素の量を下の高さと比べて選んでいたが，はっきりした
+    `+` が数百セル落ち，ある列の箱を変えると他の列の選び方まで動いた．
+    量の高さは，読んだ結果を採るか (`thin`) にだけ使う．
     **「何も無い」の高さはページによって違う**ので，その場で測る．
       `example.jpg`  非出現は `・` が印字され 0.013，単独の `+` は 0.029
       `kinki_047`    非出現は**空白**で 0.000，単独の `+` は 0.032
@@ -265,16 +270,22 @@ def retry_empty_comp(df, image, img):
         return ink.ratio(dark, df.at[i, 'y1'], df.at[i, 'y2'],
                          df.at[i, 'x1'], df.at[i, 'x2'])
 
+    def cell(i):
+        return dark[int(df.at[i, 'y1']):int(df.at[i, 'y2']),
+                    int(df.at[i, 'x1']):int(df.at[i, 'x2'])]
+
     ratios = {i: ratio(i) for i in empty}
     blank = float(np.percentile(list(ratios.values()), 10))
     full = float(np.median([ratio(i) for i in read])) if read else blank * 6
     if full <= blank:
         full = blank * 6 or 0.05
-    limit = blank + (full - blank) * RETRY_AT
     thin_at = blank + (full - blank) * THIN_AT
     n = 0
     for i in empty:
-        if ratios[i] <= limit:
+        # **読み直すかは形で決める** (2026-09-17)．黒画素の割合を表全体の統計と
+        # 比べていたときは，はっきりした `+` が数百セル落ちていた
+        # (`ink.glyph_gate`)．読んだ結果を採るかの `thin` は割合のまま
+        if not ink.glyph_gate(cell(i)):
             continue
         box = (df.at[i, 'x1'], df.at[i, 'y1'], df.at[i, 'x2'], df.at[i, 'y2'])
         text = retry_comp_cell(img, box, thin=ratios[i] < thin_at)
