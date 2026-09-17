@@ -331,13 +331,17 @@ def reasons_for(row, suspect, reader='easyocr'):
     return out
 
 
-def push_left_rule(df, work):
-    """**組成部の左端の列を，左の縦罫線より右へ押し出す** (切り出しだけ．2026-09-16)
+def move_off_rules(df, work):
+    """**組成のセルの箱を，縦罫線から外す** (切り出しだけ)
 
-    格子 (`located.csv`) はそのまま残し，読む箱だけを動かす
-    (理由は `comptea/left_rule.py`)．罫線が当たらない表では何もしない．
+    格子 (`located.csv`) はそのまま残し，読む箱だけを動かす．2 段ある．
+
+    1. 組成部の左端の列を，左の縦罫線より右へ押し出す (2026-09-16．
+       `comptea/left_rule.py`)．罫線の外にある階層の記号も外れる
+    2. **セルごとに**，箱の左右の端に入った縦罫線を外す (2026-09-17．
+       `comptea/cell_rule.py`)．1 が歯止めで採られない表と，内側の罫線を受け持つ
     """
-    from comptea import ink, left_rule, source
+    from comptea import cell_rule, ink, left_rule, source
 
     comp = df[df['obj_name'] == 'comp']
     if comp.empty or 'col' not in comp.columns:
@@ -347,14 +351,17 @@ def push_left_rule(df, work):
     except FileNotFoundError:
         return df
     dark = ink.binarize(img)
+    out = df
     rule = left_rule.fit_rule(dark, comp)
-    if rule is None:
-        return df
-    out, moved = left_rule.push_first_column(df, rule, dark=dark)
-    if moved:
-        print(f'組成部の左端の列 {moved} セルの左の境を，縦罫線より右へ押し出した'
-              f'(罫線 x = {rule[0] * 1000:+.1f}/1000・y + {rule[1]:.0f})．'
-              '格子のファイルは変えず，読む箱だけを動かす')
+    if rule is not None:
+        out, moved = left_rule.push_first_column(df, rule, dark=dark)
+        if moved:
+            print(f'組成部の左端の列 {moved} セルの左の境を，縦罫線より右へ押し出した'
+                  f'(罫線 x = {rule[0] * 1000:+.1f}/1000・y + {rule[1]:.0f})．'
+                  '格子のファイルは変えず，読む箱だけを動かす')
+    out, n = cell_rule.trim_rules(out, dark)
+    if n:
+        print(f'組成の {n} セルの箱から，縦罫線を外した (読む箱だけ)')
     return out
 
 
@@ -371,7 +378,7 @@ def main(argv=None):
         from comptea import ocr  # import に時間がかかる(EasyOCR のモデルを読む)
 
     df = pd.read_csv(work / 'located.csv')
-    df = push_left_rule(df, work)
+    df = move_off_rules(df, work)
     # --only で読み直すときは，前の結果を残したまま該当セルだけ差し替える
     base = None
     if args.only and (work / 'ocred.csv').is_file():
@@ -489,11 +496,12 @@ def main(argv=None):
         if len(review) and review['reason'].str.contains(key).any():
             print(f'  * {key}: {text}')
 
+    from comptea import cell_rule as _cr
     from comptea import left_rule as _lr
     _common.write_run_info(work, 'read', {
         'reader': args.reader, 'device': args.device or 'auto',
         'retry_pad': RETRY_PAD, 'retry_rounds': RETRY_ROUNDS,
-        'left_rule_margin': _lr.RULE_MARGIN,
+        'left_rule_margin': _lr.RULE_MARGIN, 'cell_rule_gap': _cr.GAP,
         'retry': not args.no_retry})
     print(f'\n書いた: {work / "ocred.csv"} / {work / "review.tsv"}')
     print('次: crop_cells.py で切り出して目で読む(段階2)')
