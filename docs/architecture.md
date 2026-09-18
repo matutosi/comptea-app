@@ -35,6 +35,7 @@ comptea のコードがどこに何を置き，どうつながっているかの
 | `tests/` | 辞書と `examples/` だけで回る試験 |
 | `examples/` | 出典を添えて引用した見本の 1 ページ (`sample.jpg`) と，段ごとの結果の zip |
 | `.claude/skills/comptea/` | Claude Code から工程を回すスキル (段階の手引き・読み取りの手引き・失敗の型) |
+| `.claude/skills/vegtable-to-csv-by-ai/` | コードを使わず AI が画像を読んで CSV にするスキル (手引き・転記表から CSV への変換・検算) |
 
 ## 段と入口
 

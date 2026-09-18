@@ -311,6 +311,10 @@ python -m coverage run -m pytest && python -m coverage report   # 網羅の度�
   (`references/failure-modes.md`)，画像を読むときの約束
   (`references/reading-guide.md`)，読み手に渡す文面
   (`references/read-cells-prompt.md`)．**このリポジトリが正**です
+- [.claude/skills/vegtable-to-csv-by-ai/](.claude/skills/vegtable-to-csv-by-ai/) — このリポジトリの
+  コードを**使わず**，AI エージェントが画像を拡大して読み，地点情報と組成の 2 つの縦持ち CSV に
+  まとめるスキル．Python は切り出し・変換・検算にだけ使う．組成表の構造と読み違いの型は，
+  ここでの学び (`docs/lessons.md`) から写した
 
 ## 重み
 
