@@ -449,6 +449,7 @@ def resplit_parts(image, tables, base, args):
     Returns:
         (残す表の検出のリスト, 警告, 再帰で書いた置き場のリスト)
     """
+    import os
     import subprocess
     from comptea import ink
     from comptea import split_sheet
@@ -539,16 +540,29 @@ def resplit_parts(image, tables, base, args):
             cmd = [sys.executable, '-m', 'comptea.pipeline.grid',
                    str(png), '--weights', args.weights,
                    '--conf', str(args.conf), '--conf-col', str(args.conf_col),
+                   '--imgsz', str(args.imgsz),
+                   '--threth-col', str(args.threth_col),
+                   '--threth-row', str(args.threth_row),
                    '--workdir', str(base.parent / name), '--no-resplit']
             if args.no_snap:
                 cmd.append('--no-snap')
             if getattr(args, 'no_track', False):
                 cmd.append('--no-track')
             print(f'\n===== 部分画像 {name} ({crop.width} x {crop.height}) =====')
-            r = subprocess.run(cmd, capture_output=True, text=True,
+            # 子は `-m comptea.pipeline.grid` で起きるので，pip install していなくても
+            # このリポジトリを読めるようにする
+            env = dict(os.environ)
+            env['PYTHONPATH'] = os.pathsep.join(
+                p for p in (str(Path(__file__).resolve().parents[2]),
+                            env.get('PYTHONPATH')) if p)
+            r = subprocess.run(cmd, capture_output=True, text=True, env=env,
                                encoding='utf-8', errors='replace')
             out = (r.stdout or '') + (r.stderr or '')
             print('\n'.join('  ' + line for line in out.rstrip().splitlines()))
+            if r.returncode != 0:
+                # 落ちた部分表が黙って消えないよう，警告に残す
+                warnings.append(f'**部分画像 {name} の格子づくりが失敗した** '
+                                f'(終了コード {r.returncode})．上の出力を見る')
             for line in out.splitlines():
                 if line.startswith('書いた: '):
                     done.append(line[len('書いた: '):].strip())
