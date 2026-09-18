@@ -6,7 +6,7 @@
 |:---|:---|
 | `eval_grid.py` | 格子を正解ラベルと突き合わせる (recall / precision / ずれ / 太さ) |
 | `eval_read.py` | 読み取りを正解表と突き合わせる (クラスごとの一致率) |
-| `scan_blocks.py` | 段が丸ごと落ちていないかだけを見る (ラベルが要らない) |
+| `scan_blocks.py` | 段が丸ごと落ちていないかだけを見る (ラベルは要らないが，`labelme_data/` の画像が要る) |
 | `label_gaps.py` | 余分な帯を切り出して並べ，付け漏れなら書き足す |
 | `make_labels.py` | できあがった格子を labelme / YOLO のラベルに戻す |
 | `build_dataset.py` | 既存の train / val の分け方を保ったまま，新しい断片を足す |
@@ -35,6 +35,16 @@ python eval/eval_grid.py --split val
 **気づけない**ためです．
 
 **実際の場所はここに書きません**．人によって違い，公開する情報でもありません．
+
+### 重みと縮尺
+
+`eval_grid.py`・`label_gaps.py`・`scan_blocks.py` の `--weights` の既定 `weights/comptea.pt` も，
+**データの置き場 (`COMPTEA_DATA`，無ければいまいる場所) からの相対**です．
+パッケージに同梱した重み (`comptea/weights/comptea.pt`) を使うときは，その場所を `--weights` で渡してください．
+
+この 3 本の `--imgsz` は既定が **1280 の固定値**です．
+工程 (`run_pipeline.py`) の既定 `auto` (画像の長辺から学習時と同じ縮尺を選ぶ) は使いません．
+長辺が 3300 px ほどから大きく外れる画像では，工程と縮尺がずれることに気をつけてください．
 
 読むだけでも，何をどう測ってきたかは分かります．
 判断の経緯は [../docs/lessons.md](../docs/lessons.md) (原則と採否の表) と

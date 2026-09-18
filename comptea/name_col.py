@@ -13,8 +13,8 @@ import numpy as np
 import pandas as pd
 
 from . import ink
+from .table_split import NAME_CLASSES
 
-NAME_CLASSES = ('sname', 'species_col')
 SMOOTH = 25           # x ごとの黒画素をならす窓(px)
 EDGE_INK = 0.02       # 帯の端とみなす黒画素の割合(字の芯は 0.12-0.25)
 PEAK_MIN = 0.05       # 山とみなす黒画素の割合

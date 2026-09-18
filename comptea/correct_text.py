@@ -411,6 +411,9 @@ def correct_field_no(text):
     return {'corrected': s, 'status': 'Need Check'}
 
 
+# 取りうる値の上限．`%` や `°` が `9` と読まれる誤り(50% -> 509)を弾ける
+HEADER_LIMITS = {'slope': 90, 'veg_cover': 100}
+
 # 項目名 -> 補正の関数
 HEADER_RULES = {
     'plot_no'  : lambda t: correct_number(t, allow_decimal=False),
@@ -419,14 +422,11 @@ HEADER_RULES = {
     'area'     : correct_number,
     'altitude' : correct_number,
     'aspect'   : correct_aspect,
-    'slope'    : lambda t: correct_number(t, limit=90),
+    'slope'    : lambda t: correct_number(t, limit=HEADER_LIMITS['slope']),
     'veg_height': correct_number,
-    'veg_cover': lambda t: correct_number(t, limit=100),
+    'veg_cover': lambda t: correct_number(t, limit=HEADER_LIMITS['veg_cover']),
     'n_species': lambda t: correct_number(t, allow_decimal=False),
 }
-
-# 取りうる値の上限．`%` や `°` が `9` と読まれる誤り(50% -> 509)を弾ける
-HEADER_LIMITS = {'slope': 90, 'veg_cover': 100}
 
 
 def correct_header_value(key, text):
@@ -441,12 +441,59 @@ def correct_header_value(key, text):
     """
     rule = HEADER_RULES.get(key)
     if rule is None and key.endswith('_cover'):
-        rule = lambda t: correct_number(t, limit=100)   # 階層ごとの植被率
+        rule = lambda t: correct_number(t, limit=HEADER_LIMITS['veg_cover'])   # 階層ごとの植被率
     if rule is None and key.endswith('_height'):
         rule = correct_number                           # 階層ごとの高さ
     if rule is None:
         return {'corrected': _clean(text) or None, 'status': None}
     return rule(text)
+
+
+# **学名・和名・階層の列は重なってよい．重なったら読みの中身で落とす**
+# (2026-09-18 ユーザ方針)．x はほとんど重ならないが，一部で重なり，
+# 隣の列の字がセルの端に入る．
+#   和名: カタカナが基本 (「◯◯属の1種」「◯◯sp」も)
+#   学名: アルファベット (アクセント記号付きはありうる)
+#   階層: B・T・S・H・K・M など
+# かな・漢字．中黒 `・` (U+30FB) は階層の区切りなので入れない
+_KANA_KANJI = re.compile(
+    '[ぁ-ゖァ-ヺー-ヿ㐀-鿿ｦ-ﾟ々〆]')
+# 和名の末尾に付いた階層の記号 (`ヤマブドウ S・K`・`オオツルウメモドキ 5`)．
+# 名前の側は ASCII でも中黒でもない字で終わること (`◯◯sp` の sp を記号と取らない)
+_LAYER_TAIL = re.compile(
+    r'^(?P<name>.*[^\x00-\x7f・･])\s*(?P<tail>(?:[BTSKHM5][12]?[\s・･.,:;\-]*)+)$')
+# 和名の頭に付いた学名の切れ端 (`Vitis ヤマブドウ`)．空白のあとにカタカナが続くこと
+_LATIN_HEAD = re.compile(r'^[A-Za-z][A-Za-z.\-]*(?:\s+[A-Za-z][A-Za-z.\-]*)*\s+(?=[ァ-ヿ])')
+# 階層の読みに混じった語 (3 字以上で小文字を含む英字の連なり)
+_LATIN_WORD = re.compile(r'[A-Za-z]*[a-z][A-Za-z]{2,}|[A-Za-z]{2,}[a-z][A-Za-z]*')
+
+
+def split_overlap(obj_name, text):
+    """隣の列から入り込んだ字を落とす．(このセルの読み, 和名から外した階層) を返す
+
+    - 和名 (`species_col`): 末尾の階層の記号と，頭の学名の切れ端を外す．
+      外した記号が階層として読めれば 2 つめの値で返す (階層のセルが空なら使う)
+    - 学名 (`sname`): かな・漢字を落とす
+    - 階層 (`layer`): かな・漢字と，英単語 (3 字以上で小文字を含む) を落とす
+
+    落とした結果が空なら，元の読みを返す (空にして読みを失わない)．
+    """
+    if not isinstance(text, str) or not text.strip():
+        return text, None
+    s = text.strip()
+    hint = None
+    if obj_name == 'species_col':
+        m = _LAYER_TAIL.match(s)
+        if m:
+            got = correct_layer(m['tail'])
+            if got['status'] in ('OK', 'multi'):
+                s, hint = m['name'].strip(), got['corrected']
+        s = _LATIN_HEAD.sub('', s).strip()
+    elif obj_name == 'sname':
+        s = _SPACES.sub(' ', _KANA_KANJI.sub(' ', s)).strip()
+    elif obj_name == 'layer':
+        s = _SPACES.sub(' ', _LATIN_WORD.sub(' ', _KANA_KANJI.sub(' ', s))).strip()
+    return (s if s else text), hint
 
 
 def correct_cell(obj_name, text):
@@ -471,9 +518,14 @@ def correct_cell(obj_name, text):
     # (非出現のセルは comp_table 側で 'absent' として扱われる)
     if not isinstance(text, str) or not text.strip():
         return {'corrected': None, 'status': None}
+    text, hint = split_overlap(obj_name, text)
     match obj_name:
         case 'species_col':
-            return correct_name(text, target='j_name')
+            got = correct_name(text, target='j_name')
+            if hint and got is not None:
+                # 和名の末尾から外した階層．階層のセルが空なら段階 3 が使う
+                got = dict(got, layer_hint=hint)
+            return got
         case 'sname':
             return correct_name(text, target='s_name')
         case 'layer':

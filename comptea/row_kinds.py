@@ -26,9 +26,7 @@ import pandas as pd
 
 from . import ink
 from .row_track import _pitch_of, clean_rules, unit_spans
-
-
-NAME_CLASSES = ('sname', 'species_col')
+from .table_split import NAME_CLASSES
 
 
 BODY_CLASSES = ('comp', 'layer')
@@ -84,10 +82,6 @@ class _Region:
         if b - a < 1:
             return 0
         return int(self.clean[a:b].sum())
-
-    def has_ink(self, a, b):
-        """`a`〜`b` (画像の y) に字があるか"""
-        return self.ink(a, b) >= self.need
 
     def ink_cells(self, cells):
         """セルごとに**自分の箱の中**の黒画素を数えて足す

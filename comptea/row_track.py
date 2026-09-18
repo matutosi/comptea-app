@@ -242,7 +242,7 @@ def split_units(dark, x1, x2, ys, pitch):
 
 
 def row_offsets(cys, centers, pitch, k=FOLLOW_K):
-    """行ごとのずれを，前後 `k` 行の中央値で滑らかにして返す
+    """行ごとのずれを，前後 `k // 2` 行を含む `k` 行の窓の中央値で滑らかにして返す
 
     列ごとの中央値 1 つでは，同じ列の中の散らばり (四分位範囲 2〜12 px) が残る．
     近くの行だけで測ると紙面の癖に従える．欠けた行 (字の無い行) は前後から埋め，
@@ -369,12 +369,6 @@ def cut_count(dark, x1, x2, ys, ratio=CUT_INK):
 
 def _band_x(cells):
     return int(cells['x1'].min()), int(cells['x2'].max())
-
-
-def _row_centers(cells):
-    """行ごとのセルの中心 y (列で違うときは中央値) を row 順に返す"""
-    c = cells.groupby('row')[['y1', 'y2']].median()
-    return ((c['y1'] + c['y2']) / 2.0).sort_index().values
 
 
 def column_offset(cys, centers, pitch):

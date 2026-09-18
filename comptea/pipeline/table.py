@@ -1,12 +1,13 @@
 """段階3: 縦持ちの表に組み，機械でできる検査をかける
 
-    python build_table.py WORKDIR [--keep-absent]
+    python build_table.py WORKDIR [--keep-absent] [--no-notes]
 
 出力
     comp_table_long.csv   1行 = 1地点 x 1種(これが正)
     comp_table_wide.csv   確認用(組成表の見た目)
     plot_table.csv        1行 = 1地点(表頭の属性)
     checks.txt            検査の結果(標準出力と同じ)
+    run_info.json         段ごとの版と設定(この段の分を書き足す)
 
 検査は**判定するだけ**．引っかかったものが誤りかどうかは，
 画像に戻って目で確かめる(references/checkpoints.md 段階3)．

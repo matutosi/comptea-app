@@ -170,7 +170,30 @@ def species_attrs(df: pd.DataFrame) -> pd.DataFrame:
     wide = attrs.pivot(index='row', columns='obj_name', values='value')
     wide = wide.rename(columns=ATTR_COLUMNS).reset_index().rename(columns={'row': 'row_no'})
     wide.columns.name = None
-    return split_bad_layers(wide)
+    return split_bad_layers(_fill_layer_hint(wide, df))
+
+
+def _fill_layer_hint(wide, df):
+    """和名の読みの末尾から外した階層 (段階 2 の `layer_hint`) を，階層が空の行に入れる
+
+    学名・和名・階層の列は重なってよく，重なったら読みで落とす (2026-09-18
+    ユーザ方針)．和名と階層の境が記号の右に来ると，記号は和名のセルで読まれ，
+    階層のセルは空になる (見本で階層が 25 → 0)．階層が読めている行は変えない．
+    """
+    if 'layer_hint' not in df.columns:
+        return wide
+    hint = df[(df['obj_name'] == 'species_col') & df['layer_hint'].notna()]
+    if hint.empty:
+        return wide
+    h = (hint.sort_values(['row', 'col']).drop_duplicates('row')
+         .set_index('row')['layer_hint'])
+    if 'layer' not in wide.columns:
+        wide['layer'] = None
+    empty = wide['layer'].map(lambda v: not (isinstance(v, str) and v.strip()))
+    fill = wide['row_no'].map(h)
+    use = empty & fill.notna()
+    wide.loc[use, 'layer'] = fill[use]
+    return wide
 
 
 def split_bad_layers(attrs):
@@ -256,7 +279,7 @@ def repair_split_values(comp, col_value='comp_raw', col_plot='plot',
     """隣り合うセルにまたがって組まれた値を，行の中で分け直す
 
     印字が列の境からずれていると，**地点1の値の末尾と地点2の値の先頭が
-    くっついて**組まれることがある(`example.jpg` の行18 は `[1・] [11・1]`)．
+    くっついて**組まれることがある(手元の旧見本 `example.jpg` の行18 は `[1・] [11・1]`)．
     切り出しは幾何で決まるので，そのまま切ると `1` と `1;1;1` になる．
     境を動かしても直らない(2026-09-01 に測って確かめた)ので，**読みの側で直す**．
 

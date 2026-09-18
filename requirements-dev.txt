@@ -1,3 +1,4 @@
-# テストを走らせるのに要るもの(本体は requirements.txt)
+# 手元で全部を走らせるのに要るもの (本体 + テスト)．
+# 検出と読み取りの要らないテストだけなら requirements-test.txt で足りる (CI と同じ)
 -r requirements.txt
-pytest>=8.0
+-r requirements-test.txt

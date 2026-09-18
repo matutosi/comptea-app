@@ -35,9 +35,8 @@
 | `layer` | 階層 | `B T S K H M` と数字(`B1` `B2` `T1` `T2`)．複数なら `;` でつなぐ |
 | `species_col` | 和名 | カタカナ．まれに漢字 |
 | `sname` | 学名 | ラテン文字(斜体)．`var.` `subsp.` `f.` `sp.` が入る |
-| `header_value` | 表頭の値 | 数字と単位，方位(`N` `S` `E` `W`)，日付 |
+| `header_value` | 表頭の値 (地点の番号を含む) | 数字と単位，方位(`N` `S` `E` `W`)，日付 |
 | `header_item` / `header_item_ja` | 表頭の項目名 | 独文と和文の項目名 |
-| `plot_row` | 地点の番号 | 数字 |
 
 ### 書き方
 

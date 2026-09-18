@@ -1,19 +1,9 @@
 """段階2の下ごしらえ: セルを読み，辞書と規則で補正する
 
-    python run_ocr.py WORKDIR [--reader easyocr|ai|both]
+    python run_ocr.py WORKDIR [--reader easyocr|multi|ai|both]
 
-読み方は3つ．**どれを選んでも補正は同じ**(`correct_text.correct_cell()`)．
-読み方だけを差し替え，判定の規則は動かさない．誰が読んだかは `read_by` に残る．
-
-    easyocr (既定)  EasyOCR で全セルを読む．安く，再現性がある
-    multi           EasyOCR で読んだうえで，**入っている読み手で領域を読み直す**．
-                    クラスごとの順で質の通る読みを採る(`read_region.pick`)．
-                    2026-09-12 の実測: 学名の一致が 13 → 24・11 → 31 (真値の 2 表)，
-                    辞書に当たるセルが 学名 462 → 548・和名 277 → 428 (12 表)
-    ai              EasyOCR を使わず，**全セルを AI が読む**ものとして段階2へ回す
-                    (古い印刷で EasyOCR が崩れる資料向け)
-    both            EasyOCR で読んだうえで全セルを AI にも回し，
-                    **補正後の値が食い違ったセルだけ**を目視に残す(費用は倍)
+読み方は `--reader` の 4 つ (easyocr・multi・ai・both)．どれを選んでも補正は同じ．
+4 つの違いは docs/pipeline.md の 8 節「読み方 (`--reader`)」が正．
 
 出力
     ocred.csv     located.csv に text / corrected / status を足したもの
@@ -175,6 +165,30 @@ def retry_until_stable(img, df, reader, cls=RETRY_CLASS, pad=RETRY_PAD,
         if after == before:
             return out, i
     return out, rounds
+
+
+def apply_corrections(read):
+    """読み (`text`) に補正を当て，`corrected`・`status`・`suggest`・`layer_hint` を書く
+
+    `suggest` は短くて採らなかった候補 (目視のために持ち回る)．
+    `layer_hint` は和名の読みの末尾から外した階層の記号 (段階 3 が，階層の
+    セルが空の行に使う．列が重なったら読みで落とす方針．2026-09-18)．
+    OCR をやり直さずに補正だけを当て直すときにも使う．
+    """
+    from comptea import correct_text
+    read = read.copy()
+    read['suggest'] = None
+    read['layer_hint'] = None
+    for i, row in read.iterrows():
+        fixed = correct_text.correct_cell(row['obj_name'], row['text']) or {
+            'corrected': None, 'status': None}
+        read.loc[i, 'corrected'] = fixed['corrected']
+        read.loc[i, 'status'] = fixed['status']
+        if fixed.get('suggest'):
+            read.loc[i, 'suggest'] = fixed['suggest']
+        if fixed.get('layer_hint'):
+            read.loc[i, 'layer_hint'] = fixed['layer_hint']
+    return read
 
 
 def recorrect_cells(df, cls=RETRY_CLASS):
@@ -448,13 +462,7 @@ def main(argv=None):
 
     # 短い読みは，候補があっても採らずに印字を残す(correct_text.MIN_ADOPT_LEN)．
     # その候補は `suggest` に入って来るので，目視のために持ち回る
-    read['suggest'] = None
-    for i, row in read.iterrows():
-        fixed = correct_text.correct_cell(row['obj_name'], row['text'])
-        read.loc[i, 'corrected'] = fixed['corrected']
-        read.loc[i, 'status'] = fixed['status']
-        if fixed.get('suggest'):
-            read.loc[i, 'suggest'] = fixed['suggest']
+    read = apply_corrections(read)
     # **読めなかった組成のセルを読み直す** (NDLOCR-Lite)．
     # 2026-09-14 の実測で，EasyOCR が読めなかったセルの 26〜77% が読める
     if not args.no_retry:

@@ -266,7 +266,7 @@ LAYER_HEAD_MAX = 0.5      # 表頭の字が地点の列の中央値のこの倍�
 def _guess_layer_column(img, name_ranges, x_edges, y_edges, head_y=None):
     """検出されなかった階層の列を，種名の列と組成部の隙間から補う
 
-    `layer` はラベルが 22 件しかなく検出が育っていない．example.jpg では
+    `layer` はラベルが 22 件しかなく検出が育っていない．手元の旧見本 example.jpg では
     信頼度 0.05 でしか出ず，閾値を下げて拾うと他が壊れる．
     そこで**隙間に字があるか**で決める(2026-09-01)．
 
@@ -492,10 +492,6 @@ def check_body_reach(df, source_image, y_edges):
 
 
 REACH_MARGIN = 10         # 右端の外の列を足すとき，次の段の種名の左端からこれだけ手前で止める
-
-
-NAME_SNAP_REACH = 0.9     # 項目名の帯の境を寄せる範囲 (行の高さの倍数)．値の側の
-                          # 0.4 では，項目名の行の数が値と違う表で字に届かない
 
 
 HEAD_COL_MIN_W = 3.0      # 項目名の領域の幅の下限 (行の高さの倍数)
