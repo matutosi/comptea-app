@@ -27,7 +27,6 @@ comptea のコードがどこに何を置き，どうつながっているかの
 |:---|:---|
 | `comptea/` | 中核のパッケージ．モジュールどうしは相対 import (`from . import ink`) |
 | `comptea/pipeline/` | 段の入口 (`grid.py`・`read.py`・`table.py`) と共通の準備 (`common.py`) |
-| `comptea/web/` | 以前の一体型の Streamlit ページ (`comptea_web.py` ほか)．当時のまま残してある |
 | `comptea/weights/` | 検出の重み `comptea.pt` (`comptea.WEIGHTS`) |
 | `comptea/*.txt` | 種名の辞書 (`j_name.txt`・`s_name.txt`・`js_name.txt`) |
 | `cli/` | 段ごとの薄い CUI |
@@ -89,7 +88,6 @@ comptea のコードがどこに何を置き，どうつながっているかの
 |:---|:---|:---|
 | `split_sheet.py` | 紙面 (画像・PDF) を読み，折り込みを表ごとの画像と注記の画像に切る．検出の `imgsz` を決める | `load_page`・`find_tables`・`blob_boxes`・`split_by_blobs`・`note_boxes`・`check_rotation`・`cut_table`・`auto_imgsz` |
 | `deskew.py` | 組成部の左右の黒画素から紙面の傾きを測る | `estimate`・`deskew_to` |
-| `preprocess_image.py` | 画像の前処理 (旧 GUI 用) | `correct_skew` |
 
 ### 検出と領域
 
@@ -161,7 +159,6 @@ comptea のコードがどこに何を置き，どうつながっているかの
 | `pipeline/common.py` | 段の準備と，段ごとの版と設定の記録 (`run_info.json`) | `setup`・`workdir`・`write_run_info`・`run_info_line` |
 | `draw_rect.py` | 箱を `note` で色分けして描く | `draw_rects_df` |
 | `util_file.py` | ファイル操作 (時刻付きの名前・zip) | `now`・`zip_now` |
-| `progress.py` | 標準出力を Streamlit に流す | `st_capture_stdout` |
 
 ### 控え (工程につないでいない別案)
 

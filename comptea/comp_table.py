@@ -1,6 +1,6 @@
 """OCRの結果を縦持ち(long format)の表に組み立てる.
 
-入力は ocr_web.py / comptea_web.py のOCRページが作るデータフレーム.
+入力は段階2 (`pipeline/read.py`) が書く ocred.csv のデータフレーム.
     obj_name  : species_col(和名) / sname(学名) / layer(階層) / comp(被度・群度)
     col, row  : locateのグリッドから振った列番号・行番号
     corrected : 補正後の文字列(無ければ text を使う)
