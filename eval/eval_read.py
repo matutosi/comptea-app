@@ -103,6 +103,9 @@ def read_run(run):
 
 def main():
     args = parse_args()
+    # 通しの出力は，呼んだ場所からの相対で受ける．置き場へ移る**前に**決める
+    # (移ってから解決すると，`--run work/x` が置き場の下を探して見つからない)
+    args.run = str(Path(args.run).resolve())
     # データの置き場へ移る(COMPTEA_DATA が無ければ，いまいる場所のまま)
     use_data_dir()
     truth = read_truth(args.truth)

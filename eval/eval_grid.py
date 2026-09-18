@@ -223,7 +223,8 @@ def run_one(image, args):
         shift = int(df_loc['block'].max())
         parts.append(df_loc)
     if not parts:
-        return df_loc, warns
+        # 表が 1 つも分けられなければ df_loc は作られていない
+        return (df_loc if tables else pd.DataFrame()), warns
     return pd.concat(parts, ignore_index=True), warns
 
 
