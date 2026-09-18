@@ -167,6 +167,30 @@ def retry_until_stable(img, df, reader, cls=RETRY_CLASS, pad=RETRY_PAD,
     return out, rounds
 
 
+def apply_corrections(read):
+    """読み (`text`) に補正を当て，`corrected`・`status`・`suggest`・`layer_hint` を書く
+
+    `suggest` は短くて採らなかった候補 (目視のために持ち回る)．
+    `layer_hint` は和名の読みの末尾から外した階層の記号 (段階 3 が，階層の
+    セルが空の行に使う．列が重なったら読みで落とす方針．2026-09-18)．
+    OCR をやり直さずに補正だけを当て直すときにも使う．
+    """
+    from comptea import correct_text
+    read = read.copy()
+    read['suggest'] = None
+    read['layer_hint'] = None
+    for i, row in read.iterrows():
+        fixed = correct_text.correct_cell(row['obj_name'], row['text']) or {
+            'corrected': None, 'status': None}
+        read.loc[i, 'corrected'] = fixed['corrected']
+        read.loc[i, 'status'] = fixed['status']
+        if fixed.get('suggest'):
+            read.loc[i, 'suggest'] = fixed['suggest']
+        if fixed.get('layer_hint'):
+            read.loc[i, 'layer_hint'] = fixed['layer_hint']
+    return read
+
+
 def recorrect_cells(df, cls=RETRY_CLASS):
     """**保存した読みに，いまの補正を当て直す** (OCR はやり直さない．2026-09-15)
 
@@ -423,13 +447,7 @@ def main(argv=None):
 
     # 短い読みは，候補があっても採らずに印字を残す(correct_text.MIN_ADOPT_LEN)．
     # その候補は `suggest` に入って来るので，目視のために持ち回る
-    read['suggest'] = None
-    for i, row in read.iterrows():
-        fixed = correct_text.correct_cell(row['obj_name'], row['text'])
-        read.loc[i, 'corrected'] = fixed['corrected']
-        read.loc[i, 'status'] = fixed['status']
-        if fixed.get('suggest'):
-            read.loc[i, 'suggest'] = fixed['suggest']
+    read = apply_corrections(read)
     # **読めなかった組成のセルを読み直す** (NDLOCR-Lite)．
     # 2026-09-14 の実測で，EasyOCR が読めなかったセルの 26〜77% が読める
     if not args.no_retry:
