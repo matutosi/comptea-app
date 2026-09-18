@@ -342,13 +342,17 @@ FLOW_GUTTER_INK = 0.4       # 種名と組成のあいだの隙間の x のこ�
 FLOW_GUTTER_NEAR = 2.0      # 隙間の右端が組成部から行の高さのこの倍より離れていたら使わない
 
 
-def _flow_top(flags, ys, y2, pitch, min_rows, dens):
-    """下から数えて，印の付いた帯の割合が `dens` 以上でいられるいちばん上の y"""
+def _flow_top(flags, ys, y2, pitch, min_rows, dens, top_ok=None):
+    """下から数えて，印の付いた帯の割合が `dens` 以上でいられるいちばん上の y
+
+    `top_ok` を渡すと，切り始める帯はそれが真のものに限る．
+    """
     best, hit = None, 0
     for j in range(len(flags) - 1, -1, -1):
         hit += bool(flags[j])
         n = len(flags) - j
-        if flags[j] and hit / n >= dens and n >= min_rows:
+        if (flags[j] and hit / n >= dens and n >= min_rows
+                and (top_ok is None or top_ok[j])):
             best = j
     if best is None:
         return float(y2)
@@ -413,8 +417,10 @@ def flow_top_by_edges(dark, edges, y1, y2, pitch, cross_min=FLOW_CROSS_MIN,
                 k += 1
         fracs.append(k / len(xs))
     flags = [f >= cross_min for f in fracs]
-    flags = [f and fr >= top_min or f for f, fr in zip(flags, fracs)]
-    return _flow_top(flags, ys, y2, pitch, min_rows, dens)
+    # 切り始める帯は `top_min` 以上の境をまたぐこと．以前は `f and ... or f` と
+    # 書いていて，優先順位で `f` に戻り，この条件が一度も効いていなかった (2026-09-18)
+    return _flow_top(flags, ys, y2, pitch, min_rows, dens,
+                     top_ok=[fr >= top_min for fr in fracs])
 
 
 def body_extent_ink(dark, df_loc, df_det=None, names=False):
