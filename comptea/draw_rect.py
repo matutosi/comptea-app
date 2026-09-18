@@ -46,19 +46,27 @@ def draw_rects_df(df, colors=None, lwd=2, note_colors=None, note_lwd=4):
     """
     dfをもとにobj_nameで異なる色の矩形を描画
 
-    画像(img_path)ごとに分けて，描画はdraw_rects()で実行する
+    画像(img_path)ごとに分けて，描画はdraw_rects()で実行する．
+    **画像が複数あれば全部を描く** (2026-09-18．以前はループの中で return していて，
+    最初の 1 枚しか描かなかった)．
 
     Args:
         df (pd.DataFrame): source_image, x1, y1, x2, y2, obj_nameの列
             note列があれば，気になるセルはその色で太く描く
+
+    Returns:
+        dict: {source_image: 描いた画像}．開けなかった画像は入れない
     """
-    for img_path, group_df in df.groupby('source_image'):
+    images = {}
+    for img_path, group_df in df.groupby('source_image', sort=False):
         cols = ['x1', 'y1', 'x2', 'y2', 'obj_name']
         if 'note' in group_df.columns:
             cols.append('note')
         image = draw_rects(img_path, group_df[cols], colors=colors, lwd=lwd,
                            note_colors=note_colors, note_lwd=note_lwd)
-        return image
+        if image is not None:
+            images[img_path] = image
+    return images
 
 
 def draw_rects(img_path, rects_df, colors=None, lwd=2, note_colors=None, note_lwd=4):

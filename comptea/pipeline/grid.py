@@ -417,10 +417,13 @@ def build_one(image, df_det, work, args, table_no=None, n_tables=1):
     df_loc.insert(0, 'cell_id', range(1, len(df_loc) + 1))
     df_loc.to_csv(work / 'located.csv', index=False)
 
-    img = draw_rect.draw_rects_df(df_loc)
-    if img is None:
-        img = Image.open(image).convert('RGB')
-    label_grid(img, df_loc).save(work / 'overlay.png')
+    # 画像が複数なら 2 枚目からは overlay_2.png ... に書く
+    images = draw_rect.draw_rects_df(df_loc) or {
+        image: Image.open(image).convert('RGB')}
+    for k, (src, img) in enumerate(images.items(), 1):
+        part = df_loc[df_loc['source_image'] == src] if len(images) > 1 else df_loc
+        name = 'overlay.png' if k == 1 else f'overlay_{k}.png'
+        label_grid(img, part).save(work / name)
     return summarize(df_det, df_loc, args), warnings
 
 
