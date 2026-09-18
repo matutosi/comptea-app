@@ -622,7 +622,8 @@ def _snap_block_edges(df, source_image, img, y_edges, y_interp,
             # **境を印字の地点の隙間へ寄せる** (2026-09-11 ユーザ指摘: kinki_070)
             from . import col_edges as _ce
             x_edges, n_snap = _ce.snap_to_plot_gaps(
-                dark_x, x_edges, (float(y_edges[0]), float(y_edges[-1])))
+                dark_x, x_edges, (float(y_edges[0]), float(y_edges[-1])),
+                bands=[(float(a), float(b)) for a, b in zip(y_edges[:-1], y_edges[1:])])
             if n_snap:
                 warnings.append(
                     f'列の境 {n_snap} 本を，印字の地点の隙間へ寄せた'

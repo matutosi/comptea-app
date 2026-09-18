@@ -767,7 +767,7 @@ GAP_FAR_MED = 15        # ずれの中央値がこの px 以上の表だけ直�
 GAP_KEEP_W = 0.7        # 寄せたあと，隣の列がこの割合 (列の幅) より細くなるなら寄せない
 
 
-def snap_to_plot_gaps(dark, x_edges, y_range, near=GAP_SNAP_NEAR):
+def snap_to_plot_gaps(dark, x_edges, y_range, near=GAP_SNAP_NEAR, bands=None):
     """**列の境を，印字の地点の隙間へ寄せる** (2026-09-11 ユーザ指摘: kinki_070)
 
     列の刻みは内挿で決まるので，隙間が拾えない所では刻みがずれて積もります
@@ -783,6 +783,11 @@ def snap_to_plot_gaps(dark, x_edges, y_range, near=GAP_SNAP_NEAR):
     寄せるのは (a) 隙間が 10 px 以上・列の幅の `near` 倍以下に離れており，
     (b) 隣の境を越えず，(c) 隣の列が細くなりすぎず，(d) 寄せて**字を割る回数が
     増えない**とき．「直して悪くならないこと」は他の直しと同じ歯止めです．
+
+    `bands` は行の帯 [(y1, y2), ...]．(d) の「字を割る回数」は行ごとに数える
+    (本体の全高を 1 つの帯にすると，ほぼ全部の x が 1 本のかたまりになり，
+    回数が 0 か 1 しか取らず歯止めが効かなかった．2026-09-18)．
+    渡さなければ `y_range` を 1 つの帯として扱う．
 
     Returns:
         (境, 寄せた本数)
@@ -802,7 +807,7 @@ def snap_to_plot_gaps(dark, x_edges, y_range, near=GAP_SNAP_NEAR):
     if (np.mean([v > GAP_FAR_MIN for v in dist]) < GAP_BAD_RATIO
             or float(np.median(dist)) < GAP_FAR_MED):
         return np.asarray(xs, dtype=float), 0     # 刻みは積もっていない
-    cross = crossing_counts(dark, [(float(y1), float(y2))], dark.shape[1])
+    cross = crossing_counts(dark, bands or [(float(y1), float(y2))], dark.shape[1])
     moved = 0
     for i in range(1, len(xs) - 1):
         e = xs[i]
