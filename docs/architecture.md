@@ -158,6 +158,7 @@ comptea のコードがどこに何を置き，どうつながっているかの
 | `compare.py` | 2 つの通しを比べる物差し (`eval/compare_runs.py` が使う) | `diff_long`・`boundary_ink`・`boundary_ink_halves` |
 | `pipeline/common.py` | 段の準備と，段ごとの版と設定の記録 (`run_info.json`) | `setup`・`workdir`・`write_run_info`・`run_info_line` |
 | `draw_rect.py` | 箱を `note` で色分けして描く | `draw_rects_df` |
+| `note.py` | セルの `note` に印を足す (`;` 区切り．空・NaN を `nan` にしない) | `add`・`text` |
 | `util_file.py` | ファイル操作 (時刻付きの名前・zip) | `now`・`zip_now` |
 
 ### 控え (工程につないでいない別案)

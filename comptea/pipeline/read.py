@@ -26,6 +26,7 @@ import argparse
 import sys
 
 from . import common as _common
+from .. import note as _note
 
 # 目視に回す理由．cell_id とともに review.tsv に書く
 REASONS = {
@@ -145,8 +146,7 @@ def retry_cells(img, df, reader, cls=RETRY_CLASS, pad=RETRY_PAD):
             continue
         out.at[i, 'corrected'] = fixed['corrected']
         out.at[i, 'status'] = 'OK'
-        now = str(out.at[i, 'note'] or '')
-        out.at[i, 'note'] = f'{now};ndl' if now else 'ndl'
+        out.at[i, 'note'] = _note.add(out.at[i, 'note'], 'ndl')
         n += 1
     if n:
         print(f'読み直し: 組成の {int(hit.sum())} セルのうち {n} セルが読めた'
@@ -204,8 +204,7 @@ def recorrect_cells(df, cls=RETRY_CLASS):
             continue
         out.at[i, 'corrected'] = fixed['corrected']
         out.at[i, 'status'] = 'OK'
-        now = str(out.at[i, 'note'] or '')
-        out.at[i, 'note'] = f'{now};ndl' if now else 'ndl'
+        out.at[i, 'note'] = _note.add(out.at[i, 'note'], 'ndl')
         n += 1
     return out, n
 
@@ -487,7 +486,11 @@ def main(argv=None):
                 'suggest': row.get('suggest'),
                 'reason': ','.join(rs),
             })
-    review = pd.DataFrame(rows)
+    # 0 件でも列名は書く (空の表を書くと改行だけのファイルになり，
+    # crop_cells.py が読むときに落ちていた．2026-09-18)
+    review = pd.DataFrame(rows, columns=[
+        'cell_id', 'obj_name', 'block', 'row', 'col', 'text', 'corrected',
+        'suggest', 'reason'])
     review.to_csv(work / 'review.tsv', sep='\t', index=False)
     print(f'--- 目視に回す: {len(review)} セル ---')
     for reason, n in (review['reason'].value_counts().items() if len(review) else []):

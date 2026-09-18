@@ -55,7 +55,10 @@ def select(df, args, work):
         return df
     review_path = work / 'review.tsv'
     _common.need_file(review_path, 'run_ocr.py')
-    ids = set(pd.read_csv(review_path, sep='\t')['cell_id']) if review_path.stat().st_size else set()
+    try:
+        ids = set(pd.read_csv(review_path, sep='\t')['cell_id'])
+    except pd.errors.EmptyDataError:             # 旧版が書いた 0 件の一覧
+        ids = set()
     return df[df['cell_id'].isin(ids)]
 
 

@@ -5,6 +5,7 @@ import pandas as pd
 from PIL import Image, ImageOps
 
 from . import ink
+from . import note as _note
 from . import parse_text
 
 def binarize_image(img):
@@ -204,8 +205,8 @@ def retry_bad_layers(df, img):
         if not got or got == text:
             continue
         df.loc[i, 'text'] = got
-        note = str(df.at[i, 'note'] or '').strip(';') if 'note' in df.columns else ''
-        df.loc[i, 'note'] = (note + ';' if note else '') + 'retry'
+        old = df.at[i, 'note'] if 'note' in df.columns else None
+        df.loc[i, 'note'] = _note.add(old, 'retry')
         n += 1
     return df, n
 
@@ -311,7 +312,7 @@ def retry_empty_comp(df, image, img):
         if text:
             df.loc[i, 'text'] = text
             old = df.at[i, 'note'] if 'note' in df.columns else None
-            df.loc[i, 'note'] = 'retry' if not isinstance(old, str) or not old else old + ',retry'
+            df.loc[i, 'note'] = _note.add(old, 'retry')
             done.append(int(df.at[i, 'cell_id']) if 'cell_id' in df.columns else i)
     if done:
         print(f'  組成部の {len(done)} セルは，値として通らなかったので字種を絞って読み直した'
@@ -405,6 +406,9 @@ def jpg2base64(img):
     st.data_editorで画像を表示するために使用
     """
     buffer = io.BytesIO() # 画像をメモリ上でバイトデータに保存
+    # JPEG は RGB・L しか書けない．透過やパレットの PNG で落ちていた (2026-09-18)
+    if img.mode not in ('RGB', 'L'):
+        img = img.convert('RGB')
     img.save(buffer, format="JPEG") # 画像をJPEG形式でバッファに保存
     img_bytes = buffer.getvalue() # get byte data from buffer
     base64_encoded_data = base64.b64encode(img_bytes) # encode to Base64

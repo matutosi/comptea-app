@@ -1059,8 +1059,9 @@ def _locate_header(df: pd.DataFrame, source_image: str, x_edges, warnings: list,
     # 和文の右に出て独文と和文が 1 列にまとまる(146 表で 43 表の境が字を横切っていた)．
     # 枠は**領域の左端を決めるためだけ**に使う(col_edges.fix_column_edges と同じ考え)
     from . import header_cols
-    split = header_cols.split_x(
-        ink.binarize(img), (left, float(x_edges[0])),
+    # 画像が無いとき (`--no-snap`・開けなかった) は検出枠のままにする
+    split = None if img is None else header_cols.split_x(
+        ink.binarize(img),(left, float(x_edges[0])),
         [(float(a), float(b)) for a, b in zip(h_edges[:-1], h_edges[1:])])
     if split is not None and left + 20 < split < float(x_edges[0]) - 20:
         if abs(split - right) > 5 and not hc_guessed:

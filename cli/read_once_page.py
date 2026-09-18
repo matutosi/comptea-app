@@ -63,11 +63,13 @@ def crop_block(image, out_dir):
         return None
     pd.DataFrame(found['lines']).to_csv(
         os.path.join(out_dir, 'lines.csv'), index=False, encoding='utf-8-sig')
-    img = Image.open(image)
-    box = tuple(int(v) for v in found['box'])
-    img.crop(box).save(os.path.join(out_dir, 'once_block.png'))
-    kind = '目印あり' if found['has_mark'] else '前のページからの続き'
-    print(f'塊 {kind}  行 {found["span"][0]}-{found["span"][1] - 1}  外形 {box}')
+    if found['box'] is None:                     # 注記だけのページ (kinki_011)
+        print('塊は無く，注記だけのページ')
+    else:
+        box = tuple(int(v) for v in found['box'])
+        Image.open(image).crop(box).save(os.path.join(out_dir, 'once_block.png'))
+        kind = '目印あり' if found['has_mark'] else '前のページからの続き'
+        print(f'塊 {kind}  行 {found["span"][0]}-{found["span"][1] - 1}  外形 {box}')
     if found['note']:
         print(f'注記: {found["note"][:120]}')
         with open(os.path.join(out_dir, 'note.txt'), 'w',

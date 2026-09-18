@@ -19,6 +19,7 @@ import re
 import pandas as pd
 
 from . import correct_text
+from . import note as _note
 from . import parse_text
 
 # OCR結果のobj_nameと，出力する列名の対応
@@ -280,8 +281,8 @@ def repair_split_values(comp, col_value='comp_raw', col_plot='plot',
         idx = list(g.index)
         for i in range(len(idx) - 1):
             ia, ib = idx[i], idx[i + 1]
-            a = str(comp.at[ia, col_value] or '')
-            b = str(comp.at[ib, col_value] or '')
+            a = _note.text(comp.at[ia, col_value])
+            b = _note.text(comp.at[ib, col_value])
             pa = [p for p in a.split(';') if p]
             pb = [p for p in b.split(';') if p]
             # **常在度は繋ぎ直す**(2026-09-04)．`III(+-1)` は 8 文字あるので
@@ -308,8 +309,7 @@ def repair_split_values(comp, col_value='comp_raw', col_plot='plot',
                     else:
                         comp.at[ia, col_value], comp.at[ib, col_value] = '', joined
                     for j in (ia, ib):
-                        note = str(comp.at[j, 'note'] or '').strip(';')
-                        comp.at[j, 'note'] = (note + ';' if note else '') + 'moved'
+                        comp.at[j, 'note'] = _note.add(comp.at[j, 'note'], 'moved')
                     n_fixed += 1
                     continue
             new_a = new_b = None
@@ -327,8 +327,7 @@ def repair_split_values(comp, col_value='comp_raw', col_plot='plot',
             comp.at[ia, col_value] = new_a
             comp.at[ib, col_value] = new_b
             for j in (ia, ib):
-                note = str(comp.at[j, 'note'] or '').strip(';')
-                comp.at[j, 'note'] = (note + ';' if note else '') + 'moved'
+                comp.at[j, 'note'] = _note.add(comp.at[j, 'note'], 'moved')
             n_fixed += 1
     return comp, n_fixed
 
@@ -456,7 +455,8 @@ def comp_table(df: pd.DataFrame, keep_absent: bool = False) -> pd.DataFrame:
             'OCRの段階でセルが作られているか確認する．')
         res = pd.DataFrame(columns=[
             'source_image', 'plot', 'row_no', 'j_name', 's_name', 'layer',
-            'cover', 'sociability', 'comp_raw', 'status'])
+            'cover', 'sociability', 'constancy', 'comp_raw', 'status', 'note',
+            'source'])
         res.attrs['warnings'] = warnings
         return res
 
@@ -615,6 +615,11 @@ def to_wide(df_long: pd.DataFrame) -> pd.DataFrame:
     sociability = df_long['sociability'].fillna('')
     df = df_long.assign(
         value=[c if s in ('', '1') else f'{c}・{s}' for c, s in zip(value, sociability)])
+    # **鍵の空は '' にしてから組む**．pivot_table は鍵が NaN の行を捨てるので，
+    # 階層の列が無い表や学名の無い行が丸ごと消えていた (out/v4 の 147 表のうち
+    # 129 表で行が減り，0 行の表もあった．2026-09-18)
+    keys = ['row_no', 'j_name', 's_name', 'layer']
+    df[keys] = df[keys].fillna('')
     return df.pivot_table(
         index=['row_no', 'j_name', 's_name', 'layer'],
         columns='plot', values='value', aggfunc='first').reset_index()

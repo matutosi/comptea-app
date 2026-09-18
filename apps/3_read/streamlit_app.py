@@ -23,7 +23,7 @@ importlib.reload(_shared)
 # 中核も，古い写しが残っていれば捨てる(次に使うときに読み直される)
 _shared.reload_core()
 
-from comptea import pipeline            # noqa: E402
+from comptea import note, pipeline      # noqa: E402
 
 _shared.start("3_read", "読み取り",
     "格子のセルを 1 つずつ読み，被度・種名・階層を補正します．"
@@ -188,8 +188,8 @@ if res:
             d.loc[i, "text"] = r["corrected"]
             d.loc[i, "corrected"] = again["corrected"]
             d.loc[i, "status"] = again["status"]
-            note = str(d.loc[i, "note"] or "").strip(";") if "note" in d else ""
-            d.loc[i, "note"] = (note + ";" if note else "") + "hand"
+            d.loc[i, "note"] = note.add(d.loc[i, "note"] if "note" in d else None,
+                                        "hand")
             n += 1
         if n:
             res["ocred"] = d

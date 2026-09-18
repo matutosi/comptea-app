@@ -234,7 +234,7 @@ share.streamlit.io に登録したあと，Secrets に次のように書いて�
 | `y_shifted:±N` / `y_followed` / `y_fitted` | `row_track.py` | 列ごとの行のずれを追って動かしたセル |
 | `heading` / `name_only` / `legend` | `row_kinds.py` | 見出し・学名だけの行・凡例 (行は落とさない) |
 | `flow` | `comp_table.mark_flow` | 表に入り込んだ流し込みの文章 |
-| `retry` | `ocr.py`・`pipeline/read.py` | 読み直して差し替えたセル |
+| `retry` | `ocr.py` | 読み直して差し替えたセル |
 | `roman` | `ocr.py` | ローマ数字として読み直したセル |
 | `ndl` | `pipeline/read.py` | NDLOCR-Lite で読めたセル (読みは `text_ndl`) |
 | `moved` | `comp_table.py` | 隣のセルにまたがった値を分け直した |
