@@ -42,5 +42,8 @@ comptea = ["*.txt", "weights/*.pt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["slow: 検出・読み取りを実際に走らせる(既定では飛ばす．--runslow で走る)"]
+markers = [
+    "slow: 検出・読み取りを実際に走らせる(既定では飛ばす．--runslow で走る)",
+    "realdata: 手元の実データが要る(環境変数で置き場を指したときだけ走る．-m realdata で選べる)",
+]
 filterwarnings = ["ignore::DeprecationWarning"]

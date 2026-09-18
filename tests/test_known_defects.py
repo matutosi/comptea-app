@@ -31,9 +31,9 @@ GRIDS = os.environ.get('COMPTEA_GRIDS')
 PARTS = os.environ.get('COMPTEA_PARTS', '')
 SCAN = os.environ.get('COMPTEA_SCAN', '')
 
-pytestmark = pytest.mark.skipif(
+pytestmark = [pytest.mark.realdata, pytest.mark.skipif(
     not GRIDS or not os.path.isdir(GRIDS),
-    reason='実データの格子が無い (COMPTEA_GRIDS を指すと走る)')
+    reason='実データの格子が無い (COMPTEA_GRIDS を指すと走る)')]
 
 
 def grid(name):

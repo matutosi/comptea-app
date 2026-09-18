@@ -429,6 +429,7 @@ def _iou(a, b):
 
 
 @pytest.mark.slow
+@pytest.mark.realdata
 @pytest.mark.parametrize('name', ['s01114_kinki_017', 's01114_kinki_040'])
 def test_本のページで組成表を囲む(name):
     """検出器で作った格子の箱 (表頭〜本体) と，7 割以上重なること"""
@@ -448,6 +449,7 @@ def test_本のページで組成表を囲む(name):
 
 
 @pytest.mark.slow
+@pytest.mark.realdata
 @pytest.mark.parametrize('num,n_tables', [('09', 5), ('12', 2)])
 def test_折込で表の数が合う(num, n_tables):
     """折込 (A0 級・複数の表) で，まとまりの数が表の数と合うこと
@@ -464,6 +466,7 @@ def test_折込で表の数が合う(num, n_tables):
 
 
 @pytest.mark.slow
+@pytest.mark.realdata
 def test_横倒しの折込でも表が出る():
     """s01115_04 の 3 表は紙面上で横倒し．そのままでは項目名 0 個，回すと 48 個"""
     pdf = os.path.join(SCAN, 's01115_04.pdf')
@@ -498,6 +501,7 @@ def _boxes(card):
 
 
 @pytest.mark.slow
+@pytest.mark.realdata
 def test_取り置きで本のページの当たりを守る():
     """格子の外接矩形と IoU >= 0.7 の枚数 (2026-09-12 に 53 → 64)
 
@@ -531,6 +535,7 @@ def test_取り置きで本のページの当たりを守る():
 
 
 @pytest.mark.slow
+@pytest.mark.realdata
 def test_取り置きで折込の表の数を守る():
     """切り分けの表の数と合った枚数 (2026-09-12 に 14 → 19)"""
     import glob

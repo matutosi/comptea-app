@@ -306,6 +306,7 @@ def test_空白が無ければその境は動かさない():
 
 
 # ---- 実データ (一時ディレクトリにあるときだけ) ------------------------------------
+# 重くはないので `slow` ではなく `realdata` の印 (COMPTEA_WORK があれば走る)
 
 WORK = os.environ.get('COMPTEA_WORK', '')
 
@@ -326,7 +327,7 @@ def _dy(warns, cls):
     return None
 
 
-@pytest.mark.slow
+@pytest.mark.realdata
 @pytest.mark.parametrize('name, cls, gain', [
     ('s01115_14_p1', 'sname', 0.5),          # 字を割る境 317 → 116 (2026-09-09)
     ('s01115_14_p1', 'species_col', 0.3),    # 286 → 187
@@ -346,7 +347,7 @@ def test_実データのタイプ打ちで字を割る境が減る(name, cls, ga
     assert after <= before * (1 - gain)
 
 
-@pytest.mark.slow
+@pytest.mark.realdata
 @pytest.mark.parametrize('name', ['s01114_kinki_017', 's01114_kinki_019', 's01114_kinki_010-1'])
 def test_実データの活字は悪化しない(name):
     img, loc = _real(name)
@@ -361,7 +362,7 @@ def test_実データの活字は悪化しない(name):
                 <= row_track.cut_count(dark, x1, x2, a.y1.values))
 
 
-@pytest.mark.slow
+@pytest.mark.realdata
 def test_実データで格子の余分な行を拍が見つける():
     img, loc = _real('s01115_13_p2')
     warns = row_track.check_beats(img, loc)
