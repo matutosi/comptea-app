@@ -27,7 +27,7 @@ detect = ["torch>=2.2", "torchvision>=0.17", "ultralytics>=8.3", "opencv-python-
 read = ["easyocr>=1.7", "opencv-python-headless>=4.9"]
 sheet = ["PyMuPDF>=1.24"]
 web = ["streamlit>=1.36"]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "coverage>=7.0", "streamlit>=1.36", "opencv-python-headless>=4.9"]
 all = ["comptea[detect,read,sheet,web]"]
 
 [project.urls]

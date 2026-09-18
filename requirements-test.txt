@@ -1,0 +1,12 @@
+# テストを走らせるのに要るもの (CI と同じ．重い依存は入れない)
+# 検出と読み取り (`slow` の印) は torch・ultralytics・easyocr が要るので，
+# それも走らせるなら requirements-dev.txt を使う
+pytest>=8.0
+coverage>=7.0
+streamlit>=1.36
+pandas>=2.2
+numpy>=1.26
+pillow>=10.0
+opencv-python-headless>=4.9
+rapidfuzz>=3.9
+python-Levenshtein>=0.25

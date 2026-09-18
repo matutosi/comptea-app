@@ -40,7 +40,7 @@ pip install -e .[all]        # 中核だけなら pip install -e .
 | `read` | easyocr・OpenCV | 段階 2 (読み取り) |
 | `sheet` | PyMuPDF | PDF の読み込み・折り込みの切り分け |
 | `web` | Streamlit | GUI |
-| `dev` | pytest | テスト |
+| `dev` | pytest・coverage・streamlit・OpenCV | テスト (requirements-test.txt と同じ) |
 | `all` | `detect`・`read`・`sheet`・`web` | — |
 
 `run_pipeline.py`・`run_ocr.py`・`build_table.py`・`link_pages.py`・`read_once_page.py` は，
@@ -268,10 +268,16 @@ share.streamlit.io に登録したあと，Secrets に次のように書いて�
 ## テスト
 
 ```bash
-pip install -r requirements-dev.txt
-pytest                # 実データの要らないもの (数秒)
-pytest --runslow      # 検出と読み取りも実際に走らせる (`slow` の印．30 秒ほど)
+pip install -r requirements-test.txt   # CI と同じ (重い依存を入れない)
+pytest                # 実データの要らないもの (30 秒ほど)
+pip install -r requirements-dev.txt    # 検出と読み取りも走らせるとき
+pytest --runslow      # 検出と読み取りも実際に走らせる (`slow` の印)
+python -m coverage run -m pytest && python -m coverage report   # 網羅の度合い
 ```
+
+**CI は Python 3.10 と 3.12 で回します**．手元も 3.12 で回すのが確実です
+(Windows なら `py -3.12 -m pytest`．既定の `python` の版に rapidfuzz などが
+入っていないと，テストを集める段で落ちます)．
 
 **実データが無くても走ります**．辞書と見本 (`examples/`) だけで完結し，
 画像の要るものは印字を模した小さな配列を組み立てて確かめます．
