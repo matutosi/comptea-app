@@ -98,25 +98,31 @@ def _merge_slivers(out, dark, body_min, sliver=SLIVER_RATIO):
     bmed = float(np.median(list(body.values())))
     dropped, merged = [], []
     order = list(cols.index)
+    # 捨てた列・併合して消えた列．隣を探すときに飛ばす (2026-09-18．消えた列を
+    # 併合先に選ぶと，代入先が無いまま自分だけ消え，その範囲の列がまるごと無くなった)
+    gone = set()
     for i, c in enumerate(order):
         r = cols.loc[c]
         w = float(r.x2 - r.x1)
         if w >= med * sliver:
             continue
         hit = (out['obj_name'] == 'comp') & (out['col'] == c)
-        at_edge = i == 0 or i == len(order) - 1
+        left = [n for n in order[:i] if n not in gone]
+        right = [n for n in order[i + 1:] if n not in gone]
+        at_edge = not left or not right
         blank = bmed > 0 and body[c] / bmed < body_min
         if at_edge and blank:
             out = out[~hit]
             dropped.append(int(c))
+            gone.add(c)
             continue
-        # 隣のうち，併合後の幅が中央値に近い方へ
+        # 生きている隣のうち，併合後の幅が中央値に近い方へ
         cands = []
-        if i > 0:
-            n = order[i - 1]
+        if left:
+            n = left[-1]
             cands.append((abs(float(cols.loc[n].x2 - cols.loc[n].x1) + w - med), n, 'x2', r.x2))
-        if i < len(order) - 1:
-            n = order[i + 1]
+        if right:
+            n = right[0]
             cands.append((abs(float(cols.loc[n].x2 - cols.loc[n].x1) + w - med), n, 'x1', r.x1))
         if not cands:
             continue
@@ -125,6 +131,7 @@ def _merge_slivers(out, dark, body_min, sliver=SLIVER_RATIO):
         out.loc[nh, side] = val
         out = out[~hit]
         merged.append((int(c), int(n)))
+        gone.add(c)
         cols.loc[n, side] = val
     warn = []
     if dropped:
