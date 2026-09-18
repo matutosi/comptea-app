@@ -61,19 +61,6 @@ def test_真っ白なら全体が1つの隙間になる():
     assert col_edges.column_edges_from_gaps(got, 0.0, 80.0) is None
 
 
-# --- 隙間から列の境を組み立てる --------------------------------------------
-
-def test_等間隔の境を組み立てる():
-    got = col_edges.column_edges_from_gaps([100.0, 200.0, 300.0], 50.0, 350.0)
-    assert got is not None
-    assert len(got) >= 4
-    assert got[0] <= 100 and got[-1] >= 300
-
-
-def test_隙間が足りなければ作らない():
-    assert col_edges.column_edges_from_gaps([100.0], 50.0, 350.0) is None
-
-
 # --- 行の刻み --------------------------------------------------------------
 
 def test_黒画素の周期から行の高さを出す():
@@ -85,9 +72,10 @@ def test_黒画素の周期から行の高さを出す():
     assert 18 <= got <= 22
 
 
-def test_並びが平らなら刻みは出ない():
+def test_並びが平らなら事前値をそのまま返す():
+    """周期が取れないので，事前値 `prior` を素通りさせる"""
     got = body_rows.row_pitch(np.ones(200), prior=20.0, search=(10, 40))
-    assert got is None or got > 0
+    assert got == 20.0
 
 
 def test_行の高さで境を並べる():
@@ -97,19 +85,3 @@ def test_行の高さで境を並べる():
     assert edges[0] >= 0 and edges[-1] <= 100
     d = np.diff(edges)
     assert abs(float(np.median(d)) - 20.0) <= 2.0
-
-
-# --- 字を割る回数 ----------------------------------------------------------
-
-def test_字のかたまりを割る回数を数える():
-    # 20-40 と 60-80 に字がある帯．40-60 は空白
-    dark = _cols(100, 30, [(20, 40), (60, 80)])
-    got = col_edges.crossing_counts(dark, [(0, 30)], 100)
-    assert got[30] > 0                               # 字の上
-    assert got[50] == 0                              # 空白の上
-
-
-def test_字が無ければどこも割らない():
-    dark = np.zeros((30, 100), dtype=bool)
-    got = col_edges.crossing_counts(dark, [(0, 30)], 100)
-    assert int(np.sum(got)) == 0

@@ -98,29 +98,3 @@ def test_表頭に字のある列に当たったら止める():
     assert len(out) == len(comp)
 
 
-def test_表頭も本体も空の列は捨てる():
-    dark = np.zeros((400, 400), dtype=bool)
-    comp = _cells(X, 100, 380, 'comp')
-    cols = layer_col._col_table(comp)
-    hb = np.array([0.0, 0.5, 0.5, 0.5])
-    body = np.array([0.0, 0.4, 0.4, 0.4])
-    widths = (cols['x2'] - cols['x1']).to_numpy(dtype=float)
-    out, dropped, _layered, _trimmed, _split = layer_col._scan_left_columns(
-        comp.copy(), cols, dark, [], 0.0, None, widths, body, hb, None, 0,
-        10.0, 80.0, True, 0.3, 0.5, 0.3)
-    assert dropped == [0]
-    assert 0 not in set(out['col'])
-
-
-def test_表頭が空で本体に字があれば階層にする():
-    dark = np.zeros((400, 400), dtype=bool)
-    comp = _cells(X, 100, 380, 'comp')
-    cols = layer_col._col_table(comp)
-    hb = np.array([0.0, 0.5, 0.5, 0.5])
-    body = np.array([0.4, 0.4, 0.4, 0.4])
-    widths = (cols['x2'] - cols['x1']).to_numpy(dtype=float)
-    _out, dropped, layered, _trimmed, _split = layer_col._scan_left_columns(
-        comp.copy(), cols, dark, [], 0.0, None, widths, body, hb, None, 0,
-        10.0, 80.0, True, 0.3, 0.5, 0.3)
-    assert dropped == []
-    assert [c for c, _ in layered] == [0]

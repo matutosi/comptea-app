@@ -56,3 +56,9 @@ def test_かたまりの外は数えない():
     cross = col_edges.crossing_counts(dark, [(0, 20)], 60)
     assert cross[10] == 0 and cross[20] == 0  # 端は割らない
     assert cross[15] == 1
+
+
+def test_字が無ければどこも割らない():
+    dark = np.zeros((30, 100), dtype=bool)
+    got = col_edges.crossing_counts(dark, [(0, 30)], 100)
+    assert int(np.sum(got)) == 0
