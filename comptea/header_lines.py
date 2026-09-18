@@ -238,9 +238,6 @@ def snap_to_gap(edges, dark, value_x, pitch, reach=SNAP_REACH, slope=0.0):
     return np.maximum.accumulate(np.array(out, dtype=float))
 
 
-VALUE_SNAP = 0.5        # 値の区切りへ寄せる範囲 (行の高さの倍数)
-
-
 VALUE_INK_THR = 0.1     # 値の側で「字がある」とみなす黒画素 (行の中央値に対する比)
 
 

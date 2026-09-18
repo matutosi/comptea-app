@@ -21,12 +21,6 @@ ENV = 'COMPTEA_DATA'
 MARKS = ('labelme_data', 'truth')
 
 
-def data_dir():
-    """データの置き場(環境変数が無ければ，いまいる場所)"""
-    env = os.environ.get(ENV)
-    return Path(env).resolve() if env else Path.cwd()
-
-
 def looks_like_data(d) -> bool:
     """そこがデータの置き場に見えるか"""
     d = Path(d)

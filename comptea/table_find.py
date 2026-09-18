@@ -608,7 +608,6 @@ def read_marks(im, reader=None, tile=TILE, least=LEAST, orientations=ORIENTATION
 # 学名の列は 1 つの表に 1 本 = 横に並ぶ表の数だけある．
 COL_GAP = 0.20          # 列の切れ目とみなす x の隔たり (紙面の幅に対する比)
 ROW_GAP = 0.05          # 同じ表の表頭とみなす y の隔たり (紙面の高さに対する比)
-COL_X_TOL = 0.10        # 同じ列とみなす x の隔たり (同上，幅に対する比)
 TABLE_LEAST = 3         # 表頭とみなすのに要る項目名の数
 ONCE_GAP = 0.02         # 「1 回出現の種」を 1 か所とみなす y の隔たり
 

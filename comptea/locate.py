@@ -494,10 +494,6 @@ def check_body_reach(df, source_image, y_edges):
 REACH_MARGIN = 10         # 右端の外の列を足すとき，次の段の種名の左端からこれだけ手前で止める
 
 
-NAME_SNAP_REACH = 0.9     # 項目名の帯の境を寄せる範囲 (行の高さの倍数)．値の側の
-                          # 0.4 では，項目名の行の数が値と違う表で字に届かない
-
-
 HEAD_COL_MIN_W = 3.0      # 項目名の領域の幅の下限 (行の高さの倍数)
 
 

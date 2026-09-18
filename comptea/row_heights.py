@@ -38,6 +38,7 @@ import numpy as np
 import pandas as pd
 
 from . import ink
+from .blocks import _renumber_rows
 from .body_rows import RULE_RUN, _strip_long_runs, body_extent_ink, lattice_rows
 
 
@@ -262,9 +263,6 @@ END_MIN_GAP = 0.75      # 範囲の端との差が行の高さのこの倍を超
 
 
 END_MIN_INK = 0.25      # 足す行の黒画素 / 行の中央値．これ未満なら足さない(空の行は足さない)
-
-
-END_TRIM_INK = 0.05     # 末尾の行の組成の黒画素 / 行の中央値．これ未満なら落とす(余分な行)
 
 
 END_INNER = 0.25        # 下端の判定で除く，帯の上下それぞれの割合(上の行の下線と，直下の流し込みの字の上端が食い込む)
@@ -533,13 +531,6 @@ def extend_edges(edges, prof_comp, prof_all, med, ext, is_text=None, prof_names=
     out, below = _add_below(out, med, hi, is_row, is_flow, judge)
     out, above = _add_above(out, med, lo, prof_all)
     return out, below, above, trimmed
-
-
-def _renumber_rows(df):
-    """段ごとに y1 の順で行番号を振り直す(`locate.number_cells` と同じ決まり)"""
-    rows = df[['block', 'y1']].drop_duplicates().sort_values(['block', 'y1'])
-    rows['row'] = range(1, len(rows) + 1)
-    return df.drop(columns=['row']).merge(rows, on=['block', 'y1'], how='left')
 
 
 def _rebuild(g, body, edges):

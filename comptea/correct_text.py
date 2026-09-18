@@ -411,6 +411,9 @@ def correct_field_no(text):
     return {'corrected': s, 'status': 'Need Check'}
 
 
+# 取りうる値の上限．`%` や `°` が `9` と読まれる誤り(50% -> 509)を弾ける
+HEADER_LIMITS = {'slope': 90, 'veg_cover': 100}
+
 # 項目名 -> 補正の関数
 HEADER_RULES = {
     'plot_no'  : lambda t: correct_number(t, allow_decimal=False),
@@ -419,14 +422,11 @@ HEADER_RULES = {
     'area'     : correct_number,
     'altitude' : correct_number,
     'aspect'   : correct_aspect,
-    'slope'    : lambda t: correct_number(t, limit=90),
+    'slope'    : lambda t: correct_number(t, limit=HEADER_LIMITS['slope']),
     'veg_height': correct_number,
-    'veg_cover': lambda t: correct_number(t, limit=100),
+    'veg_cover': lambda t: correct_number(t, limit=HEADER_LIMITS['veg_cover']),
     'n_species': lambda t: correct_number(t, allow_decimal=False),
 }
-
-# 取りうる値の上限．`%` や `°` が `9` と読まれる誤り(50% -> 509)を弾ける
-HEADER_LIMITS = {'slope': 90, 'veg_cover': 100}
 
 
 def correct_header_value(key, text):
@@ -441,7 +441,7 @@ def correct_header_value(key, text):
     """
     rule = HEADER_RULES.get(key)
     if rule is None and key.endswith('_cover'):
-        rule = lambda t: correct_number(t, limit=100)   # 階層ごとの植被率
+        rule = lambda t: correct_number(t, limit=HEADER_LIMITS['veg_cover'])   # 階層ごとの植被率
     if rule is None and key.endswith('_height'):
         rule = correct_number                           # 階層ごとの高さ
     if rule is None:

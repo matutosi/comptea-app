@@ -25,12 +25,6 @@ ROW_COVER_MIN = 0.8     # 格子の行 / 組成部の字の行．これを下回
 TOP_GAP_ROWS = 1.5      # 格子の上端が表頭の下端からこの行数より下なら，行を決め直す
 
 
-ROW_VALLEY_K = 0.2      # 行の谷とみなす黒画素の量．組成部の中央値に対する比
-
-
-ROW_VALLEY_MIN = 2      # 谷とみなす最小の幅(px)
-
-
 GUTTER_MIN_W = 20           # 種名の列と組成部のあいだの隙間とみなす最小の幅(px)
 
 
@@ -576,24 +570,6 @@ def lattice_rows(prof, y1, y2, pitch, snap=LATTICE_SNAP, pull=LATTICE_PULL):
         edges.append(y)
     edges.append(float(n))
     return [float(y1) + e for e in edges]
-
-
-ROW_EDGE_GAIN = 0.7     # 行の境の線上の黒画素がこの倍以下なら，決め直した方を採る
-
-
-ROW_KEEP_MIN = 0.8      # ただし，決め直した行がいまの行のこの割合を下回るなら採らない
-
-
-def _row_edge_ink(dark, edges, x1, x2):
-    """行の境の線上の黒画素(組成部の中央値との比)．小さいほど字を割っていない"""
-    if len(edges) < 3 or x2 - x1 < 10:
-        return None
-    prof = dark[:, int(x1):int(x2)].sum(axis=1).astype(float)
-    inner = [int(e) for e in edges[1:-1] if 0 <= int(e) < len(prof)]
-    if len(inner) < 2:
-        return None
-    med = float(np.median(prof[prof > 0])) if (prof > 0).any() else 0.0
-    return (float(np.mean(prof[inner])) / med) if med else None
 
 
 def expected_row_edges(dark, df_loc, df_det, ext):

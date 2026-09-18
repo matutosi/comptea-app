@@ -371,12 +371,6 @@ def _band_x(cells):
     return int(cells['x1'].min()), int(cells['x2'].max())
 
 
-def _row_centers(cells):
-    """行ごとのセルの中心 y (列で違うときは中央値) を row 順に返す"""
-    c = cells.groupby('row')[['y1', 'y2']].median()
-    return ((c['y1'] + c['y2']) / 2.0).sort_index().values
-
-
 def column_offset(cys, centers, pitch):
     """単位を最寄りの行の中心に付け，ずれの中央値 `dy` と，引いた後の四分位範囲を返す"""
     cys = np.asarray(cys, dtype=float)

@@ -25,18 +25,9 @@ from PIL import Image
 
 from . import ink
 from .col_edges import column_edges_from_gaps, plot_gaps
-from .table_split import drop_stray_plot_rows
+from .table_split import NAME_CLASSES, drop_stray_plot_rows
 
 Image.MAX_IMAGE_PIXELS = None
-
-
-# 種名の側の列(短冊の頭に付ける)
-# **`layer`・`header_col` は入っていない**(2026-09-06 に分割して分かった)．
-# 元は 4 つ組で書いてあったが，同じ名前の定数が同じファイルの後ろで 2 つ組に
-# 上書きされており，**走っていた値は 2 つ組**だった(`map_back()` の 1 か所が
-# これを見ている)．分けるにあたっては振る舞いを変えないため，走っていた値を
-# そのまま採る．4 つ組が正しいかは，物差しを回して別に決める
-NAME_CLASSES = ('sname', 'species_col')
 
 
 # 表の幅いっぱいに広がるもの．短冊では途中で切れるので，戻すときに広げ直す
