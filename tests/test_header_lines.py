@@ -57,10 +57,15 @@ def test_値の無い末尾の帯も落とすが中の帯は残す():
     assert np.allclose(out, [30.0, 65.0, 100.0, 135.0, 170.0])
 
 
-def test_reader_が無ければ帯を作らない():
+def test_reader_が無ければ帯を作らない(monkeypatch):
+    """easyocr が無い・読めない場では空を返す
+
+    以前は `reader=False` を渡していたが，本体は `reader or _reader()` なので
+    EasyOCR を読み込んでしまい (11.7 秒)，確かめ方も常に真だった (2026-09-18)
+    """
+    monkeypatch.setattr(header_lines, '_reader', lambda: None)
     img = Image.new('L', (400, 300), 255)
-    boxes = header_lines.detect_boxes(img, (0, 0, 400, 300), reader=False)
-    assert boxes == [] or boxes is not None
+    assert header_lines.detect_boxes(img, (0, 0, 400, 300)) == []
 
 
 @pytest.mark.slow
