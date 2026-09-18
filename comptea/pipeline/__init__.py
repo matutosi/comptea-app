@@ -4,9 +4,11 @@ CLI からもアプリからも**同じものを呼ぶ**(2026-09-07)．前はア
 `cli/*.py` を subprocess で起こしており，そのたびに torch を読み込んでいた．
 
     from comptea.pipeline import grid, read, table
-    grid.run(['画像.png', '--workdir', 'work/x'])
+    grid.main(['画像.png', '--workdir', 'work/x'])     # 段を直に呼ぶ
+    run('grid', ['画像.png', '--workdir', 'work/x'])  # 画面に出た文字も返す
 
-`run()` は CLI と同じ引数の並びを受け取り，何も渡さなければ `sys.argv` を使う．
+各段の `main()` は CLI と同じ引数の並びを受け取り，何も渡さなければ `sys.argv` を使う．
+`run()` は `argv` を必ず受け取る．
 """
 from . import common                                # noqa: F401
 

@@ -60,8 +60,17 @@ comptea のコードがどこに何を置き，どうつながっているかの
 
 ### 段階 1 の中の順序
 
-`grid.main` → `deskew_page` (傾いていれば回して検出し直す) → `split_page` (表ごとに分ける) →
-`build_tables` → 表ごとに `build_one`．
+`grid.main` の中は次の順である．
+
+1. `split_sheet.check_rotation` (横倒しなら `rotate_page` で 2 通りに回し，`row` が多く出た向きを採る)
+2. `detect` (YOLO の検出)
+3. `deskew_page` (傾いていれば回して検出し直す)
+4. `split_page` (表ごとに分ける)．中は `filters.drop_unsupported_headers` → `blocks.split_tables` →
+   `resplit_parts` (切れ目があれば部分画像に切り出してやり直す) → `table_split.split_side_by_side`
+5. `widen_tables` (地点の多い表を `strips.detect_wide` で短冊に分けて検出し直す)
+6. `build_tables` → 表ごとに `build_one`．`row` が 1 本も無くて失敗した表は，行の閾値を
+   `ROW_RETRY_CONF` (10%) に下げて検出し直し，1 回だけやり直す
+
 `build_one` の中は次の順で，**順序に意味がある** (理由は pipeline.md の各節)．
 
 1. `filters.looks_like_fragment` (切れ端なら止める)
@@ -74,9 +83,6 @@ comptea のコードがどこに何を置き，どうつながっているかの
    `col_edges.fix_name_layer_edge` → `layer_col.refit_layer_width` → `join_layer_comp_edge` →
    `row_kinds.mark_rows` → `header_lines.shear_header_values`
 7. `located.csv` と重ね描きの画像を書く
-
-`split_page` の中で，左右に並ぶ表 (`table_split.split_side_by_side` → `grid.resplit_parts`) と
-地点の多い表 (`strips.detect_wide`) は検出をやり直す．
 
 ## モジュールの地図
 
@@ -177,13 +183,13 @@ comptea のコードがどこに何を置き，どうつながっているかの
 | 仕事 | 正 | 控え・分岐 |
 |:---|:---|:---|
 | 折り込みの切り分け | `split_sheet.find_tables` (空白の帯 + 縮めた塊) | `table_find` (目印)．yomitoku・DocLayout-YOLO のレイアウト解析は候補から外した (コードは無い) |
-| 1 枚に載る別々の表 | `blocks.split_tables` (縦)・`table_split.split_side_by_side` (横) → `grid.resplit_parts` | — |
+| 1 枚に載る別々の表 | `blocks.split_tables` (縦) → `grid.resplit_parts` → `table_split.split_side_by_side` (横) | — |
 | 格子 | `detect.py` → `locate.py` | `noyolo.py` |
 | 格子の分岐 | `one_plot.py` (1 調査区の 2 段組)・`strips.py` (地点の多い表)・`name_col.py` (種名の列の補い) | 条件に当たる表だけで働く |
 | 表頭の縦の境 | `header_cols.py` (黒画素) | 検出の `header_col` は領域の左端だけに使う |
 | 表頭の行 | `header_lines.bands_from_value_lines` (値の行ごと) | 値の行が足りなければ項目名の箱から (`bands_from_pairs`)，それも足りなければ投影 (`locate._header_bands_from_names`) |
-| 組成部の行 | `axes.locate_edges` → `row_heights`・`body_rows.lattice_rows` → `row_track` | `--no-snap`・`--no-track` で後ろを切れる |
-| 読み取り | `--reader easyocr` (既定) | `multi` (`read_region` + `ndl`・`yomi`，折り込みは `tiles`)・`ai`・`both` |
+| 組成部の行 | `axes.locate_edges` (`locate_items` の中) → `body_rows.rows_from_body` (`lattice_rows`) → `row_heights` → `row_skew` → `row_track` | `--no-snap`・`--no-track` で後ろを切れる |
+| 読み取り | `--reader easyocr` (既定) | `multi`・`ai`・`both` ([pipeline.md の「読み方 (`--reader`)」](pipeline.md#読み方---reader)) |
 | 段階 1 の読み手 | EasyOCR だけ (`header_lines` の `reader.detect` など) | — |
 | 後処理 (段階 3) | `correct_text` → `comp_table` (`row_kinds` の印を使う) → `plot_table` → `site_notes` | `--no-notes`・`--keep-absent` |
 

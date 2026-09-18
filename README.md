@@ -21,8 +21,8 @@
 - セルを読み，種名の辞書と被度の規則で補正する
 - 縦持ちの表 (1 行 = 1 地点 × 1 種) に組み，機械でできる検査にかける
 
-実際の資料の全 147 表で通すと，**縦持ち 47,097 行・要確認 (`Need Check`) 1,018 件**
-でした (2026-09-16 時点．要確認は目視に回します)．
+実際の資料の全 147 表で通すと，**縦持ちは 47,097 行** (2026-09-16 時点)，
+**要確認 (`Need Check`) は 924 件**でした (2026-09-17 時点．要確認は目視に回します)．
 
 ## 入れ方
 
@@ -55,6 +55,10 @@ EasyOCR に加えて，外の読み手を重ねられます (`run_ocr.py --reade
 (和名 277 → 428，学名 462 → 548 のセルが辞書に当たるようになりました)．
 **どちらも，入っていなければ黙って飛ばします**．入れていない環境でも
 `--reader multi` は落ちず，EasyOCR だけで読みます．
+
+yomitoku は段階 3 でも使います．表の下の注記から調査地・調査年月日・出典を読み，
+表頭で空いている地点の情報を埋めます (`site_notes`)．
+入れていなければ，この差し込みは起きません．
 
 | 読み手 | 入れ方 |
 |:---|:---|
@@ -90,8 +94,8 @@ python cli/run_ocr.py work/<名前>                    # --reader multi・--devi
 python cli/crop_cells.py work/<名前> --what review    # 目視に回すセルを work/<名前>/crops/ に切り出す
 python cli/apply_text.py work/<名前> --tsv fixes.tsv # 目で読んだ字 (cell_id と text) を戻す
 
-# 段階 3: 縦持ちに組む (comp_table_long.csv)
-python cli/build_table.py work/<名前>                # 非出現のセルも残すなら --keep-absent
+# 段階 3: 縦持ちに組む (comp_table_long.csv ほか．下の「出力の形」)
+python cli/build_table.py work/<名前>                # 非出現のセルも残すなら --keep-absent，注記を読まないなら --no-notes
 
 # まとめて書き出す (Need Check のセルを画像に切り出し，CSV から辿れるようにする)
 python cli/export_data.py work --out out --tag <資料名>
@@ -195,8 +199,17 @@ share.streamlit.io に登録したあと，Secrets に次のように書いて�
 
 ## 出力の形
 
-`comp_table_long.csv` は縦持ちで，1 行が 1 地点 × 1 種です
-(`export_data.py` は全部の表を縦に積んで `comp_table_long_<tag>.csv` に書きます)．
+段階 3 (`build_table.py`) は，作業ディレクトリに次のファイルを書きます．
+
+| ファイル | 中身 |
+|:---|:---|
+| `comp_table_long.csv` | 縦持ちの表 (1 行 = 1 地点 × 1 種)．**これが正** |
+| `comp_table_wide.csv` | 目で確かめる用の横持ち (組成表の見た目) |
+| `plot_table.csv` | 表頭の属性 (1 行 = 1 地点)．表頭が無ければ書かない |
+| `checks.txt` | 機械でできる検査の結果 (標準出力と同じ) |
+| `run_info.json` | 段ごとの版と設定 (段階 1・2・3 がそれぞれ書き足す) |
+
+`comp_table_long.csv` の列は次のとおりです．
 
 | 列 | 中身 |
 |:---|:---|
@@ -212,6 +225,17 @@ share.streamlit.io に登録したあと，Secrets に次のように書いて�
 | `status` | 検証の結果 (下の表) |
 | `note` | セルごとの疑わしさ (下の表．複数は `;` でつなぐ) |
 | `source` | `body` (表の本体) / `once` (1 回出現種の流し込み) |
+| `table` | 1 ページに表が 2 つ以上あるときだけ付く，ページの中の表の番号 (`plot_table.csv` にも付く) |
+
+`export_data.py` は全部の表を縦に積んで `comp_table_long_<tag>.csv` に書き，
+次の列を足します (`plot_table_<tag>.csv` にも `corpus`・`table`・`table_in_sheet` が付きます)．
+
+| 列 | 中身 |
+|:---|:---|
+| `corpus` | `--tag` で渡した資料名 |
+| `table` | 作業ディレクトリの名前 (表ごとに 1 つ) |
+| `table_in_sheet` | 上の表の `table` (ページの中の表の番号) を名前を変えて残したもの |
+| `image` | `Need Check` の行だけ，切り出したセルの画像のフルパス (`--no-crop` のときは空) |
 
 ### `status`
 
@@ -252,7 +276,8 @@ pytest --runslow      # 検出と読み取りも実際に走らせる (`slow` �
 **実データが無くても走ります**．辞書と見本 (`examples/`) だけで完結し，
 画像の要るものは印字を模した小さな配列を組み立てて確かめます．
 実データの格子を使うもの (`test_known_defects.py`・`test_table_find.py` の一部など) は，
-環境変数 `COMPTEA_GRIDS`・`COMPTEA_PARTS`・`COMPTEA_SCAN` (`test_row_track.py` は `COMPTEA_WORK`)
+環境変数 `COMPTEA_GRIDS`・`COMPTEA_PARTS`・`COMPTEA_SCAN` (`test_row_track.py` は `COMPTEA_WORK`，
+`test_table_find.py` の取り置いた目印は `COMPTEA_TF_CACHE`)
 で置き場を指したときだけ走り，無ければ飛ばします．
 
 `tests/test_<モジュール名>.py` が，おおむね `comptea/<モジュール名>.py` に対応します．

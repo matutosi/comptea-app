@@ -1,19 +1,9 @@
 """段階2の下ごしらえ: セルを読み，辞書と規則で補正する
 
-    python run_ocr.py WORKDIR [--reader easyocr|ai|both]
+    python run_ocr.py WORKDIR [--reader easyocr|multi|ai|both]
 
-読み方は3つ．**どれを選んでも補正は同じ**(`correct_text.correct_cell()`)．
-読み方だけを差し替え，判定の規則は動かさない．誰が読んだかは `read_by` に残る．
-
-    easyocr (既定)  EasyOCR で全セルを読む．安く，再現性がある
-    multi           EasyOCR で読んだうえで，**入っている読み手で領域を読み直す**．
-                    クラスごとの順で質の通る読みを採る(`read_region.pick`)．
-                    2026-09-12 の実測: 学名の一致が 13 → 24・11 → 31 (真値の 2 表)，
-                    辞書に当たるセルが 学名 462 → 548・和名 277 → 428 (12 表)
-    ai              EasyOCR を使わず，**全セルを AI が読む**ものとして段階2へ回す
-                    (古い印刷で EasyOCR が崩れる資料向け)
-    both            EasyOCR で読んだうえで全セルを AI にも回し，
-                    **補正後の値が食い違ったセルだけ**を目視に残す(費用は倍)
+読み方は `--reader` の 4 つ (easyocr・multi・ai・both)．どれを選んでも補正は同じ．
+4 つの違いは docs/pipeline.md の 8 節「読み方 (`--reader`)」が正．
 
 出力
     ocred.csv     located.csv に text / corrected / status を足したもの

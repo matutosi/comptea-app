@@ -266,7 +266,7 @@ LAYER_HEAD_MAX = 0.5      # 表頭の字が地点の列の中央値のこの倍�
 def _guess_layer_column(img, name_ranges, x_edges, y_edges, head_y=None):
     """検出されなかった階層の列を，種名の列と組成部の隙間から補う
 
-    `layer` はラベルが 22 件しかなく検出が育っていない．example.jpg では
+    `layer` はラベルが 22 件しかなく検出が育っていない．手元の旧見本 example.jpg では
     信頼度 0.05 でしか出ず，閾値を下げて拾うと他が壊れる．
     そこで**隙間に字があるか**で決める(2026-09-01)．
 
