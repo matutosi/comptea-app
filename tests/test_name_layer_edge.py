@@ -129,3 +129,37 @@ def test_和名が無ければ何もしない():
                    ignore_index=True)
     out, warns = col_edges.fix_name_layer_edge(img, df)
     assert out is df and warns == []
+
+
+def _sheet_heading(size=(900, 600)):
+    """見本 (examples/sample.jpg) と同じ形の紙面
+
+    - 1 行目は種群の見出しで，和名から記号の列まで字が続く
+    - 記号は「S・K」(S と ・K のあいだに隙間) か「K」だけ
+    - 記号の右と組成部のあいだは空いている
+    """
+    img = Image.new('L', size, 255)
+    px = img.load()
+    for r, (ya, yb) in enumerate(zip(EDGES[:-1], EDGES[1:])):
+        c = int((ya + yb) // 2)
+        if r == 0:
+            _text(px, 310, 470, c - 8, c + 8, gap=2)      # 見出し
+            continue
+        _text(px, 310, 400, c - 8, c + 8)                 # 和名
+        if r % 3 == 1:
+            _fill(px, 440, 452, c - 8, c + 8)             # S
+            _fill(px, 463, 480, c - 8, c + 8)             # ・K
+        else:
+            _fill(px, 463, 480, c - 8, c + 8)             # K
+    return img
+
+
+def test_見出しの行が横切っても記号を和名に入れない():
+    """2026-09-18．見出しの行のせいで和名と記号のあいだに空白の帯ができず，
+    記号の右の空きが「いちばん広い帯」として選ばれ，記号がまるごと和名の列に
+    入っていた (見本で階層の読みが 25 → 0)"""
+    img = _sheet_heading()
+    out, warns = col_edges.fix_name_layer_edge(img, _df(ja=(300, 450), layer=(450, 560)))
+    ja_r, lay_l = _edge(out)
+    assert ja_r == lay_l
+    assert 400 <= ja_r <= 440, warns           # 和名の末尾と S のあいだ
