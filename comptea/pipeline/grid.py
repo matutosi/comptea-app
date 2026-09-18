@@ -20,6 +20,7 @@
 """
 import argparse
 import sys
+from pathlib import Path
 
 from . import common as _common
 
@@ -109,7 +110,8 @@ def detect(image, weights, conf, by_class, imgsz, source=None):
     df = detect_mod.split_box_column(results[0].to_df(decimals=2))
     df['source_image'] = str(source if source is not None else image
                              ).replace('\\', '/')
-    df['model'] = weights
+    # 名前だけを書く．絶対パスは出力を受け取った人に意味が無く，手元の置き場も漏れる
+    df['model'] = Path(weights).name
     return df
 
 
@@ -147,7 +149,7 @@ def label_grid(img, df):
 def summarize(df_det, df_loc, args):
     """判断の材料になる数だけを並べる"""
     out = [f'image   : {args.image}',
-           f'weights : {args.weights}  imgsz={args.imgsz}  '
+           f'weights : {Path(args.weights).name}  imgsz={args.imgsz}  '
            f'conf={args.conf:.2f} (col {args.conf_col:.2f})']
 
     out.append('--- 検出 ---')

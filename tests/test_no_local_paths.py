@@ -68,3 +68,22 @@ def test_外の道具の既定は空():
     assert ndl.DEFAULT_DIRS == ()
     assert yomi.ENV_PY == 'COMPTEA_YOMI_PY'
     assert ndl.ENV == 'COMPTEA_NDLOCR'
+
+
+# 見本の zip の中の表にも，作った人の置き場が残る (2026-09-18．`model` 列に
+# 重みの絶対パス，`source_image` に手元の画像の場所が 1,100 行あった)
+ZIPS = sorted(glob.glob(os.path.join(ROOT, 'examples', '*.zip')))
+
+
+@pytest.mark.parametrize('path', ZIPS, ids=[os.path.basename(p) for p in ZIPS])
+def test_見本のzipの中にも手元のパスを書かない(path):
+    import zipfile
+
+    bad = []
+    with zipfile.ZipFile(path) as z:
+        for name in z.namelist():
+            text = z.read(name).decode('utf-8', errors='replace')
+            for i, line in enumerate(text.splitlines(), 1):
+                if DRIVE.search(line) or HOME.search(line):
+                    bad.append(f'{name}:{i}: {line.strip()[:60]}')
+    assert not bad, '手元のパスが入っている: ' + ' / '.join(bad[:5])
