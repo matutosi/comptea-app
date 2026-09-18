@@ -149,7 +149,7 @@ def label_grid(img, df):
 def summarize(df_det, df_loc, args):
     """判断の材料になる数だけを並べる"""
     out = [f'image   : {args.image}',
-           f'weights : {Path(args.weights).name}  imgsz={args.imgsz}  '
+           f'weights : {Path(str(args.weights)).name}  imgsz={args.imgsz}  '
            f'conf={args.conf:.2f} (col {args.conf_col:.2f})']
 
     out.append('--- 検出 ---')
