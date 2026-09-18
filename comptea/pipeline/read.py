@@ -209,11 +209,25 @@ def recorrect_cells(df, cls=RETRY_CLASS):
     return out, n
 
 
+def _for_class(ok, cls):
+    """`ok(text, cls)` をクラスに束ねて `ok(text)` にする (1 引数の判定はそのまま)"""
+    if ok is None:
+        return None
+    import inspect
+    try:
+        n = len(inspect.signature(ok).parameters)
+    except (TypeError, ValueError):
+        n = 1
+    return (lambda t: ok(t, cls)) if n >= 2 else ok
+
+
 def blend(img, read, readers, ok=None):
     """EasyOCR の読みに，**領域を読み直した結果**を重ねる
 
     クラスごとの順 (`read_region.ORDER`) で，質の通る読みを採ります．
     どこから採ったかは `read_by` に残します．
+
+    `ok(text, cls)` は「通る読み」の判定．1 引数の `ok(text)` も受ける．
     """
     from comptea import read_region
     out = read.copy()
@@ -232,7 +246,7 @@ def blend(img, read, readers, ok=None):
             # **領域が大きければ分割して読む** (折込をそのまま渡すと縮小されて
             # 読みが崩れる．7012x9214 は辞書に当たる和名が 1 個だった)
             maps[tag] = read_region.read_cells(img, cells, r)
-        got, src = read_region.pick(maps, cls, ok=ok, with_source=True)
+        got, src = read_region.pick(maps, cls, ok=_for_class(ok, cls), with_source=True)
         for cid, text in got.items():
             m = out['cell_id'] == cid
             out.loc[m, 'text'] = text
@@ -427,8 +441,9 @@ def main(argv=None):
                 except Exception:                       # noqa: BLE001
                     done.append(group)
                     continue
-                done.append(blend(img, group, readers,
-                                  ok=lambda t, c=None: True))
+                # 質の通る読みを採る (2026-09-18．以前は常に真の判定を渡していて，
+                # 実際には「クラスの順で最初に読めたもの」を採っていた)
+                done.append(blend(img, group, readers, ok=_ok))
             read = pd.concat(done).sort_values('cell_id')
 
     # 短い読みは，候補があっても採らずに印字を残す(correct_text.MIN_ADOPT_LEN)．
