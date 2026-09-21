@@ -78,3 +78,19 @@ python eval/compare_runs.py <前の置き場> <後の置き場> [表の名前 ..
 要確認は減ったのに中身が壊れていました (本物の値が消えた・罫線を `1` と読んだ・
 隣の列へ値が移った)．物差しの中身は `comptea/compare.py` にあり，的で固めています
 (行番号の無い行を毎回別物と数えた誤りを含む)．
+
+## 見本の zip を作り直す (`build_examples.py`)
+
+`examples/sample_grid.zip`・`sample_read.zip` は，`examples/sample.jpg` を段階 1〜3 で
+通した結果です．工程を変えて中身が古くなったら作り直します．
+
+```bash
+python -m comptea.pipeline.grid examples/sample.jpg --workdir <作業場所>
+python -m comptea.pipeline.read <作業場所>
+python -m comptea.pipeline.table <作業場所>
+python eval/build_examples.py <作業場所>
+```
+
+`model` は重みの名前だけ，`source_image` は画像の名前だけに直してから詰めます
+(公開リポジトリに手元の置き場を残さない)．作り直したら一式のテストを通してください
+(`tests/test_pipeline.py`・`test_shared.py` が中身に触れます)．
