@@ -458,37 +458,6 @@ def align_header_columns(df_loc, img=None):
 NL_WINDOW = 1.5         # 境を動かす窓 (行の高さの倍数)
 NL_MIN_GAP = 4          # 列の幅がこれ未満になる位置へは動かさない (px)
 NL_PAD = 3              # 字の右端に足す余白 (px)
-NL_NEAR = 0.15          # 境の左右この幅 (行の高さの倍数) に字があれば「字を割る」とみなす．
-                        # 字間 (2-5 px) や記号「S・K」の中 (見本で 14 px．行 56 px) は割るとみなし，
-                        # 和名と記号の間 (見本で 40 px．接する段では 11 px ほど) は割らない．
-                        # 0.25 では 11 px の隙間まで割るとみなした (test_name_layer_edge)
-
-
-def _split_rows_near(dark, xs, y_rows, near):
-    """境の候補 `xs` ごとに，左右 `near` px 以内に字がある行 (字を割る行) の数
-
-    `_split_rows` は境の隣の 1 px だけを見るので，2 px の字間も「割らない」になる．
-    和名の字間に境が落ちて名前を割っていた (見本の「オオツルウメモドキ」．2026-09-18)．
-    """
-    xs = np.asarray(xs, dtype=int)
-    if xs.size == 0:
-        return np.zeros(0, int)
-    x1 = max(0, int(xs[0]) - near)
-    x2 = min(dark.shape[1], int(xs[-1]) + near + 1)
-    out = np.zeros(xs.size, int)
-    for a, b in y_rows:
-        a, b = max(0, int(a)), min(dark.shape[0], int(b))
-        if b - a < 2:
-            continue
-        col = dark[a:b, x1:x2].any(axis=0).astype(int)
-        cum = np.concatenate(([0], np.cumsum(col)))
-        i = xs - x1
-        lo, hi = np.clip(i - near, 0, col.size), np.clip(i + near + 1, 0, col.size)
-        mid = np.clip(i, 0, col.size - 1)
-        left = cum[np.clip(i + 1, 0, col.size)] - cum[lo] > 0
-        right = cum[hi] - cum[mid] > 0
-        out += (left & right)
-    return out
 
 
 def _split_rows(dark, x, y_rows):
@@ -582,71 +551,6 @@ def _ink_left(dark, x1, x2, y_rows):
     return best
 
 
-NL_RULE_FRAC = 0.9      # この割合以上の行で黒い x は印字の縦罫線とみなす
-NL_RULE_SPREAD = 0.2    # 罫線の左に，この割合以上の行で黒い x が続けば罫線の傾きとみなす
-NL_LAYER_KEEP = 0.5     # 境の右 (階層の列) に，階層の字のある行をこの割合以上残す
-NL_LAYER_MIN = 3        # 階層の字のある行がこれ未満なら，残す条件をかけない
-NL_CORE = 0.5           # 階層の記号の列の芯: この割合以上の行に字がある x
-
-
-def _ink_rows(dark, x1, x2, y_rows):
-    """行 × x の「字がある」の表 (縦罫線から右は消す) と，使った行を返す
-
-    **縦罫線から右は字に数えない**．階層の列の右端には組成部との罫線があり，
-    数えると「どこに境を置いても階層の字が残る」ことになる．罫線は少し傾いて
-    隣の x にも散るので，全行で黒い x から左へ，黒い行の多い x が続く所までを
-    罫線とみなす (見本では罫線の左 3 px が 18 行で黒かった)．
-    """
-    x1, x2 = max(0, int(x1)), min(dark.shape[1], int(x2))
-    rows = [(max(0, int(a)), min(dark.shape[0], int(b))) for a, b in y_rows]
-    rows = [(a, b) for a, b in rows if b - a >= 2]
-    if x2 <= x1 or not rows:
-        return np.zeros((0, max(0, x2 - x1)), bool), rows
-    m = np.array([dark[a:b, x1:x2].any(axis=0) for a, b in rows])
-    cover = m.mean(axis=0)
-    rule = np.flatnonzero(cover >= NL_RULE_FRAC)
-    if rule.size:
-        left = int(rule[0])
-        while left > 0 and cover[left - 1] >= NL_RULE_SPREAD:
-            left -= 1
-        m[:, left:] = False
-    return m, rows
-
-
-def _rows_right(dark, x1, x2, y_rows):
-    """x ごとに「その x から `x2` までに字のある行の数」を返す (x1..x2-1 の配列)"""
-    m, _rows = _ink_rows(dark, x1, x2, y_rows)
-    if m.size == 0:
-        return np.zeros(m.shape[1], int)
-    # 右から累積した OR: その x より右に字があるか
-    right = np.logical_or.accumulate(m[:, ::-1], axis=1)[:, ::-1]
-    return right.sum(axis=0)
-
-
-def _symbol_rows(dark, x1, x2, y_rows):
-    """階層の記号のある行だけを返す (見つからなければ全行)
-
-    記号の列の芯は，罫線の手前でいちばん右にある「半分以上の行に字がある x」の
-    続き．芯に字の無い行 (種群の見出しなど，和名から記号の列まで横切る行) を
-    外して境を決める．見出しの行が和名と記号のあいだを横切ると空白の帯が
-    できず，記号「S・K」の中の隙間に境が落ちていた (見本．2026-09-18)
-    """
-    m, rows = _ink_rows(dark, x1, x2, y_rows)
-    if m.size == 0:
-        return list(y_rows)
-    dense = np.flatnonzero(m.mean(axis=0) >= NL_CORE)
-    if dense.size == 0:
-        return list(y_rows)
-    # いちばん右の続き
-    end = int(dense[-1])
-    start = end
-    while start - 1 >= 0 and (start - 1) in set(dense.tolist()):
-        start -= 1
-    keep = m[:, start:end + 1].any(axis=1)
-    picked = [r for r, k in zip(rows, keep) if k]
-    return picked if len(picked) >= NL_LAYER_MIN else list(y_rows)
-
-
 def fix_name_layer_edge(img, df_loc, window=NL_WINDOW):
     """和名の右端と階層の左端を 1 本の境にする (階層が無ければ字の右端まで広げる)
 
@@ -717,28 +621,8 @@ def fix_name_layer_edge(img, df_loc, window=NL_WINDOW):
         # 選ぶと，語間の空白に落ちて和名の末尾が枠の外に残る (「アラゲミツバ|ツツジ」の
         # 類．この指標には出ない)．字が接している段 (81 段中 32 段) では帯が無いので，
         # そのときだけ「字を割る行が最小」に戻す
-        near = max(2, int(NL_NEAR * pitch))
-        # 割る行と空白の帯は，階層の記号のある行だけで数える (見出しの行を外す)
-        y_sym = _symbol_rows(dark, xs[0], lay_r - NL_MIN_GAP, y_rows)
-        blank = np.array([not _has_ink_col(dark, x, y_sym) for x in xs])
-        counts = _split_rows_near(dark, xs, y_sym, near)
-        # 字間より狭い空白の帯は採らない (字間に境が落ちて名前を割る)
-        for a, b in _blank_runs(blank):
-            if b - a < 2 * near + 1:
-                blank[a:b] = False
-        # **境の右に階層の字を残す** (2026-09-18)．階層の記号が和名に接していると
-        # 左側に空白の帯が無く，記号と組成部のあいだの帯が「いちばん広い」として
-        # 選ばれ，記号がまるごと和名の列に入っていた (見本で階層の読みが 25 → 0)
-        kept = np.zeros(len(xs), int)
-        tail = _rows_right(dark, xs[0], lay_r - NL_MIN_GAP, y_rows)
-        kept[:min(len(xs), tail.size)] = tail[:len(xs)]
-        ref = int(kept[min(len(xs) - 1, max(0, int(lay_l) - int(xs[0])))])
-        if ref >= NL_LAYER_MIN:
-            ok = kept >= NL_LAYER_KEEP * ref
-            if not ok.any():
-                continue
-            blank = blank & ok
-            counts = np.where(ok, counts, counts.max() + 1)
+        blank = np.array([not _has_ink_col(dark, x, y_rows) for x in xs])
+        counts = np.array([_split_rows(dark, x, y_rows) for x in xs])
         runs = _blank_runs(blank)
         if runs:
             # **いちばん広い空白の帯**を採る．語間も空白になるが，和名と記号のあいだの
@@ -750,16 +634,9 @@ def fix_name_layer_edge(img, df_loc, window=NL_WINDOW):
             best = int(counts[xs == int(new)][0]) if (xs == int(new)).any() else 0
         else:
             best = int(counts.min())
-            # 同点が続く区間のうち**いちばん広いもの**の中央に置く (同じ幅なら階層の
-            # 左端に近い方)．空白の帯と同じ考え方で，見出しの行が横切って帯が
-            # できない段でも，和名と記号のあいだの広い空きを選べる．
-            # 以前は同点のうち階層の左端に近い 1 点を採っていて，記号「S・K」の
-            # S と ・K のあいだを割っていた (見本．2026-09-18)
-            spans = _blank_runs(counts == best)
-            a, b = min(spans, key=lambda ab: (-(ab[1] - ab[0]),
-                                              abs((ab[0] + ab[1] - 1) / 2 + xs[0] - lay_l)))
-            new = float(xs[0] + (a + b - 1) // 2)
-        n_old = int(_split_rows_near(dark, [ja_r, lay_l], y_sym, near).min())
+            cand = xs[counts == best]
+            new = float(cand[np.abs(cand - lay_l).argmin()])   # 同点は階層の左端に近い方
+        n_old = min(_split_rows(dark, ja_r, y_rows), _split_rows(dark, lay_l, y_rows))
         if abs(new - ja_r) < 1 and abs(new - lay_l) < 1:
             continue
         if best > n_old:
