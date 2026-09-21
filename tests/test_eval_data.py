@@ -79,7 +79,8 @@ def test_物差しは全部この部品を呼ぶ():
     # **データの置き場を使わない道具は除く** (2026-09-16)．`compare_runs.py` は
     # ラベルも正解表も読まず，比べる置き場を引数で受け取る．`use_data_dir()` で
     # 作業ディレクトリが移ると，**渡した相対パスが壊れる**
-    no_data = {'_data.py', 'compare_runs.py'}
+    # `build_examples.py` も同じ (見本の zip を作業ディレクトリから作るだけ．2026-09-21)
+    no_data = {'_data.py', 'compare_runs.py', 'build_examples.py'}
     for p in sorted(root.glob('*.py')):
         if p.name in no_data:
             continue

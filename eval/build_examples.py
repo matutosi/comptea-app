@@ -1,6 +1,6 @@
 """見本の zip (examples/*.zip) を，作業ディレクトリから作り直す
 
-    py -3.12 out_build_examples.py <作業ディレクトリ>
+    py -3.12 eval/build_examples.py <作業ディレクトリ>
 
 手元のパスは入れない (`model` は名前だけ，`source_image` は画像の名前だけ)．
 """
