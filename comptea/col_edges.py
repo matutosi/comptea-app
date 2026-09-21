@@ -159,6 +159,31 @@ def _lattice_edges(body_x1, body_x2, off, pitch, n):
     return out if len(out) >= 3 else None
 
 
+def _notes_by_row(src):
+    """列を組み直すときに印を引き継ぐための {行: [(x1, x2, note), ...]}"""
+    from . import note as _note
+    if 'note' not in src.columns:
+        return {}
+    out = {}
+    for r in src.itertuples():
+        out.setdefault(r.row, []).append((float(r.x1), float(r.x2), _note.text(r.note)))
+    return out
+
+
+def _carried_note(notes, row, x1, x2):
+    """組み直した (row, x1-x2) のセルに，いちばん重なる元のセルの印を返す
+
+    組み直しで `note=''` にしていて，`interpolated`・`snapped` などの印が消え，
+    overlay の色分けと出力の note から見えなくなっていた (2026-09-18)．
+    """
+    best, best_w = '', 0.0
+    for a, b, n in notes.get(row, ()):
+        w = min(b, x2) - max(a, x1)
+        if w > best_w:
+            best, best_w = n, w
+    return best
+
+
 EDGE_INK_GAIN = 0.7      # 隙間から作った格子を採るのは，線上の黒画素がこの倍以下のとき
 
 
@@ -212,11 +237,13 @@ def fix_column_edges(img, df_loc, gain=EDGE_INK_GAIN, min_cols=EDGE_SWAP_MIN_COL
         bands = (src.groupby('row').agg(y1=('y1', 'min'), y2=('y2', 'max'))
                  .sort_index())
         like = src.iloc[0].to_dict()
+        notes = _notes_by_row(src)
         cells = []
         for row, b in bands.iterrows():
             for i, (a, c) in enumerate(zip(edges[:-1], edges[1:]), start=1):
                 r = dict(like)
-                r.update(dict(row=row, col=i, note='', x1=float(a), x2=float(c),
+                r.update(dict(row=row, col=i, x1=float(a), x2=float(c),
+                              note=_carried_note(notes, row, float(a), float(c)),
                               y1=float(b.y1), y2=float(b.y2)))
                 cells.append(r)
         return pd.DataFrame(cells), bands
@@ -330,11 +357,13 @@ def fix_edges_by_crossings(img, df_loc, shift=CROSS_SHIFT, gain=CROSS_MIN_GAIN,
     bandsr = (comp.groupby('row').agg(y1=('y1', 'min'), y2=('y2', 'max'))
               .sort_index())
     like = comp.iloc[0].to_dict()
+    notes = _notes_by_row(comp)
     cells = []
     for row, b in bandsr.iterrows():
         for i, (a, c) in enumerate(zip(out[:-1], out[1:]), start=1):
             r = dict(like)
-            r.update(dict(row=row, col=i, note='', x1=float(a), x2=float(c),
+            r.update(dict(row=row, col=i, x1=float(a), x2=float(c),
+                          note=_carried_note(notes, row, float(a), float(c)),
                           y1=float(b.y1), y2=float(b.y2)))
             cells.append(r)
     res = pd.concat([df_loc[df_loc['obj_name'] != 'comp'], pd.DataFrame(cells)],
@@ -387,11 +416,13 @@ def align_header_columns(df_loc, img=None):
             edges, img, [(float(r.y1), float(r.y2)) for _, r in bands.iterrows()])
         edges = np.asarray(edges, dtype=float)
     like = head.iloc[0].to_dict()
+    notes = _notes_by_row(head)
     cells = []
     for row, b in bands.iterrows():
         for i, (a, c) in enumerate(zip(edges[:-1], edges[1:]), start=1):
             r = dict(like)
-            r.update(dict(row=row, col=i, note='', x1=float(a), x2=float(c),
+            r.update(dict(row=row, col=i, x1=float(a), x2=float(c),
+                          note=_carried_note(notes, row, float(a), float(c)),
                           y1=float(b.y1), y2=float(b.y2)))
             cells.append(r)
     out = pd.concat([df_loc[df_loc['obj_name'] != 'header_value'],
@@ -644,7 +675,7 @@ GAP_FAR_MED = 15        # ずれの中央値がこの px 以上の表だけ直�
 GAP_KEEP_W = 0.7        # 寄せたあと，隣の列がこの割合 (列の幅) より細くなるなら寄せない
 
 
-def snap_to_plot_gaps(dark, x_edges, y_range, near=GAP_SNAP_NEAR):
+def snap_to_plot_gaps(dark, x_edges, y_range, near=GAP_SNAP_NEAR, bands=None):
     """**列の境を，印字の地点の隙間へ寄せる** (2026-09-11 ユーザ指摘: kinki_070)
 
     列の刻みは内挿で決まるので，隙間が拾えない所では刻みがずれて積もります
@@ -660,6 +691,11 @@ def snap_to_plot_gaps(dark, x_edges, y_range, near=GAP_SNAP_NEAR):
     寄せるのは (a) 隙間が 10 px 以上・列の幅の `near` 倍以下に離れており，
     (b) 隣の境を越えず，(c) 隣の列が細くなりすぎず，(d) 寄せて**字を割る回数が
     増えない**とき．「直して悪くならないこと」は他の直しと同じ歯止めです．
+
+    `bands` は行の帯 [(y1, y2), ...]．(d) の「字を割る回数」は行ごとに数える
+    (本体の全高を 1 つの帯にすると，ほぼ全部の x が 1 本のかたまりになり，
+    回数が 0 か 1 しか取らず歯止めが効かなかった．2026-09-18)．
+    渡さなければ `y_range` を 1 つの帯として扱う．
 
     Returns:
         (境, 寄せた本数)
@@ -679,7 +715,7 @@ def snap_to_plot_gaps(dark, x_edges, y_range, near=GAP_SNAP_NEAR):
     if (np.mean([v > GAP_FAR_MIN for v in dist]) < GAP_BAD_RATIO
             or float(np.median(dist)) < GAP_FAR_MED):
         return np.asarray(xs, dtype=float), 0     # 刻みは積もっていない
-    cross = crossing_counts(dark, [(float(y1), float(y2))], dark.shape[1])
+    cross = crossing_counts(dark, bands or [(float(y1), float(y2))], dark.shape[1])
     moved = 0
     for i in range(1, len(xs) - 1):
         e = xs[i]

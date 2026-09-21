@@ -199,3 +199,20 @@ def test_余白は呼ぶ側で変えられる():
 
     read_mod.retry_cells(None, df, _Pad(), pad=4)
     assert seen['pad'] == 4
+
+
+def test_通る判定にはクラスが渡る():
+    """段階 2 は `ok(text, cls)` を渡す (2026-09-18．以前は常に真の判定を渡していた)"""
+    df = _df([(1, 'sname', 0, 0, 100, 50, 'Pinus densiflora')])
+    fake = Fake([((10, 10, 60, 40), 'P1nus')])
+    seen = []
+
+    def ok(t, cls):
+        seen.append(cls)
+        return t == 'Pinus densiflora'
+
+    out = read_mod.blend(None, df, {'yomi': fake}, ok=ok)
+    assert set(seen) == {'sname'}
+    # yomitoku が先でも，通らない読みなら EasyOCR の通る読みを採る
+    assert list(out['text']) == ['Pinus densiflora']
+    assert list(out['read_by']) == ['easy']

@@ -710,11 +710,13 @@ def refine_columns(dark, bounds, spans):
     return out
 
 
-GUT_MIN_W = 0.02        # 表の境とみなす隙間の幅 (箱の幅に対する比)
+# 272 行の GUT_MIN_W (行の高さの倍数) と同じ名前で上書きしていて，4c・4e の隙間の判定が
+# 0.02 行 (1 px 未満) で動いていた (2026-09-18 に名前を分けた)
+SPLIT_GUT_MIN_W = 0.02  # 表の境とみなす隙間の幅 (箱の幅に対する比)
 GUT_MIN_H = 0.80        # その隙間が箱の高さのこの割合以上つづくこと
 
 
-def split_at_gutters(dark, box, min_w=GUT_MIN_W, min_h=GUT_MIN_H):
+def split_at_gutters(dark, box, min_w=SPLIT_GUT_MIN_W, min_h=GUT_MIN_H):
     """箱を，**縦に長い白い隙間**で左右に分ける
 
     **表頭の見つからない表は列を作らない**ので，1 つの帯に 2 つの表が

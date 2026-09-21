@@ -84,3 +84,13 @@ def test_種名の箱まで広げられる():
 def test_組成部が無ければ範囲も無い():
     got = body_rows.body_extent(_loc([('sname', 0, 0, 100, 100)]))
     assert got is None or got[0] is None or got[1] is None
+
+
+def test_流し込みの切り始めは十分またいだ帯に限る():
+    """`FLOW_TOP_MIN` が演算子の優先順位で効いていなかった (2026-09-18)"""
+    from comptea import body_rows as br
+    ys = [0, 10, 20, 30]
+    flags = [True, True, True, True]
+    assert br._flow_top(flags, ys, 40, 10, 1, 0.5) == 0.0
+    assert br._flow_top(flags, ys, 40, 10, 1, 0.5,
+                        top_ok=[False, True, True, True]) == 10.0

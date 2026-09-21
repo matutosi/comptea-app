@@ -494,7 +494,9 @@ def _apply_edges(df, mask, edges, note):
     pos = rows.map(order).values
     out.loc[idx, 'y1'] = np.asarray(edges, dtype=float)[pos]
     out.loc[idx, 'y2'] = np.asarray(edges, dtype=float)[pos + 1]
-    out.loc[idx, 'note'] = note
+    # 印は足す (上書きすると interpolated・snapped などが消えていた．2026-09-18)
+    from . import note as _note
+    out.loc[idx, 'note'] = [_note.add(v, note) for v in out.loc[idx, 'note']]
     return out
 
 
